@@ -29,8 +29,8 @@ class UserResource extends Resource
                     'admin' => 'Admin', 'editor' => 'Editor', 'member' => 'Member',
                 ])->default('member')->required(),
                 Forms\Components\TextInput::make('password')->password()
-                    ->dehydrateStateUsing(fn($s) => filled($s) ? Hash::make($s) : null)
-                    ->dehydrated(fn($s) => filled($s))
+                    ->dehydrateStateUsing(fn($state) => filled($state) ? Hash::make($state) : null)
+                    ->dehydrated(fn($state) => filled($state))
                     ->required(fn(string $context) => $context === 'create')
                     ->helperText('เว้นว่างหากไม่ต้องการเปลี่ยน'),
             ]),

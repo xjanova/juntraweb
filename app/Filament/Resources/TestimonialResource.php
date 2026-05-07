@@ -38,7 +38,7 @@ class TestimonialResource extends Resource
         return $table->defaultSort('order_index')->columns([
             Tables\Columns\TextColumn::make('name')->searchable(),
             Tables\Columns\TextColumn::make('service'),
-            Tables\Columns\TextColumn::make('rating')->formatStateUsing(fn($s) => str_repeat('★', (int) $s)),
+            Tables\Columns\TextColumn::make('rating')->formatStateUsing(fn($state) => str_repeat('★', (int) $state)),
             Tables\Columns\IconColumn::make('approved')->boolean(),
             Tables\Columns\TextColumn::make('message')->limit(60),
         ])->actions([Tables\Actions\EditAction::make()])
