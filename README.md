@@ -2,7 +2,7 @@
 
 Fortune-telling website built on Laravel 11 with the Mae Mor Chantra theme. Sister project to [Thaiprompt-Affiliate](https://github.com/xjanova/Thaiprompt-Affiliate); deployed to the same DirectAdmin server.
 
-**Production:** https://xn--82c4af5bzdj.online (`จันทราพยากรณ์.online`)
+**Production:** https://xn--82c4af5bzdj.online (`จันทรา.online`)
 **Server path:** `/home/admin/domains/xn--82c4af5bzdj.online/public_html`
 
 ## Features
