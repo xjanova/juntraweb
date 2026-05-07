@@ -25,43 +25,65 @@ class TarotCard extends Model
      * Resolve the public URL for this card's face image.
      *
      * Image path conventions, in order of precedence:
-     *   1. Empty / null            → fallback (default magician art)
-     *   2. Absolute URL            → returned as-is (CDN, etc.)
-     *   3. `images/...`            → public/images/ — `asset()`
-     *   4. `tarot/...`             → storage disk (uploaded via Filament FileUpload)
-     *   5. anything else           → assume public/, `asset()`
+     *   1. Absolute URL                       → returned as-is (CDN, etc.)
+     *   2. `images/...`                       → public/images/ — `asset()`
+     *   3. storage path that exists on disk   → Storage url (e.g. tarot/cards/<slug>.webp)
+     *   4. `images/card-magician.png` (the legacy default placeholder) OR null
+     *      → fallback to the operator-uploaded card-back if one is configured,
+     *        otherwise the legacy magician placeholder.
+     *
+     * The card-back fallback is what makes Minor Arcana (without their own art)
+     * render as a beautiful face-down card rather than 56 identical Magician
+     * images on the result page.
      */
     public function imageUrl(): string
     {
         $path = $this->image_path;
 
-        if (!$path) {
-            return asset('images/card-magician.png');
-        }
+        // Treat both null AND the legacy magician default as "no real face image"
+        // so they both fall through to the card-back if one is set.
+        $isPlaceholder = !$path || $path === 'images/card-magician.png';
 
-        if (preg_match('#^https?://#i', $path)) {
-            return $path;
-        }
-
-        if (str_starts_with($path, 'images/')) {
+        if (!$isPlaceholder) {
+            if (preg_match('#^https?://#i', $path)) {
+                return $path;
+            }
+            if (str_starts_with($path, 'images/')) {
+                return asset($path);
+            }
+            // Storage disk path (typically `tarot/cards/<slug>.webp` from Filament FileUpload).
+            if (Storage::disk('public')->exists($path)) {
+                return Storage::disk('public')->url($path);
+            }
+            // Anything else — assume it's a public/-relative path.
             return asset($path);
         }
 
-        // Storage disk path (typically `tarot/cards/<slug>.webp` written by Filament FileUpload).
+        // No face image — use the operator-configured card back, then magician as last resort.
+        $back = $this->cardBackUrl();
+        return $back ?: asset('images/card-magician.png');
+    }
+
+    /** Resolved URL of the global card-back image (admin-uploaded), or null if unset. */
+    public function cardBackUrl(): ?string
+    {
+        $path = Setting::get('tarot_card_back_path');
+        if (!$path) {
+            return null;
+        }
+        if (preg_match('#^https?://#i', $path)) {
+            return $path;
+        }
         if (Storage::disk('public')->exists($path)) {
             return Storage::disk('public')->url($path);
         }
-
-        return asset($path);
+        return null;
     }
 
-    /** Fallback art when DB-stored path doesn't resolve at runtime. */
-    public function imageUrlOrPlaceholder(): string
+    /** True when this card has its own face image (not falling back to the card back). */
+    public function hasFaceImage(): bool
     {
-        $url = $this->imageUrl();
-        if (!$url || str_ends_with($url, 'card-magician.png')) {
-            return asset('images/card-magician.png');
-        }
-        return $url;
+        $path = $this->image_path;
+        return $path && $path !== 'images/card-magician.png';
     }
 }
