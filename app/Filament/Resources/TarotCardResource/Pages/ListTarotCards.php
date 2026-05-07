@@ -42,6 +42,29 @@ class ListTarotCards extends ListRecords
                     }
                 }),
 
+            Actions\Action::make('importCardBack')
+                ->label('Import หลังไพ่ จาก Thaiprompt')
+                ->icon('heroicon-o-photo')
+                ->color('info')
+                ->requiresConfirmation()
+                ->modalHeading('Import หลังไพ่ (Card Back) จาก Thaiprompt-Affiliate')
+                ->modalDescription('คัดลอกรูปหลังไพ่ใหม่ที่สุดจาก Thaiprompt มาใช้เป็นหลังไพ่บนหน้าเว็บ — ตอน user เลือกไพ่จะเห็นรูปหลังนี้แทน SVG default.')
+                ->modalSubmitActionLabel('Import หลังไพ่')
+                ->action(function () {
+                    $report = app(TarotImporter::class)->importCardBack();
+                    if ($report['imported']) {
+                        Notification::make()
+                            ->title('Import หลังไพ่สำเร็จ')
+                            ->body("บันทึกที่ {$report['path']} — รีเฟรชหน้า /tarot/pick เพื่อดูผล")
+                            ->success()->send();
+                    } else {
+                        Notification::make()
+                            ->title('Import ไม่สำเร็จ')
+                            ->body($report['error'] ?? 'unknown error')
+                            ->danger()->send();
+                    }
+                }),
+
             Actions\CreateAction::make(),
         ];
     }

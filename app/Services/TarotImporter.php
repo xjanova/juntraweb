@@ -65,6 +65,56 @@ class TarotImporter
             ?: '/home/admin/domains/main.thaiprompt.online/public_html/storage/app/public/tarot/cards';
     }
 
+    /** Default card-back source dir (also on the same DA server). */
+    public function defaultCardBackSourcePath(): string
+    {
+        return config('tarot.card_back_source')
+            ?: '/home/admin/domains/main.thaiprompt.online/public_html/storage/app/public/tarot/card-backs';
+    }
+
+    /**
+     * Copy the first card-back image from a Thaiprompt-style source dir into our
+     * public storage and store its path in the `tarot_card_back_path` setting.
+     *
+     * Returns ['imported' => bool, 'path' => string|null, 'error' => string|null].
+     */
+    public function importCardBack(?string $sourceDir = null): array
+    {
+        $sourceDir = $sourceDir ?: $this->defaultCardBackSourcePath();
+        $report = ['imported' => false, 'path' => null, 'error' => null];
+
+        if (!is_dir($sourceDir)) {
+            $report['error'] = "Source directory not found: $sourceDir";
+            return $report;
+        }
+
+        $candidates = collect(File::files($sourceDir))
+            ->filter(fn ($f) => in_array(strtolower($f->getExtension()), ['webp', 'jpg', 'jpeg', 'png']))
+            ->sortByDesc(fn ($f) => $f->getMTime())
+            ->values();
+
+        if ($candidates->isEmpty()) {
+            $report['error'] = "No image files in: $sourceDir";
+            return $report;
+        }
+
+        $src = $candidates->first()->getPathname();
+        $ext = strtolower(pathinfo($src, PATHINFO_EXTENSION));
+
+        $destRel = 'tarot/card-backs/imported-' . date('Ymd-His') . '.' . $ext;
+        if (!Storage::disk('public')->put($destRel, file_get_contents($src))) {
+            $report['error'] = "Failed to write to public storage: $destRel";
+            return $report;
+        }
+
+        \App\Models\Setting::put('tarot_card_back_path', $destRel, 'tarot', false);
+
+        $report['imported'] = true;
+        $report['path'] = $destRel;
+        Log::info('TarotImporter card-back imported', $report);
+        return $report;
+    }
+
     /**
      * Copy + map images from a source dir into our public storage and update DB.
      *

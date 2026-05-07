@@ -56,8 +56,22 @@
 .cc-pos-9  { grid-area: p9; }
 .cc-pos-10 { grid-area: p10; }
 
-/* Position 2 keeps a subtle gold glow as the "challenge" card crossing position 1 */
-.cc-pos-2 .cc-card-img { filter: drop-shadow(0 0 14px rgba(244, 207, 106, .35)); }
+/* Position 2 = challenge card. Rotated 90° to honour the canonical "crossing"
+   visual without literally overlapping position 1. The wrapper reserves enough
+   horizontal breathing room so the rotated card has space to display fully. */
+.cc-pos-2 { overflow: visible; }
+.cc-pos-2 .cc-card-wrap {
+  width: 100%;
+  max-width: 200px;
+  margin-block: 28px;       /* extra vertical room because rotated card is shorter */
+}
+.cc-pos-2 .cc-card-img {
+  transform: rotate(90deg);
+  transform-origin: center;
+  filter: drop-shadow(0 0 14px rgba(244, 207, 106, .35));
+}
+/* Reversed flip composes with the 90° container rotation — done by base
+   `.cc-card-img.is-reversed img { transform: rotate(180deg); }` already. */
 
 /* Card visual */
 .cc-card-wrap {
@@ -215,62 +229,137 @@
 }
 .pick-reset-btn:disabled { opacity: .4; cursor: not-allowed; }
 
+/* ============================================================
+   FAN ARC — true card spread (กรีดไพ่)
+   78 face-down cards arranged in horizontal arcs, with each card
+   rotated relative to row center (pivot at bottom of card) and
+   slightly translated upward toward arc apex.
+
+   Multiple rows are used so the fan width fits the viewport;
+   Alpine chunks the card array client-side based on window.innerWidth
+   and writes --row-count/--row-i/--card-i inline on each .fan-card.
+   ============================================================ */
+
 .card-fan {
-  display: grid;
-  /* responsive auto-fill — each card ≥ 64px wide; rows automatic */
-  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-  gap: 12px 8px;
-  max-width: 1200px;
+  --fan-card-w: 78px;
+  --fan-overlap: 48px;          /* effective card pitch = w − overlap */
+  --fan-arc-deg: 3deg;          /* rotation per step from center */
+  --fan-arc-lift: 1.6px;        /* additional translateY per |step| from center */
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 8px 4px 24px;
+  padding: 64px 4px 32px;       /* generous top padding for arc apex */
+  perspective: 1400px;
+  overflow: visible;
+}
+.fan-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  position: relative;
+  padding-left: var(--fan-overlap);    /* counterbalance negative margin on first card */
+  min-height: calc(var(--fan-card-w) * 9 / 5 + 40px);
 }
 
 .fan-card {
   position: relative;
+  flex: 0 0 auto;
+  width: var(--fan-card-w);
   aspect-ratio: 5/9;
-  width: 100%;
   border: 0;
   padding: 0;
   background: transparent;
   cursor: pointer;
   border-radius: 8px;
+  margin-left: calc(-1 * var(--fan-overlap));
+  transform-origin: 50% 100%;          /* rotate around bottom center */
+  --pos: calc(var(--row-i, 0) - var(--row-mid, 0));
+  --abs-pos: max(var(--pos), calc(-1 * var(--pos)));
+  transform:
+    rotate(calc(var(--pos) * var(--fan-arc-deg)))
+    translateY(calc(var(--abs-pos) * var(--fan-arc-lift) * -1));    /* apex lifts upward */
   transition:
-    transform .35s cubic-bezier(.2, .7, .2, 1),
-    filter .35s,
-    z-index 0s linear .35s;
-  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .55));
+    transform .4s cubic-bezier(.2, .7, .2, 1),
+    filter .35s;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .65));
+
+  /* Sequential "dealing" deal-in animation */
+  animation: dealIn .85s cubic-bezier(.2, .7, .2, 1) both;
+  animation-delay: calc(var(--card-i, 0) * 0.018s);
 }
+@keyframes dealIn {
+  0% {
+    transform:
+      translateY(-220px) translateX(45vw)
+      rotate(220deg)
+      scale(.35);
+    opacity: 0;
+    filter: brightness(.35);
+  }
+  55% {
+    opacity: 1;
+    filter: brightness(1.1);
+  }
+  100% {
+    transform:
+      rotate(calc(var(--pos, 0) * var(--fan-arc-deg)))
+      translateY(calc(var(--abs-pos, 0) * var(--fan-arc-lift) * -1));
+    opacity: 1;
+    filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .65));
+  }
+}
+
 .fan-card:hover {
-  transform: translateY(-10px) scale(1.06);
-  filter: drop-shadow(0 14px 24px rgba(176, 122, 255, .55));
-  z-index: 5;
-  transition-delay: 0s;
+  transform:
+    rotate(calc(var(--pos, 0) * var(--fan-arc-deg)))
+    translateY(calc(var(--abs-pos, 0) * var(--fan-arc-lift) * -1 - 28px))
+    scale(1.12);
+  filter: drop-shadow(0 16px 30px rgba(176, 122, 255, .7));
+  z-index: 50;
 }
 .fan-card:focus-visible {
   outline: 2px solid var(--gold-2, var(--gold, #f4cf6a));
   outline-offset: 4px;
 }
 .fan-card.is-picked {
-  transform: translateY(-16px) scale(1.08);
-  filter: drop-shadow(0 0 28px rgba(244, 207, 106, .85)) drop-shadow(0 14px 22px rgba(0, 0, 0, .5));
-  z-index: 6;
-  transition-delay: 0s;
+  transform:
+    rotate(calc(var(--pos, 0) * var(--fan-arc-deg)))
+    translateY(calc(var(--abs-pos, 0) * var(--fan-arc-lift) * -1 - 44px))
+    scale(1.14);
+  filter:
+    drop-shadow(0 0 32px rgba(244, 207, 106, .9))
+    drop-shadow(0 14px 22px rgba(0, 0, 0, .55));
+  z-index: 60;
 }
-.fan-card.is-picked .fan-card-back rect:first-of-type {
-  stroke: var(--gold-2, var(--gold, #f4cf6a));
-  stroke-width: 1.4;
+.fan-card.is-picked .fan-card-back {
+  border-color: var(--gold-2, var(--gold, #f4cf6a));
+  box-shadow: inset 0 0 16px rgba(244, 207, 106, .35), 0 0 0 1px rgba(244, 207, 106, .35);
 }
 
 .fan-card-back {
   display: block;
-  width: 100%;
-  height: 100%;
+  position: absolute; inset: 0;
   border-radius: 8px;
   overflow: hidden;
-  background: radial-gradient(circle at 50% 50%, #6a3bd6, #2a1647 55%, #07041a 100%);
+  background:
+    var(--card-back-image, radial-gradient(circle at 50% 50%, #6a3bd6, #2a1647 55%, #07041a 100%));
+  background-size: cover;
+  background-position: center;
   box-shadow: inset 0 0 8px rgba(244, 207, 106, .25);
+  border: 1px solid rgba(244, 207, 106, .25);
+  transition: border-color .35s, box-shadow .35s;
 }
 .fan-card-back svg { display: block; width: 100%; height: 100%; }
+/* When the operator uploads a card-back image, hide the inline SVG fallback. */
+.card-fan.has-card-back .fan-card-back svg { display: none; }
+
+/* Responsive sizing — keep the arc but shrink cards on narrower viewports */
+@media (max-width: 1280px) { .card-fan { --fan-card-w: 70px; --fan-overlap: 44px; } }
+@media (max-width: 1024px) { .card-fan { --fan-card-w: 64px; --fan-overlap: 40px; --fan-arc-deg: 3.4deg; } }
+@media (max-width: 768px)  { .card-fan { --fan-card-w: 56px; --fan-overlap: 36px; --fan-arc-deg: 4deg; } }
+@media (max-width: 560px)  { .card-fan { --fan-card-w: 48px; --fan-overlap: 32px; --fan-arc-deg: 4.5deg; --fan-arc-lift: 1.2px; } }
 
 .fan-card-marker {
   position: absolute;
@@ -306,12 +395,7 @@
   margin: 0 4px;
 }
 
-/* very small screens — pack more cards per row but smaller */
 @media (max-width: 480px) {
-  .card-fan {
-    grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
-    gap: 8px 6px;
-  }
   .fan-card-marker { width: 22px; height: 22px; font-size: 11px; top: -7px; right: -7px; }
   .pick-status { padding: 10px 14px; font-size: 12px; border-radius: 14px; }
   .pick-status strong { font-size: 15px; }

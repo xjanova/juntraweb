@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\Setting;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -41,6 +42,7 @@ class SiteSettings extends Page implements HasForms
             'ai_model' => Setting::get('ai_model'),
             'ai_api_key' => Setting::get('ai_api_key'),
             'ai_system_prompt' => Setting::get('ai_system_prompt'),
+            'tarot_card_back_path' => Setting::get('tarot_card_back_path'),
         ]);
     }
 
@@ -73,6 +75,21 @@ class SiteSettings extends Page implements HasForms
                         ->helperText('Google AI Studio API key — เก็บเป็น encrypted ในฐานข้อมูล'),
                     Textarea::make('ai_system_prompt')->label('System Prompt')->rows(4),
                 ])->columns(2),
+
+                Section::make('ระบบไพ่ยิปซี')
+                    ->description('หลังไพ่ที่ user เห็นตอนเลือก — อัปโหลดเองที่นี่ หรือใช้ปุ่ม "Import หลังไพ่ จาก Thaiprompt" ในหน้า /admin/tarot-cards')
+                    ->schema([
+                        FileUpload::make('tarot_card_back_path')
+                            ->label('หลังไพ่')
+                            ->image()
+                            ->disk('public')
+                            ->directory('tarot/card-backs')
+                            ->visibility('public')
+                            ->imagePreviewHeight('220')
+                            ->maxSize(4096)
+                            ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
+                            ->helperText('แนะนำสัดส่วน 5:9 (ไพ่มาตรฐาน). หากไม่มีจะใช้ลาย SVG default'),
+                    ]),
             ])
             ->statePath('data');
     }
@@ -88,6 +105,7 @@ class SiteSettings extends Page implements HasForms
             'stat_readings' => 'homepage', 'stat_accuracy' => 'homepage', 'stat_cards' => 'homepage',
             'contact_line' => 'contact', 'contact_facebook' => 'contact', 'contact_email' => 'contact',
             'ai_provider' => 'ai', 'ai_model' => 'ai', 'ai_api_key' => 'ai', 'ai_system_prompt' => 'ai',
+            'tarot_card_back_path' => 'tarot',
         ];
 
         foreach ($data as $key => $value) {
