@@ -38,7 +38,18 @@ class TarotCardResource extends Resource
                 ]),
                 Forms\Components\TextInput::make('number')->required()->numeric()->minValue(0)->maxValue(99),
             ]),
-            Forms\Components\TextInput::make('image_path')->maxLength(191)->helperText('เช่น images/card-magician.png'),
+
+            Forms\Components\FileUpload::make('image_path')
+                ->label('หน้าไพ่ (อัปโหลดที่นี่)')
+                ->image()
+                ->disk('public')
+                ->directory('tarot/cards')
+                ->visibility('public')
+                ->imagePreviewHeight('260')
+                ->maxSize(4096)
+                ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
+                ->helperText('รับ JPG/PNG/WEBP สูงสุด 4MB — แนะนำสัดส่วน 5:9 (ไพ่ยิปซีมาตรฐาน). หากไม่อัปโหลด ระบบจะใช้ภาพจาก Import (Thaiprompt) หรือภาพ default'),
+
             Forms\Components\TextInput::make('keywords_th')->maxLength(255),
             Forms\Components\Textarea::make('upright_meaning_th')->required()->rows(3),
             Forms\Components\Textarea::make('reversed_meaning_th')->required()->rows(3),
@@ -54,6 +65,16 @@ class TarotCardResource extends Resource
         return $table
             ->defaultSort('number')
             ->columns([
+                Tables\Columns\ImageColumn::make('image_path')
+                    ->label('หน้าไพ่')
+                    ->disk('public')
+                    ->getStateUsing(function (TarotCard $record): ?string {
+                        // Use the model's resolver so both `images/...` (legacy public)
+                        // and `tarot/cards/...` (storage) paths render correctly.
+                        return $record->image_path ? $record->imageUrl() : null;
+                    })
+                    ->height(60)
+                    ->extraImgAttributes(['style' => 'aspect-ratio:5/9;object-fit:cover;border-radius:4px']),
                 Tables\Columns\TextColumn::make('number')->sortable(),
                 Tables\Columns\TextColumn::make('name_th')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('name_en')->searchable(),
@@ -67,6 +88,10 @@ class TarotCardResource extends Resource
                     'major' => 'Major', 'wands' => 'Wands', 'cups' => 'Cups',
                     'swords' => 'Swords', 'pentacles' => 'Pentacles',
                 ]),
+                Tables\Filters\Filter::make('has_image')
+                    ->label('มีรูปแล้วเท่านั้น')
+                    ->query(fn ($q) => $q->whereNotNull('image_path')->where('image_path', '!=', ''))
+                    ->toggle(),
             ])
             ->actions([Tables\Actions\EditAction::make()])
             ->bulkActions([Tables\Actions\DeleteBulkAction::make()]);
