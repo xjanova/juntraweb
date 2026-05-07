@@ -30,16 +30,20 @@
         </label>
       </div>
 
-      <form :action="spread==='three' ? '{{ route('tarot.three-card') }}' : '{{ route('tarot.celtic-cross') }}'" method="POST" style="margin-top:32px">
+      <form action="{{ route('tarot.begin') }}" method="POST" style="margin-top:32px">
         @csrf
+        {{-- the spread radios above also write to this hidden mirror so Alpine reactivity is irrelevant on submit --}}
+        <input type="hidden" name="spread" :value="spread">
         <div class="field">
           <label for="question">คำถาม (ไม่ใส่ก็ได้)</label>
           <textarea id="question" name="question" rows="3" x-model="question" placeholder="เช่น ดวงเดือนนี้เป็นอย่างไร, ความสัมพันธ์กับคนรักจะดีขึ้นไหม"></textarea>
         </div>
         <button class="btn btn-primary" style="width:100%;justify-content:center">
-          <span x-text="spread==='three' ? 'เปิดไพ่ 3 ใบ' : 'เปิดไพ่ Celtic Cross 10 ใบ'"></span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          <span x-text="spread==='three' ? 'เลือกไพ่ 3 ใบ →' : 'เลือกไพ่ Celtic Cross 10 ใบ →'"></span>
         </button>
+        <div style="margin-top:14px;font-size:12px;color:var(--ink-dim);text-align:center;letter-spacing:.04em">
+          ระบบจะกางไพ่ทั้ง 78 ใบให้คุณเลือกด้วยตัวเองในขั้นตอนถัดไป ✨
+        </div>
       </form>
     </div>
 

@@ -17,27 +17,18 @@
       @endphp
 
       <div class="celtic-cross" aria-label="Celtic Cross 10 cards">
-        {{-- ───── Cross arm (positions 1–6) ───── --}}
+        {{-- ───── Cross arm: 5 (top), 4 (left), 1 (center), 6 (right), 2 (below 1), 3 (below 2) ───── --}}
         <div class="cc-cell cc-pos-5">@include('pages.tarot._celtic-card', ['rc' => $byPos[5] ?? null])</div>
 
         <div class="cc-cell cc-pos-4">@include('pages.tarot._celtic-card', ['rc' => $byPos[4] ?? null])</div>
-        <div class="cc-cell cc-pos-cross">
-          @if (isset($byPos[1]))
-            <div class="cc-card-1" data-pos="1">
-              @include('pages.tarot._celtic-card-bare', ['rc' => $byPos[1]])
-            </div>
-          @endif
-          @if (isset($byPos[2]))
-            <div class="cc-card-2" data-pos="2" aria-label="ไพ่ตำแหน่งที่ 2 ขวางกั้น">
-              @include('pages.tarot._celtic-card-bare', ['rc' => $byPos[2]])
-            </div>
-          @endif
-        </div>
+        <div class="cc-cell cc-pos-1">@include('pages.tarot._celtic-card', ['rc' => $byPos[1] ?? null])</div>
         <div class="cc-cell cc-pos-6">@include('pages.tarot._celtic-card', ['rc' => $byPos[6] ?? null])</div>
+
+        <div class="cc-cell cc-pos-2">@include('pages.tarot._celtic-card', ['rc' => $byPos[2] ?? null])</div>
 
         <div class="cc-cell cc-pos-3">@include('pages.tarot._celtic-card', ['rc' => $byPos[3] ?? null])</div>
 
-        {{-- ───── Staff (positions 7–10, top→bottom: 10, 9, 8, 7) ───── --}}
+        {{-- ───── Staff (right column, top→bottom: 10, 9, 8, 7) ───── --}}
         <div class="cc-cell cc-pos-10">@include('pages.tarot._celtic-card', ['rc' => $byPos[10] ?? null])</div>
         <div class="cc-cell cc-pos-9">@include('pages.tarot._celtic-card', ['rc' => $byPos[9] ?? null])</div>
         <div class="cc-cell cc-pos-8">@include('pages.tarot._celtic-card', ['rc' => $byPos[8] ?? null])</div>

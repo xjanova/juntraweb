@@ -30,12 +30,15 @@
   /* 4 cols for the cross (with the 4th being a buffer) + 1 col for the staff */
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1fr) minmax(20px, 0.4fr) minmax(0, 1fr);
   grid-template-rows: auto auto auto auto;
+  /* Vertical cross arm: 5 (top) → 1 (center) → 2 (challenge, just below 1) → 3 (foundation, bottom)
+     Horizontal cross arm: 4 (left of 1) and 6 (right of 1)
+     Staff (right column, top → bottom): 10, 9, 8, 7 */
   grid-template-areas:
     ".   p5  .   .   p10"
     "p4  p1  p6  .   p9"
-    ".   p3  .   .   p8"
-    ".   .   .   .   p7";
-  gap: 28px 18px;
+    ".   p2  .   .   p8"
+    ".   p3  .   .   p7";
+  gap: 24px 18px;
   max-width: 1100px;
   margin: 60px auto 40px;
   padding: 24px;
@@ -44,7 +47,8 @@
 .cc-cell { display: flex; flex-direction: column; align-items: center; }
 .cc-pos-5  { grid-area: p5; }
 .cc-pos-4  { grid-area: p4; }
-.cc-pos-cross { grid-area: p1; position: relative; min-height: 200px; display: flex; align-items: center; justify-content: center; }
+.cc-pos-1  { grid-area: p1; }
+.cc-pos-2  { grid-area: p2; }
 .cc-pos-6  { grid-area: p6; }
 .cc-pos-3  { grid-area: p3; }
 .cc-pos-7  { grid-area: p7; }
@@ -52,23 +56,8 @@
 .cc-pos-9  { grid-area: p9; }
 .cc-pos-10 { grid-area: p10; }
 
-/* The cross intersection — positions 1 (vertical) and 2 (horizontal over 1) */
-.cc-pos-cross .cc-card-1 {
-  position: relative;
-  width: 100%;
-  max-width: 180px;
-  z-index: 1;
-}
-.cc-pos-cross .cc-card-2 {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 100%;
-  max-width: 180px;
-  transform: translate(-50%, -50%) rotate(90deg);
-  z-index: 2;
-  filter: drop-shadow(0 0 24px rgba(244, 207, 106, .35));
-}
+/* Position 2 keeps a subtle gold glow as the "challenge" card crossing position 1 */
+.cc-pos-2 .cc-card-img { filter: drop-shadow(0 0 14px rgba(244, 207, 106, .35)); }
 
 /* Card visual */
 .cc-card-wrap {
@@ -175,3 +164,155 @@
 }
 
 /* Mobile hides the desktop staff column 7-10 too — they stack in mobile fallback */
+
+/* ============================================================
+   CARD-PICK FAN — 78 face-down cards, responsive auto-fill grid
+   Shown at /tarot/pick after user chooses spread + question.
+   ============================================================ */
+
+.pick-status {
+  position: sticky; top: 8px; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding: 14px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line, rgba(244, 207, 106, .25));
+  background: linear-gradient(180deg, rgba(36, 16, 56, .85), rgba(15, 8, 28, .85));
+  backdrop-filter: blur(14px);
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-dim, #c8b8de);
+  margin-bottom: 28px;
+  transition: all .35s;
+}
+.pick-status strong {
+  font-weight: 600;
+  color: var(--gold-2, var(--gold, #f4cf6a));
+  font-size: 18px;
+  margin: 0 4px;
+}
+.pick-status.is-complete {
+  border-color: var(--gold-2, var(--gold, #f4cf6a));
+  box-shadow: 0 0 30px rgba(244, 207, 106, .35);
+}
+.pick-reset-btn {
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 8px 18px;
+  border: 1px solid var(--line, rgba(244, 207, 106, .3));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-dim, #c8b8de);
+  cursor: pointer;
+  transition: all .25s;
+}
+.pick-reset-btn:hover:not(:disabled) {
+  border-color: var(--gold-2, var(--gold, #f4cf6a));
+  color: var(--gold-2, var(--gold, #f4cf6a));
+}
+.pick-reset-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.card-fan {
+  display: grid;
+  /* responsive auto-fill — each card ≥ 64px wide; rows automatic */
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 12px 8px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 8px 4px 24px;
+}
+
+.fan-card {
+  position: relative;
+  aspect-ratio: 5/9;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 8px;
+  transition:
+    transform .35s cubic-bezier(.2, .7, .2, 1),
+    filter .35s,
+    z-index 0s linear .35s;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .55));
+}
+.fan-card:hover {
+  transform: translateY(-10px) scale(1.06);
+  filter: drop-shadow(0 14px 24px rgba(176, 122, 255, .55));
+  z-index: 5;
+  transition-delay: 0s;
+}
+.fan-card:focus-visible {
+  outline: 2px solid var(--gold-2, var(--gold, #f4cf6a));
+  outline-offset: 4px;
+}
+.fan-card.is-picked {
+  transform: translateY(-16px) scale(1.08);
+  filter: drop-shadow(0 0 28px rgba(244, 207, 106, .85)) drop-shadow(0 14px 22px rgba(0, 0, 0, .5));
+  z-index: 6;
+  transition-delay: 0s;
+}
+.fan-card.is-picked .fan-card-back rect:first-of-type {
+  stroke: var(--gold-2, var(--gold, #f4cf6a));
+  stroke-width: 1.4;
+}
+
+.fan-card-back {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 50%, #6a3bd6, #2a1647 55%, #07041a 100%);
+  box-shadow: inset 0 0 8px rgba(244, 207, 106, .25);
+}
+.fan-card-back svg { display: block; width: 100%; height: 100%; }
+
+.fan-card-marker {
+  position: absolute;
+  top: -10px; right: -10px;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #f6e3a8, #c89a3c);
+  color: #1a0d3d;
+  display: grid; place-items: center;
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-weight: 700;
+  font-size: 13px;
+  border: 2px solid var(--void, #07041a);
+  box-shadow: 0 0 16px rgba(244, 207, 106, .85);
+  animation: pickPop .35s cubic-bezier(.2, .7, .2, 1);
+}
+@keyframes pickPop {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.pick-hint {
+  font-size: 14px;
+  color: var(--ink-dim, #c8b8de);
+  letter-spacing: .04em;
+  margin-top: 12px;
+}
+.pick-hint strong {
+  color: var(--gold-2, var(--gold, #f4cf6a));
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-style: italic;
+  margin: 0 4px;
+}
+
+/* very small screens — pack more cards per row but smaller */
+@media (max-width: 480px) {
+  .card-fan {
+    grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+    gap: 8px 6px;
+  }
+  .fan-card-marker { width: 22px; height: 22px; font-size: 11px; top: -7px; right: -7px; }
+  .pick-status { padding: 10px 14px; font-size: 12px; border-radius: 14px; }
+  .pick-status strong { font-size: 15px; }
+}
