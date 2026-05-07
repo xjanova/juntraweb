@@ -42,14 +42,20 @@ class TarotCardSeeder extends Seeder
         ];
 
         foreach ($major as [$slug, $num, $en, $th, $kw, $up, $rev]) {
-            TarotCard::updateOrCreate(['slug' => $slug], [
+            $card = TarotCard::firstOrNew(['slug' => $slug]);
+            $card->fill([
                 'name_en' => $en, 'name_th' => $th, 'arcana' => 'major', 'suit' => 'major',
                 'number' => $num,
-                'image_path' => $imageMap[$slug] ?? 'images/card-magician.png',
                 'keywords_th' => $kw,
                 'upright_meaning_th' => $up, 'reversed_meaning_th' => $rev,
                 'active' => true,
             ]);
+            // Only set image_path on FIRST insert. Re-runs (deploy.sh) preserve any image
+            // imported via TarotImporter or uploaded via Filament admin.
+            if (!$card->exists) {
+                $card->image_path = $imageMap[$slug] ?? 'images/card-magician.png';
+            }
+            $card->save();
         }
 
         // Minor Arcana — 56 cards (4 suits × 14)
@@ -120,18 +126,22 @@ class TarotCardSeeder extends Seeder
         foreach ($suits as $suitKey => [$suitTh, $suitMeaning]) {
             foreach ($ranks as [$rankSlug, $rankNum, $rankEn]) {
                 $slug = "$rankSlug-of-$suitKey";
-                TarotCard::updateOrCreate(['slug' => $slug], [
+                $card = TarotCard::firstOrNew(['slug' => $slug]);
+                $card->fill([
                     'name_en' => "$rankEn of " . ucfirst($suitKey),
                     'name_th' => $rankTh[$rankSlug] . 'แห่ง' . $suitTh,
                     'arcana' => 'minor',
                     'suit'   => $suitKey,
                     'number' => $rankNum,
-                    'image_path' => 'images/card-magician.png',
                     'keywords_th' => $suitMeaning,
                     'upright_meaning_th' => $rankUp[$rankSlug] . ' (' . $suitMeaning . ')',
                     'reversed_meaning_th' => $rankRev[$rankSlug],
                     'active' => true,
                 ]);
+                if (!$card->exists) {
+                    $card->image_path = 'images/card-magician.png';
+                }
+                $card->save();
             }
         }
     }
