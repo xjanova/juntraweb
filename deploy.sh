@@ -40,9 +40,13 @@ ls -t .deploy-backup/.env.* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null |
 ls -t .deploy-backup/uploads-*.tar.gz 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
 
 # ---------- 3. Git sync ----------
+# NOTE: We intentionally do NOT `git stash -u` here. `git reset --hard`
+# overwrites tracked files but leaves untracked files alone — exactly what we
+# want for env files, generated build artifacts, and any operator-added shims.
+# The previous `stash -u; reset --hard; <no pop>` pattern silently lost
+# untracked files on every deploy (lesson learned 2026-05-07).
 log "📥 Syncing code from origin/$BRANCH..."
 git fetch --all --prune 2>&1 | tee -a "$LOG"
-git stash -u 2>/dev/null || true
 git reset --hard "origin/$BRANCH" 2>&1 | tee -a "$LOG" || fail "git reset failed"
 git clean -fd -- 'storage/framework/' 'bootstrap/cache/' 2>/dev/null || true
 

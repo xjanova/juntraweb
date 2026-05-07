@@ -1,0 +1,32 @@
+# ===================================================================
+# Shared-hosting Apache config.
+#
+# DirectAdmin serves public_html/ as document root, but Laravel keeps its
+# front controller in public/. This rewrites every request:
+#   - if the requested file exists inside public/, serve it directly
+#     (e.g. /build/manifest.json → public/build/manifest.json)
+#   - otherwise, hand it to public/index.php (Laravel routing)
+# ===================================================================
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Static assets: serve straight from public/ if the file exists there.
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{DOCUMENT_ROOT}/public/$1 -f
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    # Everything else → Laravel front controller (this dir's index.php).
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^(.*)$ index.php [L]
+</IfModule>
+
+# Block access to dotfiles + sensitive Laravel paths from outside public/
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+<FilesMatch "(composer\.(json|lock)|package(-lock)?\.json|\.env(\..+)?|artisan)$">
+    Require all denied
+</FilesMatch>
