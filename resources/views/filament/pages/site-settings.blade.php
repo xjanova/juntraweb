@@ -1,7 +1,11 @@
 <x-filament-panels::page>
-    <x-filament-panels::form wire:submit="save">
+    <form wire:submit="save" class="space-y-6">
         {{ $this->form }}
 
-        <x-filament-panels::form.actions :actions="$this->getCachedFormActions()" :full-width="$this->hasFullWidthFormActions()" />
-    </x-filament-panels::form>
+        <div class="flex justify-start">
+            <x-filament::button type="submit" color="primary" size="lg">
+                บันทึกการตั้งค่า
+            </x-filament::button>
+        </div>
+    </form>
 </x-filament-panels::page>

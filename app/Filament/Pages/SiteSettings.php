@@ -96,11 +96,4 @@ class SiteSettings extends Page implements HasForms
 
         Notification::make()->title('บันทึกการตั้งค่าแล้ว')->success()->send();
     }
-
-    protected function getFormActions(): array
-    {
-        return [
-            \Filament\Actions\Action::make('save')->label('บันทึก')->action('save')->color('primary'),
-        ];
-    }
 }
