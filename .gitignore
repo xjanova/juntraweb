@@ -1,0 +1,37 @@
+/.phpunit.cache
+/node_modules
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+/vendor
+.env
+.env.backup
+.env.local
+.phpactor.json
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+npm-debug.log
+yarn-error.log
+/auth.json
+/.fleet
+/.idea
+/.nova
+/.vscode
+/.zed
+
+# Deployment artifacts (keep .env.production as a template — server fills it)
+.deploy-backup/
+storage/logs/deployment.log
+storage/logs/*.log
+storage/app/public/palmistry/
+
+# Local SQLite (production uses MySQL)
+database/database.sqlite
+
+# Local theme working files (not part of app)
+/_theme_extracted/
+/_run.ps1
+*.zip

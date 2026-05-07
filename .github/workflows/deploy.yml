@@ -1,0 +1,99 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'production' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check required secrets
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::error::Required deployment secrets are not configured."
+            echo "Please set: SSH_HOST, SSH_USER, SSH_PRIVATE_KEY (organization-level secrets are inherited)"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured."
+          echo "Deploy path: ${{ vars.DEPLOY_PATH }}"
+
+      - name: Deploy via SSH (run deploy.sh on server)
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 15m
+          envs: DEPLOY_DIR
+          script: |
+            echo "🚀 Starting juntraweb deployment..."
+            echo "Deploy path: $DEPLOY_DIR"
+
+            cd "$DEPLOY_DIR" || {
+              echo "❌ Cannot cd to $DEPLOY_DIR"
+              exit 1
+            }
+
+            if [ -f deploy.sh ]; then
+              chmod +x deploy.sh
+              bash deploy.sh main
+            else
+              echo "❌ deploy.sh not found!"
+              exit 1
+            fi
+
+            echo "✅ Deployment completed!"
+
+      - name: Health check
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          echo "Waiting 10s for deployment to settle..."
+          sleep 10
+          if [ -z "$APP_URL" ]; then
+            echo "⚠️ APP_URL variable not set, skipping health check"
+            exit 0
+          fi
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -L "$APP_URL" --max-time 30 || echo "000")
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 302 ]; then
+            echo "✅ Application is healthy (HTTP $HTTP_CODE)"
+          else
+            echo "⚠️ Health check returned HTTP $HTTP_CODE (may still be starting)"
+          fi
+
+      - name: Deployment summary
+        if: always()
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Ref:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** $APP_URL" >> $GITHUB_STEP_SUMMARY
