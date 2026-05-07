@@ -59,6 +59,11 @@ Route::middleware('auth')->prefix('account')->name('account.')->group(function (
     Route::get('/history', [AccountController::class, 'history'])->name('history');
 });
 
+// Breeze-compatible dashboard route (alias of account.dashboard)
+Route::get('/dashboard', [AccountController::class, 'dashboard'])
+    ->middleware(['auth', 'verified'])
+    ->name('dashboard');
+
 // Profile (Breeze)
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
