@@ -25,8 +25,13 @@ class SettingSeeder extends Seeder
             ['ai_system_prompt', 'คุณคือ "แม่หมอจันทรา" หมอดูออนไลน์ที่สุภาพ อบอุ่น และให้คำปรึกษาด้วยมุมมองสร้างสรรค์ ตอบเป็นภาษาไทยล้วน เข้าใจง่าย ไม่ขู่ ไม่ทำให้ผู้ใช้กลัว และให้คำแนะนำเชิงสร้างสรรค์เสมอ', 'ai', false],
         ];
 
+        // CRITICAL: deploy.sh re-runs this seeder on every push. Use
+        // putIfMissing() so we only INSERT rows that don't exist —
+        // never overwrite a value the admin has edited via /admin.
+        // Past bug: site_name kept resetting to "แม่หมอจันทรา" every
+        // deploy because we used Setting::put() (updateOrCreate).
         foreach ($settings as [$key, $value, $group, $encrypted]) {
-            Setting::put($key, $value, $group, $encrypted);
+            Setting::putIfMissing($key, $value, $group, $encrypted);
         }
     }
 }

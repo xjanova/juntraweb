@@ -31,4 +31,19 @@ class Setting extends Model
         static::updateOrCreate(['key' => $key], ['value' => $stored, 'group' => $group, 'is_encrypted' => $encrypted]);
         Cache::forget("setting:$key");
     }
+
+    /**
+     * Insert a setting ONLY if the key does not already exist. Never overwrites
+     * a value the operator has edited via /admin → SettingsController. Used by
+     * SettingSeeder so deploys can re-run without resetting branding/secrets.
+     */
+    public static function putIfMissing(string $key, ?string $value, string $group = 'general', bool $encrypted = false): void
+    {
+        if (static::where('key', $key)->exists()) {
+            return;
+        }
+        $stored = $encrypted && $value !== null ? Crypt::encryptString($value) : $value;
+        static::create(['key' => $key, 'value' => $stored, 'group' => $group, 'is_encrypted' => $encrypted]);
+        Cache::forget("setting:$key");
+    }
 }
