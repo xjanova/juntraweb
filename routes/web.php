@@ -7,6 +7,7 @@ use App\Http\Controllers\ChatController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\HoroscopeController;
 use App\Http\Controllers\Install\InstallerController;
+use App\Http\Controllers\MlmController;
 use App\Http\Controllers\NumerologyController;
 use App\Http\Controllers\PalmistryController;
 use App\Http\Controllers\ProfileController;
@@ -79,6 +80,13 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
 Route::middleware('auth')->prefix('account')->name('account.')->group(function () {
     Route::get('/dashboard', [AccountController::class, 'dashboard'])->name('dashboard');
     Route::get('/history', [AccountController::class, 'history'])->name('history');
+});
+
+// MLM dashboard — reads canonical data from Thaiprompt-Affiliate via OAuth bearer.
+Route::middleware('auth')->prefix('mlm')->name('mlm.')->group(function () {
+    Route::get('/',             [MlmController::class, 'dashboard'])->name('dashboard');
+    Route::get('/commissions',  [MlmController::class, 'commissions'])->name('commissions');
+    Route::get('/users',        [MlmController::class, 'users'])->name('users');
 });
 
 // Breeze-compatible dashboard route (alias of account.dashboard)
