@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'แม่หมอจันทรา · Mae Mor Chantra')
+@section('title', config('app.name', 'แม่หมอจันทรา'))
 @section('description', 'ทำนายดวงด้วย AI ศักดิ์สิทธิ์ — ไพ่ยิปซี Celtic Cross, ดวงรายวัน 12 ราศี, เลขศาสตร์, ลายมือ, ฤกษ์ยาม, AI Chat ดูดวง')
 
 @section('content')
