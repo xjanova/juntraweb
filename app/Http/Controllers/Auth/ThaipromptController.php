@@ -60,6 +60,14 @@ class ThaipromptController extends Controller
         $name  = (string) ($profile['name'] ?? $profile['username'] ?? Str::before($email, '@'));
         $tpId  = (string) ($profile['id'] ?? $profile['user_id'] ?? '');
 
+        // FB/LINE link state from Thaiprompt — used to gate the AI chat.
+        // Thaiprompt's User model carries `line_user_id` natively; FB users
+        // are tracked indirectly via FortuneReading PSIDs (Thaiprompt may
+        // surface a `facebook_user_id` field on /api/user once we expose it).
+        $lineId  = (string) ($profile['line_user_id'] ?? '');
+        $fbId    = (string) ($profile['facebook_user_id'] ?? $profile['fb_psid'] ?? '');
+        $signup  = (string) ($profile['signup_via'] ?? '');
+
         $user = User::where('email', $email)->orWhere('thaiprompt_user_id', $tpId)->first();
         if (!$user) {
             $user = new User();
@@ -72,6 +80,20 @@ class ThaipromptController extends Controller
         $user->thaiprompt_user_id = $tpId !== '' ? $tpId : $user->thaiprompt_user_id;
         $user->thaiprompt_token   = $token['access_token'];
         $user->thaiprompt_synced_at = now();
+
+        // Refresh FB/LINE link from upstream — never blank out a previously
+        // captured id (Thaiprompt may stop returning it on later refreshes).
+        if ($lineId !== '') $user->line_user_id = $lineId;
+        if ($fbId   !== '') $user->facebook_user_id = $fbId;
+
+        // Derive signup_via if upstream didn't set one explicitly.
+        if ($signup !== '') {
+            $user->signup_via = $signup;
+        } elseif (!$user->signup_via) {
+            $user->signup_via = $fbId !== '' ? 'facebook'
+                              : ($lineId !== '' ? 'line' : 'thaiprompt');
+        }
+
         if (!$user->email_verified_at) {
             $user->email_verified_at = now();
         }
