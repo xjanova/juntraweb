@@ -5,6 +5,7 @@ namespace App\Filament\Resources\TarotCardResource\Pages;
 use App\Filament\Resources\TarotCardResource;
 use App\Services\TarotImporter;
 use Filament\Actions;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 
@@ -15,6 +16,42 @@ class ListTarotCards extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('importLocal')
+                ->label('Import 78 ใบ จากเครื่องนี้')
+                ->icon('heroicon-o-folder-arrow-down')
+                ->color('success')
+                ->form([
+                    TextInput::make('rootDir')
+                        ->label('Path บนเครื่อง server')
+                        ->default('E:/จันทราพยากรณ์')
+                        ->placeholder('เช่น E:/จันทราพยากรณ์ หรือ /home/user/tarot')
+                        ->required()
+                        ->helperText('ภายในต้องมีโฟลเดอร์ Major/0.png … 21.png และ Cups/Wands/Swords/Pentacles/{ace,2,3,…,king}.png — ระบบจะอ่านอัตโนมัติทั้ง 78 ใบ'),
+                ])
+                ->modalHeading('Import ภาพไพ่ทั้ง 78 ใบ จาก local path')
+                ->modalDescription('ระบบจะสแกน Major/<number>.png และ <Suit>/<rank>.png แล้วคัดลอกเข้า public/images/tarot — รูปที่ admin upload เองจะถูกเขียนทับเฉพาะการ์ดที่หาไฟล์ต้นทางเจอเท่านั้น')
+                ->modalSubmitActionLabel('Import')
+                ->action(function (array $data) {
+                    $report = app(TarotImporter::class)->importFromLocalPath($data['rootDir']);
+
+                    if ($report['imported'] > 0) {
+                        $major = $report['by_arcana']['major'] ?? 0;
+                        $minor = $report['by_arcana']['minor'] ?? 0;
+                        Notification::make()
+                            ->title("Import สำเร็จ {$report['imported']} ใบ")
+                            ->body("Major: {$major}/22 · Minor: {$minor}/56"
+                                . ($report['skipped_missing'] ? " · ขาดไฟล์ {$report['skipped_missing']} ใบ" : ''))
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Import ไม่สำเร็จ')
+                            ->body($report['errors'][0] ?? 'ไม่พบไฟล์ใดในโฟลเดอร์นี้ — ตรวจสอบ path อีกครั้ง')
+                            ->danger()
+                            ->send();
+                    }
+                }),
+
             Actions\Action::make('importThaiprompt')
                 ->label('Import จาก Thaiprompt')
                 ->icon('heroicon-o-arrow-down-tray')

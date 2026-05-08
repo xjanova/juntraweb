@@ -31,6 +31,16 @@ storage/app/public/palmistry/
 # Local SQLite (production uses MySQL)
 database/database.sqlite
 
+# Imported tarot card art — too large for git, re-imported on the server
+# via the Filament admin "Import 78 ใบ จากเครื่องนี้" action.
+/public/images/tarot/
+
+# Marker file written by the first-time installer
+/storage/app/.installed
+
+# Editor / tooling caches
+/.claude/
+
 # Local theme working files (not part of app)
 /_theme_extracted/
 /_run.ps1

@@ -7,7 +7,6 @@ use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Forms\Form;
@@ -44,10 +43,6 @@ class SiteSettings extends Page implements HasForms
             'ai_api_key' => Setting::get('ai_api_key'),
             'ai_system_prompt' => Setting::get('ai_system_prompt'),
             'tarot_card_back_path' => Setting::get('tarot_card_back_path'),
-            'thaiprompt_enabled' => Setting::get('thaiprompt_enabled', '0') === '1',
-            'thaiprompt_base_url' => Setting::get('thaiprompt_base_url'),
-            'thaiprompt_client_id' => Setting::get('thaiprompt_client_id'),
-            'thaiprompt_client_secret' => Setting::get('thaiprompt_client_secret'),
         ]);
     }
 
@@ -81,16 +76,6 @@ class SiteSettings extends Page implements HasForms
                     Textarea::make('ai_system_prompt')->label('System Prompt')->rows(4),
                 ])->columns(2),
 
-                Section::make('Thaiprompt SSO · ระบบสมาชิก')
-                    ->description('เปิดใช้งานเพื่อให้ผู้ใช้ล็อกอินด้วยบัญชี Thaiprompt — ปลายทางคือ {base}/oauth/authorize, /oauth/token, /api/user')
-                    ->schema([
-                        Toggle::make('thaiprompt_enabled')->label('เปิดใช้งาน Thaiprompt SSO')->inline(false),
-                        TextInput::make('thaiprompt_base_url')->label('Base URL')->url()->placeholder('https://thaiprompt.com'),
-                        TextInput::make('thaiprompt_client_id')->label('Client ID'),
-                        TextInput::make('thaiprompt_client_secret')->label('Client Secret')->password()->revealable()
-                            ->helperText('เก็บแบบ encrypted ใน DB · เว้นว่างหากไม่อยากเปลี่ยนของเดิม'),
-                    ])->columns(2),
-
                 Section::make('ระบบไพ่ยิปซี')
                     ->description('หลังไพ่ที่ user เห็นตอนเลือก — อัปโหลดเองที่นี่ หรือใช้ปุ่ม "Import หลังไพ่ จาก Thaiprompt" ในหน้า /admin/tarot-cards')
                     ->schema([
@@ -113,7 +98,7 @@ class SiteSettings extends Page implements HasForms
     {
         $data = $this->form->getState();
 
-        $encryptedKeys = ['ai_api_key', 'thaiprompt_client_secret'];
+        $encryptedKeys = ['ai_api_key'];
         $groups = [
             'site_name' => 'general', 'site_tagline' => 'general',
             'hero_lede' => 'homepage',
@@ -121,19 +106,9 @@ class SiteSettings extends Page implements HasForms
             'contact_line' => 'contact', 'contact_facebook' => 'contact', 'contact_email' => 'contact',
             'ai_provider' => 'ai', 'ai_model' => 'ai', 'ai_api_key' => 'ai', 'ai_system_prompt' => 'ai',
             'tarot_card_back_path' => 'tarot',
-            'thaiprompt_enabled' => 'thaiprompt', 'thaiprompt_base_url' => 'thaiprompt',
-            'thaiprompt_client_id' => 'thaiprompt', 'thaiprompt_client_secret' => 'thaiprompt',
         ];
 
         foreach ($data as $key => $value) {
-            // Toggle bools → "1" / "0"
-            if ($key === 'thaiprompt_enabled') {
-                $value = $value ? '1' : '0';
-            }
-            // Don't blank out a stored secret if the form left it empty.
-            if ($key === 'thaiprompt_client_secret' && (string) $value === '') {
-                continue;
-            }
             Setting::put($key, $value, $groups[$key] ?? 'general', in_array($key, $encryptedKeys, true));
         }
 

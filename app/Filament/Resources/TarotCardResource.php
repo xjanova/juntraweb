@@ -69,12 +69,22 @@ class TarotCardResource extends Resource
                     ->label('หน้าไพ่')
                     ->disk('public')
                     ->getStateUsing(function (TarotCard $record): ?string {
-                        // Use the model's resolver so both `images/...` (legacy public)
-                        // and `tarot/cards/...` (storage) paths render correctly.
-                        return $record->image_path ? $record->imageUrl() : null;
+                        // Show the FACE only — never fall back to card-back here.
+                        // Operator wants to see which cards genuinely have art.
+                        return $record->faceImageUrl();
                     })
-                    ->height(60)
-                    ->extraImgAttributes(['style' => 'aspect-ratio:5/9;object-fit:cover;border-radius:4px']),
+                    ->defaultImageUrl(fn () => asset('images/card-magician.png'))
+                    ->height(72)
+                    ->extraImgAttributes(['style' => 'aspect-ratio:5/9;object-fit:cover;border-radius:4px;border:1px solid rgba(0,0,0,.1)']),
+                Tables\Columns\IconColumn::make('has_face')
+                    ->label('รูป')
+                    ->getStateUsing(fn (TarotCard $r): bool => $r->hasFaceImage())
+                    ->boolean()
+                    ->trueIcon('heroicon-o-check-circle')
+                    ->falseIcon('heroicon-o-photo')
+                    ->trueColor('success')
+                    ->falseColor('warning')
+                    ->tooltip(fn (TarotCard $r): string => $r->hasFaceImage() ? 'มีหน้าไพ่แล้ว' : 'ยังไม่มีหน้าไพ่ — ใช้รูปหลังไพ่แทน'),
                 Tables\Columns\TextColumn::make('number')->sortable(),
                 Tables\Columns\TextColumn::make('name_th')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('name_en')->searchable(),
@@ -90,7 +100,17 @@ class TarotCardResource extends Resource
                 ]),
                 Tables\Filters\Filter::make('has_image')
                     ->label('มีรูปแล้วเท่านั้น')
-                    ->query(fn ($q) => $q->whereNotNull('image_path')->where('image_path', '!=', ''))
+                    ->query(fn ($q) => $q->whereNotNull('image_path')
+                        ->where('image_path', '!=', '')
+                        ->where('image_path', '!=', 'images/card-magician.png'))
+                    ->toggle(),
+                Tables\Filters\Filter::make('missing_image')
+                    ->label('ยังไม่มีรูป')
+                    ->query(fn ($q) => $q->where(function ($q) {
+                        $q->whereNull('image_path')
+                          ->orWhere('image_path', '')
+                          ->orWhere('image_path', 'images/card-magician.png');
+                    }))
                     ->toggle(),
             ])
             ->actions([Tables\Actions\EditAction::make()])

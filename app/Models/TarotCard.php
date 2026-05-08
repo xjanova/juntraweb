@@ -86,4 +86,31 @@ class TarotCard extends Model
         $path = $this->image_path;
         return $path && $path !== 'images/card-magician.png';
     }
+
+    /**
+     * Resolve the face-image URL only — never falls back to the card-back.
+     * Used by the admin so an operator can SEE which cards genuinely have art
+     * and which are still showing the placeholder.
+     */
+    public function faceImageUrl(): ?string
+    {
+        if (!$this->hasFaceImage()) {
+            return null;
+        }
+        $path = $this->image_path;
+
+        if (preg_match('#^https?://#i', $path)) {
+            return $path;
+        }
+        if (str_starts_with($path, 'images/')) {
+            // public/images/... — bust the browser cache when the operator re-imports.
+            $abs = public_path($path);
+            $v = is_file($abs) ? filemtime($abs) : null;
+            return $v ? asset($path) . '?v=' . $v : asset($path);
+        }
+        if (Storage::disk('public')->exists($path)) {
+            return Storage::disk('public')->url($path);
+        }
+        return asset($path);
+    }
 }

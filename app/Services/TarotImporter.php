@@ -9,23 +9,61 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Imports Tarot card images from a sibling Laravel project (Thaiprompt-Affiliate)
- * that lives on the same server.
+ * Imports Tarot card images from one of two source layouts:
  *
- * Both projects use Laravel storage layout, so the images sit at:
- *   <other-project>/storage/app/public/tarot/cards/<random>.webp
+ *  A. **Local layout** (recommended) — directory tree
+ *       <source>/Major/0.png     ... 21.png         (22 Major Arcana, by Rider-Waite number)
+ *       <source>/Cups/ace.png    ... king.png       (14 Cups)
+ *       <source>/Wands/ace.png   ... king.png       (14 Wands)
+ *       <source>/Swords/ace.png  ... king.png       (14 Swords)
+ *       <source>/Pentacles/ace.png ... king.png     (14 Pentacles)
  *
- * We copy them into our own:
- *   <self>/storage/app/public/tarot/cards/<our-slug>.webp
+ *     Folder names are matched case-insensitively. Files may be .png/.jpg/.jpeg/.webp.
+ *     Minor Arcana ranks accept either the english name (`ace`, `two` … `king`)
+ *     OR the number (`1` … `14`).
  *
- * and update the tarot_cards.image_path column to the public URL.
+ *  B. **Thaiprompt-Affiliate sibling layout** — flat directory with the random
+ *     storage filenames captured from production. Used when juntra and Thaiprompt
+ *     share a server. Only Major Arcana mapped (legacy).
  *
- * Lookup is by `name_en` (e.g. "The Fool" → matches our slug "fool" by the canonical
- * map below). The other project queries Thaiprompt's MySQL DB if available;
- * otherwise it falls back to a static name→file map embedded here.
+ * Both produce a report with counts + per-card errors.
  */
 class TarotImporter
 {
+    /** Major Arcana slug by Rider-Waite number (0–21). */
+    private const MAJOR_BY_NUMBER = [
+        0  => 'fool',             1  => 'magician',     2  => 'high-priestess',
+        3  => 'empress',          4  => 'emperor',      5  => 'hierophant',
+        6  => 'lovers',           7  => 'chariot',      8  => 'strength',
+        9  => 'hermit',           10 => 'wheel-of-fortune',
+        11 => 'justice',          12 => 'hanged-man',   13 => 'death',
+        14 => 'temperance',       15 => 'devil',        16 => 'tower',
+        17 => 'star',             18 => 'moon',         19 => 'sun',
+        20 => 'judgement',        21 => 'world',
+    ];
+
+    /** Map english rank words to numeric position 1–14. */
+    private const RANK_WORDS = [
+        'ace' => 1, 'two' => 2, 'three' => 3, 'four' => 4, 'five' => 5,
+        'six' => 6, 'seven' => 7, 'eight' => 8, 'nine' => 9, 'ten' => 10,
+        'page' => 11, 'knight' => 12, 'queen' => 13, 'king' => 14,
+    ];
+
+    /** Numeric rank 1–14 back to slug word for building the card slug. */
+    private const RANK_SLUG = [
+        1 => 'ace',   2 => 'two',   3 => 'three', 4 => 'four',  5 => 'five',
+        6 => 'six',   7 => 'seven', 8 => 'eight', 9 => 'nine',  10 => 'ten',
+        11 => 'page', 12 => 'knight', 13 => 'queen', 14 => 'king',
+    ];
+
+    /** Suit folder names → DB suit value. Folder lookup is case-insensitive. */
+    private const SUITS = [
+        'cups' => 'cups', 'cup' => 'cups',
+        'wands' => 'wands', 'wand' => 'wands',
+        'swords' => 'swords', 'sword' => 'swords',
+        'pentacles' => 'pentacles', 'pentacle' => 'pentacles', 'coins' => 'pentacles',
+    ];
+
     /**
      * Static fallback map — Thaiprompt Major Arcana files by name_en.
      * (Captured from production 2026-05-07. Update if Thaiprompt rotates filenames.)
@@ -55,28 +93,25 @@ class TarotImporter
         'The World'          => 'YHxQOWUnxO2WtKYG8ZGM3b1FFyF19NdHrj3hxccN.webp',
     ];
 
-    /**
-     * Default Thaiprompt source path on the shared DirectAdmin server.
-     * Override via env('TAROT_IMPORT_SOURCE') if the path moves.
-     */
     public function defaultSourcePath(): string
     {
         return config('tarot.import_source')
             ?: '/home/admin/domains/main.thaiprompt.online/public_html/storage/app/public/tarot/cards';
     }
 
-    /** Default card-back source dir (also on the same DA server). */
     public function defaultCardBackSourcePath(): string
     {
         return config('tarot.card_back_source')
             ?: '/home/admin/domains/main.thaiprompt.online/public_html/storage/app/public/tarot/card-backs';
     }
 
+    /* =========================================================================
+       PUBLIC API
+       ========================================================================= */
+
     /**
-     * Copy the first card-back image from a Thaiprompt-style source dir into our
-     * public storage and store its path in the `tarot_card_back_path` setting.
-     *
-     * Returns ['imported' => bool, 'path' => string|null, 'error' => string|null].
+     * Import card-back. Picks the most-recently-modified image in $sourceDir
+     * and stores it as the global tarot_card_back_path setting.
      */
     public function importCardBack(?string $sourceDir = null): array
     {
@@ -116,9 +151,113 @@ class TarotImporter
     }
 
     /**
-     * Copy + map images from a source dir into our public storage and update DB.
+     * Local layout — scans <root>/Major + <root>/{Cups,Wands,Swords,Pentacles}.
+     * The recommended way to bring all 78 face images into the system.
      *
-     * Returns ['imported' => N, 'skipped_missing' => N, 'updated' => N, 'errors' => [..]]
+     * Returns:
+     *   ['source' => string,
+     *    'imported' => N (files copied),
+     *    'updated'  => N (DB rows updated),
+     *    'skipped_missing' => N (cards in DB with no source file),
+     *    'errors'   => [string, ...] ]
+     */
+    public function importFromLocalPath(string $rootDir): array
+    {
+        $report = [
+            'source' => $rootDir,
+            'imported' => 0, 'updated' => 0, 'skipped_missing' => 0,
+            'by_arcana' => ['major' => 0, 'minor' => 0],
+            'errors' => [],
+        ];
+
+        if (!is_dir($rootDir)) {
+            $report['errors'][] = "Source directory not found: $rootDir";
+            return $report;
+        }
+
+        $publicDest = public_path('images/tarot');
+        if (!is_dir($publicDest)) {
+            File::makeDirectory($publicDest, 0755, true);
+        }
+
+        DB::transaction(function () use ($rootDir, $publicDest, &$report) {
+            // 1) Major Arcana — Major/<number>.<ext>
+            $majorDir = $this->resolveSubdir($rootDir, ['Major', 'major', 'MAJOR']);
+            if ($majorDir) {
+                foreach (self::MAJOR_BY_NUMBER as $num => $slug) {
+                    $src = $this->findImageByBasename($majorDir, (string) $num);
+                    if (!$src) {
+                        $report['skipped_missing']++;
+                        $report['errors'][] = "Missing Major #$num ($slug)";
+                        continue;
+                    }
+                    $this->placeCardImage($slug, $src, $publicDest, $report);
+                    $report['by_arcana']['major']++;
+                }
+            } else {
+                $report['errors'][] = "No Major/ subdirectory in $rootDir";
+            }
+
+            // 2) Minor Arcana — <Suit>/<rank>.<ext>
+            foreach (self::SUITS as $folderAlias => $suitKey) {
+                // each canonical suit appears under multiple aliases — only resolve once
+                if ($folderAlias !== $suitKey && $folderAlias !== rtrim($suitKey, 's')) {
+                    continue; // skip "coin" alias when we already handle "pentacles"
+                }
+            }
+
+            $canonicalSuits = ['cups', 'wands', 'swords', 'pentacles'];
+            foreach ($canonicalSuits as $suit) {
+                $aliases = array_keys(array_filter(self::SUITS, fn ($v) => $v === $suit));
+                $variants = [];
+                foreach ($aliases as $a) {
+                    $variants[] = $a;
+                    $variants[] = ucfirst($a);
+                    $variants[] = strtoupper($a);
+                }
+                $suitDir = $this->resolveSubdir($rootDir, $variants);
+                if (!$suitDir) {
+                    // missing suit folder is not a hard error — log per-card below
+                    foreach (self::RANK_SLUG as $rankSlug) {
+                        $report['skipped_missing']++;
+                        $report['errors'][] = "Missing $suit folder · $rankSlug-of-$suit";
+                    }
+                    continue;
+                }
+
+                foreach (self::RANK_SLUG as $rankNum => $rankSlug) {
+                    $candidates = [(string) $rankNum, $rankSlug, ucfirst($rankSlug)];
+                    $src = null;
+                    foreach ($candidates as $base) {
+                        $src = $this->findImageByBasename($suitDir, $base);
+                        if ($src) break;
+                    }
+                    if (!$src) {
+                        $report['skipped_missing']++;
+                        $report['errors'][] = "Missing $suit · $rankSlug ($rankNum)";
+                        continue;
+                    }
+
+                    $cardSlug = "$rankSlug-of-$suit";
+                    $this->placeCardImage($cardSlug, $src, $publicDest, $report);
+                    $report['by_arcana']['minor']++;
+                }
+            }
+        });
+
+        Log::info('TarotImporter local run', [
+            'source' => $rootDir,
+            'imported' => $report['imported'],
+            'updated' => $report['updated'],
+            'skipped_missing' => $report['skipped_missing'],
+            'errors' => count($report['errors']),
+        ]);
+        return $report;
+    }
+
+    /**
+     * Legacy Thaiprompt-style flat-directory import (Major Arcana only).
+     * Kept for backwards compatibility with the existing admin button.
      */
     public function importFromPath(?string $sourceDir = null): array
     {
@@ -168,5 +307,86 @@ class TarotImporter
 
         Log::info('TarotImporter run', $report);
         return $report;
+    }
+
+    /* =========================================================================
+       INTERNAL HELPERS
+       ========================================================================= */
+
+    /** Locate `<rootDir>/<one of $names>` (case-insensitive); return abs path or null. */
+    private function resolveSubdir(string $rootDir, array $names): ?string
+    {
+        foreach ($names as $n) {
+            $abs = rtrim($rootDir, '/\\') . DIRECTORY_SEPARATOR . $n;
+            if (is_dir($abs)) {
+                return $abs;
+            }
+        }
+        // case-insensitive scan as final fallback
+        foreach (@scandir($rootDir) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $abs = $rootDir . DIRECTORY_SEPARATOR . $entry;
+            if (!is_dir($abs)) continue;
+            foreach ($names as $n) {
+                if (strcasecmp($entry, $n) === 0) {
+                    return $abs;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Find a file in $dir whose basename (without extension) matches $base
+     * exactly, case-insensitively. Accepts png/jpg/jpeg/webp. Returns abs path or null.
+     */
+    private function findImageByBasename(string $dir, string $base): ?string
+    {
+        $exts = ['png', 'jpg', 'jpeg', 'webp', 'PNG', 'JPG', 'JPEG', 'WEBP'];
+        foreach ($exts as $ext) {
+            $abs = $dir . DIRECTORY_SEPARATOR . $base . '.' . $ext;
+            if (is_file($abs)) return $abs;
+        }
+        // case-insensitive scan of the directory
+        foreach (@scandir($dir) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $abs = $dir . DIRECTORY_SEPARATOR . $entry;
+            if (!is_file($abs)) continue;
+            $info = pathinfo($entry);
+            $ext = strtolower($info['extension'] ?? '');
+            if (!in_array($ext, ['png', 'jpg', 'jpeg', 'webp'], true)) continue;
+            if (strcasecmp($info['filename'] ?? '', $base) === 0) {
+                return $abs;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Copy $src → public/images/tarot/<slug>.<ext> and update the matching
+     * tarot_cards row. Updates $report counters in place.
+     */
+    private function placeCardImage(string $cardSlug, string $src, string $publicDest, array &$report): void
+    {
+        $card = TarotCard::where('slug', $cardSlug)->first();
+        if (!$card) {
+            $report['errors'][] = "Card not in DB: $cardSlug";
+            return;
+        }
+
+        $ext = strtolower(pathinfo($src, PATHINFO_EXTENSION)) ?: 'png';
+        $destFilename = $cardSlug . '.' . $ext;
+        $destPath = $publicDest . DIRECTORY_SEPARATOR . $destFilename;
+
+        if (!@copy($src, $destPath)) {
+            $report['errors'][] = "Copy failed: $cardSlug ($src → $destPath)";
+            return;
+        }
+
+        $card->image_path = "images/tarot/$destFilename";
+        $card->save();
+
+        $report['imported']++;
+        $report['updated']++;
     }
 }
