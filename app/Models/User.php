@@ -19,11 +19,15 @@ class User extends Authenticatable implements FilamentUser
         'email',
         'password',
         'role',
+        'thaiprompt_user_id',
+        'thaiprompt_token',
+        'thaiprompt_synced_at',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'thaiprompt_token',
     ];
 
     protected function casts(): array
@@ -31,7 +35,13 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'thaiprompt_synced_at' => 'datetime',
         ];
+    }
+
+    public function isThaipromptLinked(): bool
+    {
+        return !empty($this->thaiprompt_user_id);
     }
 
     public function profile(): HasOne

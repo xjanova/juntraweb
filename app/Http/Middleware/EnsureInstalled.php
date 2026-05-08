@@ -1,0 +1,25 @@
+<?php
+
+namespace App\Http\Middleware;
+
+use App\Support\Installation;
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+class EnsureInstalled
+{
+    public function handle(Request $request, Closure $next): Response
+    {
+        if (Installation::isInstalled()) {
+            return $next($request);
+        }
+
+        // allow installer routes, health check, and built assets through
+        if ($request->is('install', 'install/*', 'up', 'build/*', 'images/*', 'storage/*', 'favicon.ico')) {
+            return $next($request);
+        }
+
+        return redirect('/install');
+    }
+}

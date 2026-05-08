@@ -1,15 +1,35 @@
 <?php
 
 use App\Http\Controllers\AccountController;
+use App\Http\Controllers\Auth\ThaipromptController;
 use App\Http\Controllers\AuspiciousController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\HoroscopeController;
+use App\Http\Controllers\Install\InstallerController;
 use App\Http\Controllers\NumerologyController;
 use App\Http\Controllers\PalmistryController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\TarotController;
 use Illuminate\Support\Facades\Route;
+
+// Installer wizard — only reachable until storage/app/.installed exists.
+Route::middleware('block.installed')->prefix('install')->name('install.')->group(function () {
+    Route::get('/',             [InstallerController::class, 'welcome'])->name('welcome');
+    Route::get('/database',     [InstallerController::class, 'databaseForm'])->name('database');
+    Route::post('/database',    [InstallerController::class, 'databaseSave'])->name('database.save');
+    Route::get('/admin',        [InstallerController::class, 'adminForm'])->name('admin');
+    Route::post('/admin',       [InstallerController::class, 'adminSave'])->name('admin.save');
+    Route::get('/integrations', [InstallerController::class, 'integrationsForm'])->name('integrations');
+    Route::post('/integrations',[InstallerController::class, 'integrationsSave'])->name('integrations.save');
+    Route::get('/finish',       [InstallerController::class, 'finish'])->name('finish');
+});
+
+// Thaiprompt SSO
+Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
+    Route::get('/redirect', [ThaipromptController::class, 'redirect'])->name('redirect');
+    Route::get('/callback', [ThaipromptController::class, 'callback'])->name('callback');
+});
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 

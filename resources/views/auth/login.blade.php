@@ -10,6 +10,20 @@
       <p class="lede" style="margin:0 auto">เข้าสู่ระบบเพื่อบันทึกประวัติการดูดวงและคำพยากรณ์ที่ได้รับ</p>
     </div>
 
+    @php $tpEnabled = \App\Models\Setting::get('thaiprompt_enabled', '0') === '1'; @endphp
+
+    @if ($tpEnabled)
+      <div class="panel" style="margin-bottom:18px;text-align:center">
+        <div class="eyebrow" style="display:inline-flex;margin-bottom:14px">SINGLE SIGN-ON</div>
+        <a href="{{ route('thaiprompt.redirect') }}" class="btn btn-primary" style="width:100%;justify-content:center">
+          เข้าสู่ระบบด้วย Thaiprompt
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </a>
+        <div style="margin-top:12px;font-size:12px;color:var(--ink-dim);letter-spacing:.06em">บัญชีเดียวใช้กับเครือ Thaiprompt ได้ทั้งหมด</div>
+      </div>
+      <div style="text-align:center;margin:14px 0;color:var(--ink-dim);font-size:12px;letter-spacing:.18em">— หรือ —</div>
+    @endif
+
     <form action="{{ route('login') }}" method="POST" class="panel">
       @csrf
 

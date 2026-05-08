@@ -20,10 +20,20 @@ class HoroscopeController extends Controller
     public function show(Zodiac $zodiac, AiOracle $oracle)
     {
         $today = Carbon::today();
-        $horoscope = DailyHoroscope::firstOrCreate(
-            ['zodiac_id' => $zodiac->id, 'date' => $today->toDateString()],
-            $oracle->generateDailyHoroscope($zodiac, $today)
-        );
+
+        // Use whereDate so we match regardless of whether the column was stored
+        // as a date or a full datetime (different drivers/casts produce both).
+        $horoscope = DailyHoroscope::where('zodiac_id', $zodiac->id)
+            ->whereDate('date', $today)
+            ->first();
+
+        if (!$horoscope) {
+            $payload = $oracle->generateDailyHoroscope($zodiac, $today);
+            $horoscope = DailyHoroscope::create(array_merge($payload, [
+                'zodiac_id' => $zodiac->id,
+                'date'      => $today,
+            ]));
+        }
 
         return view('pages.horoscope.show', [
             'zodiac' => $zodiac,
