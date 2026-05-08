@@ -199,13 +199,6 @@ class TarotImporter
             }
 
             // 2) Minor Arcana — <Suit>/<rank>.<ext>
-            foreach (self::SUITS as $folderAlias => $suitKey) {
-                // each canonical suit appears under multiple aliases — only resolve once
-                if ($folderAlias !== $suitKey && $folderAlias !== rtrim($suitKey, 's')) {
-                    continue; // skip "coin" alias when we already handle "pentacles"
-                }
-            }
-
             $canonicalSuits = ['cups', 'wands', 'swords', 'pentacles'];
             foreach ($canonicalSuits as $suit) {
                 $aliases = array_keys(array_filter(self::SUITS, fn ($v) => $v === $suit));

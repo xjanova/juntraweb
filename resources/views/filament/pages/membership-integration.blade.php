@@ -10,7 +10,7 @@
         </ol>
     </div>
 
-    <form wire:submit="save" class="space-y-6">
-        {{ $this->form }}
-    </form>
+    {{-- The header actions ("บันทึก" / "ทดสอบเชื่อมต่อ") drive the page —
+         no <form> wrapper here so we don't have a wire:submit with no submit button. --}}
+    {{ $this->form }}
 </x-filament-panels::page>

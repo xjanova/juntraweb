@@ -3,7 +3,6 @@
 namespace App\Filament\Pages;
 
 use App\Models\Setting;
-use App\Services\ThaipromptClient;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -13,6 +12,7 @@ use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Dedicated admin page for the Thaiprompt SSO connection used by the
@@ -113,18 +113,37 @@ class MembershipIntegration extends Page implements HasForms
      * Probe the Base URL — we don't have a credentialed test endpoint, so we
      * just verify that {base}/oauth/authorize responds (any 2xx/3xx is OK;
      * even a 4xx with a body that mentions "client" tells us OAuth is alive).
+     *
+     * Reads the URL from the FORM state first so the operator can probe a
+     * value they just typed without needing to save it. Falls back to the
+     * stored Setting if the form is empty (e.g. probing right after page load).
      */
     public function testConnection(): void
     {
-        $base = Setting::get('thaiprompt_base_url');
+        // Pull the form's current state — Filament keeps it on $this->data.
+        // This also picks up unsaved edits, which is what the operator expects.
+        $state = is_array($this->data ?? null) ? $this->data : [];
+        $base  = $state['thaiprompt_base_url']  ?? Setting::get('thaiprompt_base_url');
+        $cid   = $state['thaiprompt_client_id'] ?? Setting::get('thaiprompt_client_id') ?: 'probe';
+
         if (!$base) {
             Notification::make()->title('ยังไม่ได้กรอก Base URL')->danger()->send();
             return;
         }
+
+        // Only allow http(s) — block file://, gopher://, dict:// etc. used by SSRF.
+        if (!preg_match('#^https?://[^/]+#i', $base)) {
+            Notification::make()
+                ->title('Base URL ต้องขึ้นต้นด้วย http:// หรือ https://')
+                ->body('โดยปกติ Thaiprompt ใช้ https — ลองพิมพ์ใหม่อีกครั้ง')
+                ->danger()->send();
+            return;
+        }
+
         try {
             $resp = Http::timeout(8)->withoutRedirecting()
                 ->get(rtrim($base, '/') . '/oauth/authorize', [
-                    'client_id'     => Setting::get('thaiprompt_client_id') ?: 'probe',
+                    'client_id'     => $cid,
                     'response_type' => 'code',
                     'redirect_uri'  => route('thaiprompt.callback'),
                 ]);
@@ -147,9 +166,14 @@ class MembershipIntegration extends Page implements HasForms
                     ->warning()->send();
             }
         } catch (\Throwable $e) {
+            // Log the full message for the operator, show a clean line in the toast.
+            Log::warning('thaiprompt.testConnection failed', [
+                'base' => $base,
+                'err'  => $e->getMessage(),
+            ]);
             Notification::make()
                 ->title('เชื่อมต่อ Thaiprompt ไม่ได้')
-                ->body($e->getMessage())
+                ->body('ไม่สามารถเรียก endpoint ได้ — ดูรายละเอียดเพิ่มเติมที่ storage/logs/laravel.log')
                 ->danger()->send();
         }
     }

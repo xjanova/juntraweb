@@ -23,10 +23,10 @@ class ListTarotCards extends ListRecords
                 ->form([
                     TextInput::make('rootDir')
                         ->label('Path บนเครื่อง server')
-                        ->default('E:/จันทราพยากรณ์')
-                        ->placeholder('เช่น E:/จันทราพยากรณ์ หรือ /home/user/tarot')
+                        ->default(config('tarot.local_import_path') ?: '')
+                        ->placeholder('เช่น /home/admin/tarot-art หรือ E:/จันทราพยากรณ์')
                         ->required()
-                        ->helperText('ภายในต้องมีโฟลเดอร์ Major/0.png … 21.png และ Cups/Wands/Swords/Pentacles/{ace,2,3,…,king}.png — ระบบจะอ่านอัตโนมัติทั้ง 78 ใบ'),
+                        ->helperText('ภายในต้องมีโฟลเดอร์ Major/0.png … 21.png และ Cups/Wands/Swords/Pentacles/{ace,2,3,…,king}.png — ระบบจะอ่านอัตโนมัติทั้ง 78 ใบ. ตั้งค่า default ที่ TAROT_LOCAL_IMPORT_PATH ใน .env ของแต่ละ env ได้'),
                 ])
                 ->modalHeading('Import ภาพไพ่ทั้ง 78 ใบ จาก local path')
                 ->modalDescription('ระบบจะสแกน Major/<number>.png และ <Suit>/<rank>.png แล้วคัดลอกเข้า public/images/tarot — รูปที่ admin upload เองจะถูกเขียนทับเฉพาะการ์ดที่หาไฟล์ต้นทางเจอเท่านั้น')

@@ -69,11 +69,11 @@ class TarotCardResource extends Resource
                     ->label('หน้าไพ่')
                     ->disk('public')
                     ->getStateUsing(function (TarotCard $record): ?string {
-                        // Show the FACE only — never fall back to card-back here.
-                        // Operator wants to see which cards genuinely have art.
+                        // Show the FACE only — never fall back to card-back here, and
+                        // never substitute a default thumbnail. The operator needs to
+                        // SEE the empty cells so they know which cards still need art.
                         return $record->faceImageUrl();
                     })
-                    ->defaultImageUrl(fn () => asset('images/card-magician.png'))
                     ->height(72)
                     ->extraImgAttributes(['style' => 'aspect-ratio:5/9;object-fit:cover;border-radius:4px;border:1px solid rgba(0,0,0,.1)']),
                 Tables\Columns\IconColumn::make('has_face')
