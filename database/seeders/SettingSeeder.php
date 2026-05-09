@@ -23,6 +23,17 @@ class SettingSeeder extends Seeder
             ['ai_model', 'gemini-2.0-flash-exp', 'ai', false],
             ['ai_api_key', '', 'ai', true],
             ['ai_system_prompt', 'คุณคือ "แม่หมอจันทรา" หมอดูออนไลน์ที่สุภาพ อบอุ่น และให้คำปรึกษาด้วยมุมมองสร้างสรรค์ ตอบเป็นภาษาไทยล้วน เข้าใจง่าย ไม่ขู่ ไม่ทำให้ผู้ใช้กลัว และให้คำแนะนำเชิงสร้างสรรค์เสมอ', 'ai', false],
+
+            // Wallet pricing — admin can override per-feature via /admin/wallet-settings.
+            // Pricing::for() reads these first, falls back to config/pricing.php.
+            ['pricing_tarot_three',  '19', 'pricing', false],
+            ['pricing_tarot_celtic', '99', 'pricing', false],
+            ['pricing_numerology',   '9',  'pricing', false],
+            ['pricing_palmistry',    '29', 'pricing', false],
+            ['pricing_auspicious',   '19', 'pricing', false],
+            ['pricing_chat_message', '2',  'pricing', false],
+            ['promptpay_id',         '',   'pricing', false],
+            ['promptpay_name',       '',   'pricing', false],
         ];
 
         // CRITICAL: deploy.sh re-runs this seeder on every push. Use

@@ -10,7 +10,13 @@
       <p class="lede" style="margin:0 auto">ระบบคำนวณวันที่ดี ตามหลักเลขศาสตร์และคติไทย — สำหรับงานบุญ งานแต่ง เปิดร้าน เริ่มเรียน</p>
     </div>
 
-    <form action="{{ route('auspicious.find') }}" method="POST" class="panel">
+    @if (isset($cost) && $cost > 0)
+      <div style="text-align:center;margin-bottom:24px;font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase">
+        ค่าบริการ ฿{{ number_format($cost, $cost == intval($cost) ? 0 : 2) }} / ครั้ง
+      </div>
+    @endif
+    <form action="{{ route('auspicious.find') }}" method="POST" class="panel"
+          x-data="{submitting:false}" @submit="submitting=true">
       @csrf
       <div class="field">
         <label for="occasion">โอกาส</label>
@@ -26,9 +32,10 @@
           <input type="date" id="to_date" name="to_date" value="{{ old('to_date', now()->addDays(60)->toDateString()) }}">
         </div>
       </div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center">
-        ค้นหาวันมงคล
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" :disabled="submitting" :style="submitting ? 'opacity:.6;cursor:wait' : ''">
+        <span x-show="!submitting">ค้นหาวันมงคล</span>
+        <span x-show="submitting">กำลังค้นหา ⋯</span>
+        <svg x-show="!submitting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
       </button>
     </form>
 

@@ -2,29 +2,38 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\InsufficientFundsException;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Services\AiOracle;
 use App\Services\FortuneBot\FortuneBotClient;
+use App\Services\Wallet\WalletService;
+use App\Support\Pricing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
  * "แม่หมอจันทรา" AI chat — proxies to Thaiprompt's Fortune Bot API so the
- * conversation behaves identically to the Facebook Messenger / LINE bot.
+ * conversation behaves identically to the Facebook Messenger / LINE bot,
+ * and uses Thaiprompt's API key pool (juntra holds NO AI keys in prod).
  *
  * Access rule (per operator request 2026-05-08):
  *   - Must be logged in via Thaiprompt SSO
  *   - Membership must originate from Facebook or LINE (signup_via)
+ *   - Must have enough wallet credit for the per-message price
  *
  * If those aren't met we render the chat shell with a CTA pointing the
- * user at the SSO redirect. If Thaiprompt is unreachable we fall back to
- * the local AiOracle so the page never crashes.
+ * user at the SSO redirect / wallet top-up. If Thaiprompt is unreachable
+ * we fall back to the local AiOracle so the page never crashes.
  */
 class ChatController extends Controller
 {
-    public function __construct(private FortuneBotClient $bot, private AiOracle $oracle) {}
+    public function __construct(
+        private FortuneBotClient $bot,
+        private AiOracle $oracle,
+        private WalletService $wallet,
+    ) {}
 
     public function index(Request $request)
     {
@@ -54,7 +63,7 @@ class ChatController extends Controller
             }
             ChatMessage::create([
                 'chat_conversation_id' => $conversation->id,
-                'role' => 'assistant',
+                'role'    => 'assistant',
                 'content' => $greeting,
             ]);
         }
@@ -63,6 +72,8 @@ class ChatController extends Controller
             'conversation' => $conversation->load('messages'),
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
+            'cost'         => Pricing::for('chat_message'),
+            'balance'      => $user ? $this->wallet->balance($user) : null,
         ]);
     }
 
@@ -84,15 +95,45 @@ class ChatController extends Controller
         $token = $request->session()->get('chat_token');
         abort_unless($token, 403);
 
+        $cost = Pricing::for('chat_message');
+        $balance = $this->wallet->balance($user);
+        if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
+            $msg = sprintf(
+                'เครดิตไม่พอสนทนา (ต้องการ %s ต่อข้อความ คงเหลือ %s) — กรุณาเติมเงินเข้าวอลเลต',
+                Pricing::format($cost),
+                Pricing::format($balance),
+            );
+            return $request->wantsJson()
+                ? response()->json(['error' => $msg, 'reason_code' => 'insufficient_funds'], 402)
+                : redirect()->route('wallet.index')->with('status', $msg);
+        }
+
         $conversation = ChatConversation::where('session_token', $token)->firstOrFail();
 
-        ChatMessage::create([
+        $userMessage = ChatMessage::create([
             'chat_conversation_id' => $conversation->id,
             'role'    => 'user',
             'content' => $data['message'],
         ]);
 
         $reply = $this->dispatchToUpstream($request, $user, $data['message']);
+
+        // Debit only AFTER we have a successful reply — fairer to the user
+        // when upstream blips. Race-safe because debit() locks the wallet row.
+        if ($cost > 0) {
+            try {
+                $this->wallet->debit($user, $cost, 'AI chat message', [
+                    'reference_type' => 'chat_message',
+                    'reference_id'   => $userMessage->id,
+                ]);
+            } catch (InsufficientFundsException $e) {
+                // Race lost (parallel debit between balance check and now).
+                // We've already produced a reply — surface a one-liner in the
+                // assistant message so the user understands why no further
+                // messages will go through.
+                $reply .= "\n\n— *แม่หมอบอก: เครดิตในวอลเลตหมดพอดีตอนตอบครั้งนี้ ครั้งหน้ากรุณาเติมเงินก่อนนะคะ*";
+            }
+        }
 
         ChatMessage::create([
             'chat_conversation_id' => $conversation->id,
@@ -101,17 +142,30 @@ class ChatController extends Controller
         ]);
 
         if ($request->wantsJson()) {
-            return response()->json(['reply' => $reply]);
+            return response()->json([
+                'reply'   => $reply,
+                'balance' => $this->wallet->balance($user),
+                'cost'    => $cost,
+            ]);
         }
         return redirect()->route('chat.index')->with('status', 'แม่หมอตอบกลับแล้ว');
     }
 
     public function show(ChatConversation $conversation)
     {
+        $user = auth()->user();
+        $isOwner = $user && $conversation->user_id === $user->id;
+        $isAdmin = $user && method_exists($user, 'isAdmin') && $user->isAdmin();
+        if (!$isOwner && !$isAdmin) {
+            abort(403);
+        }
+
         return view('pages.chat.index', [
             'conversation' => $conversation->load('messages'),
             'gate'         => ['allowed' => true, 'reason' => null, 'code' => null],
-            'channel'      => auth()->user()?->chatLinkChannel(),
+            'channel'      => $user?->chatLinkChannel(),
+            'cost'         => Pricing::for('chat_message'),
+            'balance'      => $user ? $this->wallet->balance($user) : null,
         ]);
     }
 
@@ -120,9 +174,10 @@ class ChatController extends Controller
        ============================================================ */
 
     /**
-     * Try Thaiprompt first (the canonical FB/LINE bot pattern). If it's
-     * unreachable or returns nothing we fall back to the local AiOracle —
-     * juntra's chat NEVER breaks, even when upstream is down.
+     * Try Thaiprompt first (the canonical FB/LINE bot pattern, using the
+     * upstream API-key pool). If it's unreachable or returns nothing we
+     * fall back to the local AiOracle — juntra's chat NEVER breaks, even
+     * when upstream is down.
      */
     private function dispatchToUpstream(Request $request, $user, string $message): string
     {
@@ -144,13 +199,29 @@ class ChatController extends Controller
             return $this->fallback($message);
         }
 
-        $resp = $this->bot->send($user, $sessionId, $message);
+        $resp  = $this->bot->send($user, $sessionId, $message);
         $reply = $resp['reply'] ?? null;
 
         if (!$reply || trim($reply) === '') {
-            Log::warning('Thaiprompt bot returned empty reply — falling back to AiOracle', [
+            // Possible stale upstream session (6h cache TTL on Thaiprompt) —
+            // forget our cached id, start fresh, retry once. After that, fall back.
+            Log::info('Thaiprompt bot returned empty reply — refreshing session and retrying once', [
                 'user_id' => $user->id,
                 'session' => $sessionId,
+            ]);
+            $request->session()->forget('thaiprompt_chat_session');
+            $start = $this->bot->start($user);
+            $newSession = $start['session_id'] ?? null;
+            if ($newSession) {
+                $request->session()->put('thaiprompt_chat_session', $newSession);
+                $resp2 = $this->bot->send($user, $newSession, $message);
+                $reply = $resp2['reply'] ?? null;
+            }
+        }
+
+        if (!$reply || trim($reply) === '') {
+            Log::warning('Thaiprompt bot still empty after retry — falling back to AiOracle', [
+                'user_id' => $user->id,
             ]);
             return $this->fallback($message);
         }
@@ -160,9 +231,6 @@ class ChatController extends Controller
 
     private function fallback(string $message): string
     {
-        // Local heuristic via the existing AiOracle wrapper. This is the
-        // exact behaviour juntra had before this change — preserved as a
-        // safety net.
         return $this->oracle->chat([
             (object) ['role' => 'user', 'content' => $message],
         ]);

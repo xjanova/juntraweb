@@ -1,0 +1,35 @@
+<?php
+
+/**
+ * Per-feature credit cost (THB).
+ *
+ * Admin can override any value via Setting('pricing_<feature>') from the
+ * Filament settings page; if no Setting exists we fall back to these
+ * defaults. Treat 1 credit == 1 THB internally so the wallet UI reads
+ * naturally to Thai users.
+ */
+return [
+    'currency' => env('PRICING_CURRENCY', 'THB'),
+
+    // Tarot
+    'tarot_three'  => env('PRICING_TAROT_THREE', 19),
+    'tarot_celtic' => env('PRICING_TAROT_CELTIC', 99),
+
+    // Other readings
+    'numerology' => env('PRICING_NUMEROLOGY', 9),
+    'palmistry'  => env('PRICING_PALMISTRY', 29),
+    'auspicious' => env('PRICING_AUSPICIOUS', 19),
+
+    // AI chat — debited per outbound user message (the bot reply is free).
+    // Set to 0 to disable per-message billing.
+    'chat_message' => env('PRICING_CHAT_MESSAGE', 2),
+
+    // Top-up
+    'topup_bundles' => [50, 100, 200, 500, 1000, 2000],
+    'min_topup'     => env('PRICING_MIN_TOPUP', 20),
+    'max_topup'     => env('PRICING_MAX_TOPUP', 50000),
+
+    // Static PromptPay info (operator can override via .env or Setting)
+    'promptpay_id'   => env('PROMPTPAY_ID', ''),         // e.g. 0812345678 or 1101700000000
+    'promptpay_name' => env('PROMPTPAY_NAME', ''),
+];

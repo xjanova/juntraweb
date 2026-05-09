@@ -34,6 +34,19 @@
     <div class="pick-status" :class="picked.length === needed ? 'is-complete' : ''">
       <div>
         เลือกแล้ว <strong x-text="picked.length"></strong> / {{ $needed }} ใบ
+        @if (isset($cost))
+          <span style="margin-left:14px;font-family:var(--display);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold)">
+            ค่าบริการ ฿{{ number_format($cost, $cost == intval($cost) ? 0 : 2) }}
+          </span>
+          @if ($balance !== null)
+            <span style="margin-left:8px;font-size:12px;color:var(--ink-dim)">
+              · คงเหลือ ฿{{ number_format($balance, 2) }}
+              @if (bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0)
+                <a href="{{ route('wallet.topup') }}" style="color:#d4a017;margin-left:6px">— เติมเงิน</a>
+              @endif
+            </span>
+          @endif
+        @endif
       </div>
       <button type="button" @click="reset" :disabled="picked.length === 0" class="pick-reset-btn">เลือกใหม่</button>
     </div>
@@ -80,15 +93,21 @@
     <div id="reveal-anchor" style="height:1px"></div>
 
     <div style="margin:48px auto 24px;text-align:center;min-height:80px">
-      <form action="{{ route($targetRoute) }}" method="POST" x-show="picked.length === needed" x-transition.duration.500ms style="display:inline-block">
+      {{-- submitting flag prevents a fast double-click from POSTing twice
+           (which would otherwise debit the wallet and create a reading twice) --}}
+      <form action="{{ route($targetRoute) }}" method="POST" x-show="picked.length === needed" x-transition.duration.500ms style="display:inline-block"
+            x-data="{submitting:false}" @submit="submitting=true">
         @csrf
         <input type="hidden" name="question" value="{{ $question }}">
         <template x-for="id in picked" :key="id">
           <input type="hidden" name="picked[]" :value="id">
         </template>
-        <button type="submit" class="btn btn-primary" style="font-size:14px;padding:20px 44px">
-          เปิดไพ่ทั้ง {{ $needed }} ใบ
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        <button type="submit" class="btn btn-primary" style="font-size:14px;padding:20px 44px"
+                :disabled="submitting"
+                :style="submitting ? 'opacity:.6;cursor:wait' : ''">
+          <span x-show="!submitting">เปิดไพ่ทั้ง {{ $needed }} ใบ</span>
+          <span x-show="submitting">กำลังเปิดไพ่ ⋯</span>
+          <svg x-show="!submitting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </button>
       </form>
 

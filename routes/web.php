@@ -12,6 +12,7 @@ use App\Http\Controllers\NumerologyController;
 use App\Http\Controllers\PalmistryController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\TarotController;
+use App\Http\Controllers\WalletController;
 use Illuminate\Support\Facades\Route;
 
 // Installer wizard — only reachable until storage/app/.installed exists.
@@ -34,13 +35,14 @@ Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
-// Tarot
+// Tarot — paid actions throttled (per-user, see AppServiceProvider) so a
+// rapid double-submit can't double-charge.
 Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::post('/begin', 'begin')->name('begin');                  // step 1 → save spread+question, redirect to pick
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
-    Route::post('/three-card', 'threeCardSpread')->name('three-card');
-    Route::post('/celtic-cross', 'celticCross')->name('celtic-cross');
+    Route::post('/three-card', 'threeCardSpread')->middleware('throttle:reading')->name('three-card');
+    Route::post('/celtic-cross', 'celticCross')->middleware('throttle:reading')->name('celtic-cross');
     Route::get('/result/{reading}', 'show')->name('show');
 });
 
@@ -51,35 +53,50 @@ Route::prefix('horoscope')->name('horoscope.')->controller(HoroscopeController::
     Route::get('/{zodiac:slug}', 'show')->name('show');
 });
 
-// Numerology
+// Numerology — calculate is paid (debits wallet) so per-user throttle applies
 Route::prefix('numerology')->name('numerology.')->controller(NumerologyController::class)->group(function () {
     Route::get('/', 'index')->name('index');
-    Route::post('/calculate', 'calculate')->name('calculate');
+    Route::post('/calculate', 'calculate')->middleware('throttle:reading')->name('calculate');
 });
 
-// Palmistry
+// Palmistry — analyze is paid + AI image upload, throttled per user
 Route::prefix('palmistry')->name('palmistry.')->controller(PalmistryController::class)->group(function () {
     Route::get('/', 'index')->name('index');
-    Route::post('/analyze', 'analyze')->name('analyze');
+    Route::post('/analyze', 'analyze')->middleware('throttle:reading')->name('analyze');
 });
 
-// Auspicious dates
+// Auspicious dates — find is paid + AI advice, throttled per user
 Route::prefix('auspicious')->name('auspicious.')->controller(AuspiciousController::class)->group(function () {
     Route::get('/', 'index')->name('index');
-    Route::post('/find', 'find')->name('find');
+    Route::post('/find', 'find')->middleware('throttle:reading')->name('find');
 });
 
-// AI Chat
+// AI Chat — send is throttled (per-user, named limiter in AppServiceProvider)
+// to prevent burst-debit + upstream abuse.
 Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(function () {
     Route::get('/', 'index')->name('index');
-    Route::post('/send', 'send')->name('send');
-    Route::get('/conversation/{conversation}', 'show')->name('show');
+    Route::post('/send', 'send')->middleware('throttle:chat-send')->name('send');
+    Route::get('/conversation/{conversation}', 'show')
+        ->middleware('auth')
+        ->name('show');
 });
 
 // Account / member area
 Route::middleware('auth')->prefix('account')->name('account.')->group(function () {
     Route::get('/dashboard', [AccountController::class, 'dashboard'])->name('dashboard');
     Route::get('/history', [AccountController::class, 'history'])->name('history');
+    Route::get('/chats',   [AccountController::class, 'chats'])->name('chats');
+});
+
+// Wallet — credit balance, top-up via PromptPay slip, transaction history.
+// Slip uploads live on the private 'local' disk; the slip route streams them
+// back through PHP after verifying the requester is the owner or an admin.
+Route::middleware('auth')->prefix('wallet')->name('wallet.')->controller(WalletController::class)->group(function () {
+    Route::get('/',                   'index')->name('index');
+    Route::get('/topup',              'topupForm')->name('topup');
+    Route::post('/topup',             'topupSubmit')->middleware('throttle:topup')->name('topup.submit');
+    Route::get('/topup/{tx}',         'topupShow')->name('topup.show');
+    Route::get('/topup/{tx}/slip',    'topupSlip')->name('topup.slip');
 });
 
 // MLM dashboard — reads canonical data from Thaiprompt-Affiliate via OAuth bearer.

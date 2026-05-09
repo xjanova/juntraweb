@@ -23,6 +23,21 @@
       </p>
     </div>
 
+    @if ($gate['allowed'] && $balance !== null && $cost > 0)
+      @php $low = bccomp(number_format($balance, 2, '.', ''), number_format($cost * 5, 2, '.', ''), 2) < 0; @endphp
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 20px;border:1px solid {{ $low ? 'rgba(212,160,23,.6)' : 'var(--line-soft)' }};border-radius:14px;margin-bottom:18px;background:{{ $low ? 'rgba(212,160,23,.08)' : 'rgba(244,207,106,.04)' }};font-size:13px;flex-wrap:wrap">
+        <div>
+          <span style="font-family:var(--display);letter-spacing:.18em;text-transform:uppercase;font-size:11px;color:var(--gold);margin-right:10px">เครดิต</span>
+          <strong style="font-family:var(--display);color:var(--gold);font-size:16px">฿{{ number_format($balance, 2) }}</strong>
+          <span style="color:var(--ink-dim);margin-left:10px">หักครั้งละ ฿{{ number_format($cost, $cost == intval($cost) ? 0 : 2) }} ต่อข้อความ</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          @if ($low)<span style="color:#d4a017;font-size:12px">เครดิตเหลือน้อย</span>@endif
+          <a href="{{ route('wallet.topup') }}" class="btn btn-ghost" style="padding:6px 16px;font-size:12px">เติมเงิน</a>
+        </div>
+      </div>
+    @endif
+
     @unless ($gate['allowed'])
       <div class="flash" style="text-align:center;padding:28px 32px;margin-bottom:24px">
         <div class="eyebrow" style="display:inline-flex;margin-bottom:14px">
@@ -151,6 +166,23 @@ document.addEventListener('alpine:init', () => {
           body: JSON.stringify({ message: text }),
         });
         const j = await r.json();
+
+        // 402 = insufficient funds. Show the explanation as a bubble and
+        // bounce the user to the top-up page so they don't have to hunt
+        // for the "เติมเงิน" button in the banner.
+        if (r.status === 402) {
+          const msg = j.error || 'เครดิตไม่พอ — กำลังพาไปหน้าเติมเงิน';
+          this.appendBubble('assistant', msg);
+          setTimeout(() => { window.location.href = @js(route('wallet.topup')); }, 1500);
+          return;
+        }
+
+        // 429 = rate-limited. Tell the user to slow down.
+        if (r.status === 429) {
+          this.appendBubble('assistant', 'พิมพ์เร็วเกินไปนะคะ ลูก — รอสักครู่แล้วลองใหม่อีกครั้ง');
+          return;
+        }
+
         this.appendBubble('assistant', r.ok ? (j.reply || 'แม่หมอกำลังพักสายตา · ลองใหม่อีกครั้งนะคะ') : (j.error || 'ระบบขัดข้องชั่วคราว'));
       } catch (e) {
         this.appendBubble('assistant', 'เครือข่ายมีปัญหา · ลองใหม่อีกครั้งนะคะ');

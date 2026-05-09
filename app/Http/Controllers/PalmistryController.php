@@ -2,43 +2,85 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\InsufficientFundsException;
 use App\Models\Reading;
 use App\Services\AiOracle;
+use App\Services\Wallet\WalletService;
+use App\Support\Pricing;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class PalmistryController extends Controller
 {
+    public function __construct(private WalletService $wallet) {}
+
     public function index()
     {
-        return view('pages.palmistry.index');
+        return view('pages.palmistry.index', [
+            'cost' => Pricing::for('palmistry'),
+        ]);
     }
 
     public function analyze(Request $request, AiOracle $oracle)
     {
         $request->validate([
-            'image' => 'required|image|max:4096',
+            'image'    => 'required|image|max:4096',
             'question' => 'nullable|string|max:500',
         ]);
 
-        $path = $request->file('image')->store('palmistry', 'public');
-        $absolute = storage_path('app/public/' . $path);
+        if (!$request->user()) {
+            return redirect()->route('login')->with('status', 'กรุณาเข้าสู่ระบบเพื่อใช้บริการดูลายมือ');
+        }
 
-        $analysis = $oracle->analyzePalmImage($absolute, $request->input('question'));
+        $cost = Pricing::for('palmistry');
+        $tx = null;
+        if ($cost > 0) {
+            try {
+                $tx = $this->wallet->debit($request->user(), $cost, 'ดูลายมือ AI', [
+                    'reference_type' => 'reading',
+                ]);
+            } catch (InsufficientFundsException $e) {
+                return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงิน');
+            }
+        }
 
-        $reading = Reading::create([
-            'user_id' => $request->user()?->id,
-            'session_token' => Str::uuid()->toString(),
-            'type' => 'palmistry',
-            'question' => $request->input('question'),
-            'payload' => ['image_path' => $path],
-            'result' => $analysis,
-            'ai_provider' => $oracle->provider(),
-            'ai_model' => $oracle->model(),
-        ]);
+        try {
+            $path     = $request->file('image')->store('palmistry', 'public');
+            $absolute = storage_path('app/public/' . $path);
+
+            $analysis = $oracle->analyzePalmImage($absolute, $request->input('question'));
+
+            $reading = Reading::create([
+                'user_id'       => $request->user()->id,
+                'session_token' => Str::uuid()->toString(),
+                'type'          => 'palmistry',
+                'question'      => $request->input('question'),
+                'payload'       => ['image_path' => $path, 'cost' => $cost],
+                'result'        => $analysis,
+                'ai_provider'   => $oracle->provider(),
+                'ai_model'      => $oracle->model(),
+            ]);
+
+            if ($tx) {
+                $tx->update(['reference_id' => $reading->id]);
+            }
+        } catch (\Throwable $e) {
+            Log::error('Palmistry reading failed after debit — refunding', [
+                'user_id' => $request->user()->id, 'tx_id' => $tx?->id, 'err' => $e->getMessage(),
+            ]);
+            if ($tx) {
+                try { $this->wallet->refund($tx, 'ระบบขัดข้องระหว่างวิเคราะห์ลายมือ'); }
+                catch (\Throwable $refundErr) {
+                    Log::critical('Refund FAILED — manual intervention needed', ['tx_id' => $tx->id, 'err' => $refundErr->getMessage()]);
+                }
+            }
+            return redirect()->route('palmistry.index')
+                ->with('status', 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนแล้ว กรุณาลองใหม่');
+        }
 
         return view('pages.palmistry.result', [
-            'reading' => $reading,
+            'reading'   => $reading,
             'image_url' => asset('storage/' . $path),
         ]);
     }

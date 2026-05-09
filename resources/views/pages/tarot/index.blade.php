@@ -19,6 +19,9 @@
           <div>
             <div style="font-family:var(--display);letter-spacing:.18em;color:var(--gold);font-size:13px;text-transform:uppercase">3 ใบ · อดีต ปัจจุบัน อนาคต</div>
             <div style="font-size:13px;color:var(--ink-dim);margin-top:4px">เร็วที่สุด เหมาะกับคำถามตรง ๆ ใช้เวลา 3 นาที</div>
+            @if (isset($priceThree))
+              <div style="font-family:var(--display);font-size:11px;color:var(--gold);letter-spacing:.18em;margin-top:6px">฿{{ number_format($priceThree, $priceThree == intval($priceThree) ? 0 : 2) }} / ครั้ง</div>
+            @endif
           </div>
         </label>
         <label style="display:flex;gap:14px;padding:18px 20px;border:1px solid var(--line-soft);border-radius:14px;cursor:pointer;align-items:center" :style="spread==='celtic' ? 'border-color:var(--gold);background:rgba(244,207,106,.08)' : ''">
@@ -26,6 +29,9 @@
           <div>
             <div style="font-family:var(--display);letter-spacing:.18em;color:var(--gold);font-size:13px;text-transform:uppercase">Celtic Cross · 10 ใบ</div>
             <div style="font-size:13px;color:var(--ink-dim);margin-top:4px">ลึก ครบ 360° วิเคราะห์ทั้งภายในและภายนอก</div>
+            @if (isset($priceCeltic))
+              <div style="font-family:var(--display);font-size:11px;color:var(--gold);letter-spacing:.18em;margin-top:6px">฿{{ number_format($priceCeltic, $priceCeltic == intval($priceCeltic) ? 0 : 2) }} / ครั้ง</div>
+            @endif
           </div>
         </label>
       </div>

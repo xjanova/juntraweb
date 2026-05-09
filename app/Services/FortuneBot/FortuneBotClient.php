@@ -9,24 +9,29 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * HTTP wrapper around Thaiprompt's "Mae Mor Chantra" web/mobile chat API.
+ * HTTP wrapper around Thaiprompt's "Mae Mor Chantra" web/mobile chat API
+ * AND its tarot-interpretation endpoint. Both ride on the same upstream
+ * API-key pool that powers the Facebook Messenger / LINE bots, so juntra
+ * users get identical persona + AI quality and juntra holds NO API keys
+ * for AI providers — all key rotation, sensitive-mode detection, billing,
+ * etc. happen upstream.
  *
+ * Endpoints consumed:
  *   POST /api/v1/juntra/chat/mae-mor/start         → {data: {session_id, greeting}}
  *   POST /api/v1/juntra/chat/mae-mor/send          → {data: {session_id, reply, ai_provider}}
- *   GET  /api/v1/juntra/chat/mae-mor/sessions/{id} → {data: {history: [...]}}
+ *   POST /api/v1/juntra/fortune/tarot/interpret    → {data: {interpretation, ai_provider, ai_model}}
  *
- * The remote endpoints reuse the exact same FortuneAIService chat path that
- * powers the Facebook Messenger bot, so juntra users get identical
- * persona + AI quality. juntra holds NO API keys for AI providers — all
- * key rotation, sensitive-mode detection, billing, etc. happen upstream.
+ * If the dedicated tarot endpoint is not yet deployed upstream, we fall
+ * back to running the tarot prompt through the chat pipeline — same pool,
+ * same quality, just a slightly less structured response shape.
  */
 class FortuneBotClient
 {
-    /** Start a new conversation. Returns ['session_id' => str, 'greeting' => str] or null on failure. */
+    /** Start a new chat conversation. */
     public function start(User $user): ?array
     {
         try {
-            $resp = $this->client($user)->post($this->url('/start'));
+            $resp = $this->client($user)->post($this->chatUrl('/start'));
             if (!$resp->successful()) {
                 Log::warning('FortuneBotClient::start failed', ['status' => $resp->status(), 'body' => $resp->body()]);
                 return null;
@@ -43,7 +48,7 @@ class FortuneBotClient
     public function send(User $user, string $sessionId, string $text): ?array
     {
         try {
-            $resp = $this->client($user)->post($this->url('/send'), [
+            $resp = $this->client($user)->post($this->chatUrl('/send'), [
                 'session_id' => $sessionId,
                 'text'       => $text,
             ]);
@@ -59,29 +64,120 @@ class FortuneBotClient
         }
     }
 
-    /** True if the upstream Thaiprompt chat endpoints are configured + reachable. */
-    public function isAvailable(User $user): bool
+    /**
+     * Interpret a tarot spread via Thaiprompt's API pool.
+     * Tries the dedicated endpoint first; falls back to a chat-piped
+     * tarot prompt when the endpoint is not available (404 / 405).
+     *
+     * Returns ['interpretation' => str, 'ai_provider' => str, 'ai_model' => str] or null.
+     */
+    public function interpretTarot(User $user, array $payload): ?array
     {
-        if (empty($user->thaiprompt_token)) {
+        try {
+            $resp = $this->client($user)->post($this->fortuneUrl('/tarot/interpret'), $payload);
+            if ($resp->successful()) {
+                $data = $resp->json('data');
+                if (is_array($data) && !empty($data['interpretation'])) {
+                    return $data;
+                }
+            }
+            // 404/405 → endpoint not deployed yet; 422 → bad payload; anything else → log + fall through
+            if (!in_array($resp->status(), [404, 405], true)) {
+                Log::info('FortuneBotClient::interpretTarot non-200, falling back to chat pipeline', [
+                    'status' => $resp->status(),
+                    'body'   => mb_substr((string) $resp->body(), 0, 400),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('FortuneBotClient::interpretTarot threw — falling back to chat', ['err' => $e->getMessage()]);
+        }
+
+        return $this->interpretViaChat($user, $payload);
+    }
+
+    /** True if the upstream Thaiprompt endpoints are configured + reachable. */
+    public function isAvailable(?User $user): bool
+    {
+        if (!$user || empty($user->thaiprompt_token)) {
             return false;
         }
-        $base = (string) Setting::get('thaiprompt_base_url');
-        return $base !== '';
+        return $this->base() !== '';
     }
 
     /* ============================================================
        INTERNAL
        ============================================================ */
 
-    private function url(string $suffix): string
+    /** Run a tarot prompt through the chat pipeline as a one-shot. */
+    private function interpretViaChat(User $user, array $payload): ?array
     {
-        $base = rtrim((string) Setting::get('thaiprompt_base_url', 'https://thaiprompt.com'), '/');
-        return $base . '/api/v1/juntra/chat/mae-mor' . $suffix;
+        if (!$this->isAvailable($user)) {
+            return null;
+        }
+        $start = $this->start($user);
+        $sessionId = $start['session_id'] ?? null;
+        if (!$sessionId) {
+            return null;
+        }
+        $resp = $this->send($user, $sessionId, $this->buildTarotPrompt($payload));
+        if (!$resp || empty($resp['reply'])) {
+            return null;
+        }
+        return [
+            'interpretation' => $resp['reply'],
+            'ai_provider'    => $resp['ai_provider'] ?? 'thaiprompt',
+            'ai_model'       => 'pool',
+        ];
+    }
+
+    private function buildTarotPrompt(array $payload): string
+    {
+        $spreadName = match ($payload['spread'] ?? '') {
+            'tarot_celtic' => 'Celtic Cross 10 ใบ',
+            'tarot_three'  => 'ไพ่ 3 ใบ (อดีต-ปัจจุบัน-อนาคต)',
+            default        => 'ไพ่ยิปซี',
+        };
+
+        $lines = ['ขอคำพยากรณ์จากการเปิดไพ่ยิปซีในโหมดพรีเมียมดังต่อไปนี้:'];
+        if (!empty($payload['question'])) {
+            $lines[] = 'คำถามของลูกค้า: ' . $payload['question'];
+        }
+        $lines[] = 'รูปแบบการเปิดไพ่: ' . $spreadName;
+        $lines[] = 'ไพ่ที่เปิดได้ตามลำดับตำแหน่ง:';
+        foreach (($payload['cards'] ?? []) as $c) {
+            $dir = !empty($c['reversed']) ? 'กลับหัว' : 'ตั้งตรง';
+            $lines[] = sprintf(
+                ' %d. [%s] %s (%s) — %s',
+                $c['position'] ?? 0,
+                $c['position_label'] ?? '',
+                $c['name_th'] ?? ($c['name_en'] ?? ''),
+                $dir,
+                $c['meaning'] ?? '',
+            );
+        }
+        $lines[] = '';
+        $lines[] = 'กรุณาวิเคราะห์ภาพรวม 4-6 ย่อหน้า ภาษาไทยล้วน เป็นกันเอง ไม่ขู่ และปิดท้ายด้วยคำแนะนำเชิงสร้างสรรค์';
+        return implode("\n", $lines);
+    }
+
+    private function chatUrl(string $suffix): string
+    {
+        return $this->base() . '/api/v1/juntra/chat/mae-mor' . $suffix;
+    }
+
+    private function fortuneUrl(string $suffix): string
+    {
+        return $this->base() . '/api/v1/juntra/fortune' . $suffix;
+    }
+
+    private function base(): string
+    {
+        return rtrim((string) Setting::get('thaiprompt_base_url', 'https://thaiprompt.com'), '/');
     }
 
     private function client(User $user): PendingRequest
     {
-        // Tight timeouts so the chat UI never hangs more than ~12s
+        // Tight timeouts so the chat UI never hangs more than ~22s
         // when upstream is unreachable. Single try (no retry storm).
         return Http::acceptJson()
             ->withToken((string) $user->thaiprompt_token)

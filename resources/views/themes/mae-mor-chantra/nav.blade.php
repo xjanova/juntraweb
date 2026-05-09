@@ -16,6 +16,7 @@
   </div>
   @auth
     <div style="display:flex;gap:10px;align-items:center">
+      <a href="{{ route('wallet.index') }}" class="nav-cta" style="border-color:var(--line);color:var(--gold)">วอลเลต</a>
       <a href="{{ route('account.dashboard') }}" class="nav-cta" style="border-color:var(--line);color:var(--ink-dim)">บัญชีของฉัน</a>
       <form method="POST" action="{{ route('logout') }}">@csrf<button class="nav-cta">ออกจากระบบ</button></form>
     </div>

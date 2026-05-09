@@ -2,17 +2,19 @@
 
 namespace App\Models;
 
+use App\Casts\EncryptedString;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, HasApiTokens, Notifiable;
 
     protected $fillable = [
         'name',
@@ -39,6 +41,10 @@ class User extends Authenticatable implements FilamentUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'thaiprompt_synced_at' => 'datetime',
+            // Stored encrypted at rest — bearer token grants access to upstream
+            // Thaiprompt account. Custom cast tolerates legacy plaintext rows
+            // (the next save() rewrites them encrypted).
+            'thaiprompt_token' => EncryptedString::class,
         ];
     }
 

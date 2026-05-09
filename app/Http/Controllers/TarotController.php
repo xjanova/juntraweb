@@ -2,18 +2,29 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\InsufficientFundsException;
 use App\Models\Reading;
 use App\Models\TarotCard;
-use App\Services\AiOracle;
+use App\Services\FortuneBot\FortuneAiService;
+use App\Services\Wallet\WalletService;
+use App\Support\Pricing;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class TarotController extends Controller
 {
+    public function __construct(
+        private FortuneAiService $ai,
+        private WalletService $wallet,
+    ) {}
+
     public function index()
     {
         return view('pages.tarot.index', [
-            'cards' => TarotCard::where('active', true)->get(),
+            'cards'        => TarotCard::where('active', true)->get(),
+            'priceThree'   => Pricing::for('tarot_three'),
+            'priceCeltic'  => Pricing::for('tarot_celtic'),
         ]);
     }
 
@@ -52,16 +63,20 @@ class TarotController extends Controller
             ->inRandomOrder()
             ->get(['id', 'slug', 'name_th']);
 
+        $type = $sess['spread'] === 'celtic' ? 'tarot_celtic' : 'tarot_three';
+
         return view('pages.tarot.pick', [
-            'cards'    => $cards,
-            'needed'   => $needed,
-            'spread'   => $sess['spread'],
-            'question' => $sess['question'],
+            'cards'       => $cards,
+            'needed'      => $needed,
+            'spread'      => $sess['spread'],
+            'question'    => $sess['question'],
             'targetRoute' => $sess['spread'] === 'celtic' ? 'tarot.celtic-cross' : 'tarot.three-card',
+            'cost'        => Pricing::for($type),
+            'balance'     => $request->user() ? $this->wallet->balance($request->user()) : null,
         ]);
     }
 
-    public function threeCardSpread(Request $request, AiOracle $oracle)
+    public function threeCardSpread(Request $request)
     {
         $data = $request->validate([
             'question' => 'nullable|string|max:500',
@@ -72,10 +87,10 @@ class TarotController extends Controller
         $cards = $this->resolvePickedCards($data['picked'] ?? null, 3);
         $positions = ['อดีต', 'ปัจจุบัน', 'อนาคต'];
 
-        return $this->createReading($request, 'tarot_three', $cards, $positions, $oracle);
+        return $this->createReading($request, 'tarot_three', $cards, $positions);
     }
 
-    public function celticCross(Request $request, AiOracle $oracle)
+    public function celticCross(Request $request)
     {
         $data = $request->validate([
             'question' => 'nullable|string|max:500',
@@ -100,7 +115,7 @@ class TarotController extends Controller
             'ผลลัพธ์สุดท้าย',
         ];
 
-        return $this->createReading($request, 'tarot_celtic', $cards, $positions, $oracle);
+        return $this->createReading($request, 'tarot_celtic', $cards, $positions);
     }
 
     /**
@@ -126,34 +141,85 @@ class TarotController extends Controller
             : TarotCard::where('active', true)->inRandomOrder()->limit($needed)->get();
     }
 
-    private function createReading(Request $request, string $type, $cards, array $positions, AiOracle $oracle)
+    private function createReading(Request $request, string $type, $cards, array $positions)
     {
-        // consume the session pick state — we're done with it
-        $request->session()->forget('tarot_pick');
-
-        $reading = Reading::create([
-            'user_id' => $request->user()?->id,
-            'session_token' => Str::uuid()->toString(),
-            'type' => $type,
-            'question' => $request->input('question'),
-            'payload' => ['positions' => $positions],
-        ]);
-
-        foreach ($cards as $i => $card) {
-            $reversed = (bool) random_int(0, 1);
-            $reading->tarotCards()->create([
-                'tarot_card_id' => $card->id,
-                'position' => $i + 1,
-                'position_label' => $positions[$i] ?? "ตำแหน่ง " . ($i + 1),
-                'reversed' => $reversed,
-            ]);
+        $user = $request->user();
+        if (!$user) {
+            return redirect()->route('login')
+                ->with('status', 'กรุณาเข้าสู่ระบบเพื่อเปิดไพ่ — เครดิตจะถูกหักจากวอลเลตของคุณ');
         }
 
-        $reading->load('tarotCards.card');
-        $reading->result = $oracle->interpretTarotReading($reading);
-        $reading->ai_provider = $oracle->provider();
-        $reading->ai_model = $oracle->model();
-        $reading->save();
+        $cost = Pricing::for($type);
+
+        // Reserve credit BEFORE we touch the AI, so a failed reading doesn't
+        // leak server resources and a successful one always has a paired tx.
+        // If insufficient, bounce to /wallet so the user can top up — their
+        // session pick state is preserved so they can retry after.
+        try {
+            $tx = $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . ($positions[0] ?? '') . ' (' . $type . ')', [
+                'reference_type' => 'reading',
+                'method'         => 'system',
+            ]);
+        } catch (InsufficientFundsException $e) {
+            return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต');
+        }
+
+        // Consume the session pick state — we're committed now.
+        $request->session()->forget('tarot_pick');
+
+        // From here on, ANY failure (DB error, AI throw, etc.) must roll back
+        // the debit by issuing a refund row — otherwise the user is charged
+        // for a reading they never received. Every catch path must refund.
+        try {
+            $reading = Reading::create([
+                'user_id'       => $user->id,
+                'session_token' => Str::uuid()->toString(),
+                'type'          => $type,
+                'question'      => $request->input('question'),
+                'payload'       => [
+                    'positions'    => $positions,
+                    'cost'         => $cost,
+                    'wallet_tx_id' => $tx->id,
+                ],
+            ]);
+
+            foreach ($cards as $i => $card) {
+                $reversed = (bool) random_int(0, 1);
+                $reading->tarotCards()->create([
+                    'tarot_card_id'  => $card->id,
+                    'position'       => $i + 1,
+                    'position_label' => $positions[$i] ?? "ตำแหน่ง " . ($i + 1),
+                    'reversed'       => $reversed,
+                ]);
+            }
+
+            $reading->load('tarotCards.card');
+            $aiResult = $this->ai->interpretTarot($reading, $user);
+            $reading->result      = $aiResult['text'];
+            $reading->ai_provider = $aiResult['provider'];
+            $reading->ai_model    = $aiResult['model'];
+            $reading->save();
+
+            // Link the wallet transaction back to the reading (audit trail).
+            $tx->update(['reference_id' => $reading->id]);
+        } catch (\Throwable $e) {
+            Log::error('Tarot reading creation failed after debit — refunding', [
+                'user_id' => $user->id,
+                'tx_id'   => $tx->id,
+                'type'    => $type,
+                'err'     => $e->getMessage(),
+            ]);
+            try {
+                $this->wallet->refund($tx, 'ระบบขัดข้องระหว่างเปิดไพ่');
+            } catch (\Throwable $refundErr) {
+                Log::critical('Refund FAILED after reading failure — manual intervention needed', [
+                    'tx_id' => $tx->id,
+                    'err'   => $refundErr->getMessage(),
+                ]);
+            }
+            return redirect()->route('tarot.index')
+                ->with('status', 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนเข้าวอลเลตแล้ว กรุณาลองใหม่อีกครั้ง');
+        }
 
         return redirect()->route('tarot.show', $reading);
     }
@@ -163,6 +229,15 @@ class TarotController extends Controller
         if (!in_array($reading->type, ['tarot_three', 'tarot_celtic'])) {
             abort(404);
         }
+
+        // Privacy: only the owner (or admin, or a public-shared reading) can view.
+        $user = request()->user();
+        $isOwner = $user && $reading->user_id === $user->id;
+        $isAdmin = $user && method_exists($user, 'isAdmin') && $user->isAdmin();
+        if (!$reading->shared_public && !$isOwner && !$isAdmin) {
+            abort(403);
+        }
+
         $reading->load('tarotCards.card');
         return view('pages.tarot.result', compact('reading'));
     }

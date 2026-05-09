@@ -14,6 +14,7 @@
     <a href="{{ route('auspicious.index') }}">ฤกษ์ยาม</a>
     <a href="{{ route('chat.index') }}">AI ทำนาย</a>
     @auth
+      <a href="{{ route('wallet.index') }}">วอลเลต</a>
       <a href="{{ route('account.dashboard') }}">บัญชี</a>
       <form method="POST" action="{{ route('logout') }}" style="display:inline">@csrf<button class="nav-cta">ออกจากระบบ</button></form>
     @else
