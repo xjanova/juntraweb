@@ -31,6 +31,12 @@ Route::middleware('block.installed')->prefix('install')->name('install.')->group
 Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
     Route::get('/redirect', [ThaipromptController::class, 'redirect'])->name('redirect');
     Route::get('/callback', [ThaipromptController::class, 'callback'])->name('callback');
+    // Mobile bootstrap — Juntra Flutter app passes its Sanctum bearer
+    // token to establish the web session for the right user, then
+    // forwards into the normal /redirect flow. The session is tagged
+    // so the callback ends on a "Return to app" success page instead
+    // of redirecting to /dashboard (mobile users don't want the web).
+    Route::get('/mobile-start', [ThaipromptController::class, 'mobileStart'])->name('mobile-start');
 });
 
 Route::get('/', [HomeController::class, 'index'])->name('home');

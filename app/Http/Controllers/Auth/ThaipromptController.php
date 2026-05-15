@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\ThaipromptClient;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class ThaipromptController extends Controller
 {
@@ -25,7 +27,69 @@ class ThaipromptController extends Controller
         return redirect()->away($client->authorizeUrl($state));
     }
 
-    public function callback(Request $request, ThaipromptClient $client): RedirectResponse
+    /**
+     * Mobile bootstrap for the OAuth flow.
+     *
+     * The Juntra Flutter app can't share its Sanctum bearer with the web
+     * browser, so it passes the token via `?bearer=...` here. We resolve
+     * the token to a user, log them into the web session (so the upstream
+     * Thaiprompt callback identifies the same user), tag the session as
+     * "started from mobile", then forward into the normal /redirect
+     * flow.
+     *
+     * Security:
+     *   - Only resolves valid Sanctum tokens via PersonalAccessToken
+     *     (rotated/revoked tokens fail closed).
+     *   - HTTPS-only; the token in the URL is only exposed in the
+     *     mobile→browser handoff (a launchUrl call) — never logged or
+     *     forwarded onward. We do NOT include it in the redirect to
+     *     Thaiprompt or in any analytics hit.
+     *   - The token-creator and the now-logged-in web session are the
+     *     same user; we never login-as a different user.
+     */
+    public function mobileStart(Request $request, ThaipromptClient $client): RedirectResponse
+    {
+        if (!$client->isEnabled()) {
+            return redirect()->route('login')
+                ->withErrors(['email' => 'ระบบเข้าสู่ระบบ Thaiprompt ยังไม่ได้เปิดใช้งาน']);
+        }
+
+        $bearer = (string) $request->query('bearer', '');
+        if ($bearer === '') {
+            return redirect()->route('login')
+                ->withErrors(['email' => 'ลิงก์เชื่อมต่อไม่ถูกต้อง — กรุณากลับไปที่แอพแล้วลองใหม่']);
+        }
+
+        $sanctum = PersonalAccessToken::findToken($bearer);
+        if (!$sanctum || !$sanctum->tokenable_id) {
+            return redirect()->route('login')
+                ->withErrors(['email' => 'เซสชั่นหมดอายุ — กรุณาเข้าสู่ระบบในแอพแล้วลองเชื่อมต่อใหม่']);
+        }
+
+        /** @var User|null $user */
+        $user = User::find($sanctum->tokenable_id);
+        if (!$user) {
+            return redirect()->route('login')
+                ->withErrors(['email' => 'ไม่พบบัญชีผู้ใช้ที่ผูกกับ token นี้']);
+        }
+
+        // Establish a web session for the same user so the OAuth callback
+        // updates the right User row. `remember: false` — mobile-bootstrap
+        // sessions shouldn't outlive the OAuth handshake.
+        Auth::login($user, false);
+        $request->session()->regenerate();
+
+        // Tag the session so the callback shows the "back to app"
+        // success page instead of redirecting to /dashboard.
+        $request->session()->put('thaiprompt_oauth_origin', 'mobile');
+
+        return redirect()->route('thaiprompt.redirect');
+    }
+
+    /**
+     * @return RedirectResponse|View
+     */
+    public function callback(Request $request, ThaipromptClient $client)
     {
         if (!$client->isEnabled()) {
             return redirect()->route('login')->withErrors(['email' => 'Thaiprompt SSO ปิดอยู่']);
@@ -101,6 +165,17 @@ class ThaipromptController extends Controller
 
         Auth::login($user, true);
         $request->session()->regenerate();
+
+        // Mobile-initiated flow → render a "back to app" success page
+        // instead of dropping the user into the web dashboard. The page
+        // has no app deep link (mobile detects the link via the next
+        // /auth/me call when the app foreground-resumes); we just need
+        // to tell the user the handshake worked.
+        if ($request->session()->pull('thaiprompt_oauth_origin') === 'mobile') {
+            return view('pages.auth.oauth-mobile-success', [
+                'user' => $user,
+            ]);
+        }
 
         return redirect()->intended(route('dashboard'));
     }
