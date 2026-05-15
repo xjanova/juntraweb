@@ -62,9 +62,14 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
                 ->middleware('throttle:chat-send')->name('conversations.send');
         });
 
-        // Reading history (tarot / numerology / palmistry / auspicious)
+        // Reading history (tarot / numerology / palmistry / auspicious).
+        // POST shares the `reading` 6/min/user rate-limit bucket defined
+        // in AppServiceProvider — same protection against rapid-fire
+        // wallet drain that the web TarotController relies on.
         Route::prefix('history')->name('history.')->group(function () {
             Route::get('readings',           [HistoryController::class, 'index'])->name('index');
+            Route::post('readings',          [HistoryController::class, 'store'])
+                ->middleware('throttle:reading')->name('store');
             Route::get('readings/{reading}', [HistoryController::class, 'show'])->name('show');
         });
     });
