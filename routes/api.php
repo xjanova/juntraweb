@@ -45,13 +45,18 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('auth/me',     [AuthController::class, 'me'])->name('auth.me');
         Route::post('auth/logout',[AuthController::class, 'logout'])->name('auth.logout');
 
-        // Wallet — balance, history, top-up start
+        // Wallet — balance, history, top-up start + native slip upload.
+        // The slip POST goes through the same `topup` 10/min/user bucket
+        // as the initiate call — mobile re-uploads from a flaky network
+        // are common, but 10/min is plenty.
         Route::prefix('wallet')->name('wallet.')->group(function () {
             Route::get('/',                   [WalletController::class, 'index'])->name('index');
             Route::get('transactions',        [WalletController::class, 'transactions'])->name('transactions');
             Route::post('topup/promptpay',    [WalletController::class, 'topupPromptPay'])
                 ->middleware('throttle:topup')->name('topup.promptpay');
             Route::get('topup/{tx}',          [WalletController::class, 'topupShow'])->name('topup.show');
+            Route::post('topup/{tx}/slip',    [WalletController::class, 'topupUploadSlip'])
+                ->middleware('throttle:topup')->name('topup.slip');
         });
 
         // Mae Mor AI Chat — conversations + send
