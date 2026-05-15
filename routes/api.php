@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChatController;
 use App\Http\Controllers\Api\V1\HistoryController;
+use App\Http\Controllers\Api\V1\MlmController;
 use App\Http\Controllers\Api\V1\WalletController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -60,6 +61,17 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('conversations/{conversation}',    [ChatController::class, 'show'])->name('conversations.show');
             Route::post('conversations/{conversation}/send', [ChatController::class, 'send'])
                 ->middleware('throttle:chat-send')->name('conversations.send');
+        });
+
+        // MLM dashboard — wraps the upstream Thaiprompt /juntra/mlm/*
+        // endpoints via the user's thaiprompt_token. Returns 403 with
+        // `thaiprompt_not_linked` when the user hasn't completed OAuth
+        // SSO yet, so the Flutter affiliate screen can show a "link
+        // account" CTA instead of an empty dashboard.
+        Route::prefix('mlm')->name('mlm.')->group(function () {
+            Route::get('stats',       [MlmController::class, 'stats'])->name('stats');
+            Route::get('tree',        [MlmController::class, 'tree'])->name('tree');
+            Route::get('commissions', [MlmController::class, 'commissions'])->name('commissions');
         });
 
         // Reading history (tarot / numerology / palmistry / auspicious).
