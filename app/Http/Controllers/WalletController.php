@@ -18,9 +18,29 @@ class WalletController extends Controller
     {
         $user   = $request->user();
         $wallet = $this->wallet->getOrCreate($user);
-        $tx     = WalletTransaction::where('user_id', $user->id)
-            ->latest()
-            ->paginate(20);
+
+        // Filters: type ∈ {topup, debit, refund, adjustment}, status ∈ all
+        // wallet statuses, from/to are inclusive date bounds (Y-m-d).
+        $type   = $request->input('type');
+        $status = $request->input('status');
+        $from   = $request->input('from');
+        $to     = $request->input('to');
+
+        $query = WalletTransaction::where('user_id', $user->id);
+        if (in_array($type,   ['topup', 'debit', 'refund', 'adjustment'], true)) {
+            $query->where('type', $type);
+        }
+        if (in_array($status, ['pending', 'success', 'failed', 'refunded'], true)) {
+            $query->where('status', $status);
+        }
+        if ($from) {
+            try { $query->where('created_at', '>=', \Carbon\Carbon::parse($from)->startOfDay()); } catch (\Throwable) {}
+        }
+        if ($to) {
+            try { $query->where('created_at', '<=', \Carbon\Carbon::parse($to)->endOfDay()); } catch (\Throwable) {}
+        }
+
+        $tx = $query->latest()->paginate(20)->withQueryString();
 
         return view('pages.wallet.index', [
             'wallet'      => $wallet,
@@ -29,6 +49,25 @@ class WalletController extends Controller
             'pricing'     => collect(Pricing::labels())->mapWithKeys(
                 fn ($label, $key) => [$key => Pricing::for($key)]
             ),
+            'filters'     => compact('type', 'status', 'from', 'to'),
+        ]);
+    }
+
+    /** List of top-up requests with their status — focused on PromptPay slip flow. */
+    public function topups(Request $request)
+    {
+        $user = $request->user();
+        $tx = WalletTransaction::where('user_id', $user->id)
+            ->where('type', 'topup')
+            ->latest()
+            ->paginate(20);
+
+        $pendingCount = WalletTransaction::where('user_id', $user->id)
+            ->where('type', 'topup')->where('status', 'pending')->count();
+
+        return view('pages.wallet.topups', [
+            'topups'       => $tx,
+            'pendingCount' => $pendingCount,
         ]);
     }
 

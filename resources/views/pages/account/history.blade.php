@@ -13,18 +13,16 @@
   ];
 @endphp
 
-<section class="canvas" style="padding-top:160px">
-  <div style="max-width:880px;margin:0 auto">
+<section class="canvas" style="padding-top:120px">
+  <div class="account-shell">
+    @include('partials.account-sidebar', ['active' => 'history'])
+
+    <div class="account-content">
     <div class="eyebrow">ประวัติของฉัน</div>
-    <h2 style="font-family:var(--serif);font-size:clamp(40px,5vw,68px);font-weight:400"><em style="color:var(--gold)">บันทึก</em> ดวงชะตา</h2>
-    <p class="lede" style="margin:14px 0 0;color:var(--ink-dim)">เก็บไว้ทุกครั้งที่เปิดไพ่หรือดูดวง — ย้อนกลับไปอ่านได้ตลอด</p>
+    <h2 style="font-family:var(--serif);font-size:clamp(32px,4vw,52px);font-weight:400;margin:8px 0 12px"><em style="color:var(--gold)">บันทึก</em> ดวงชะตา</h2>
+    <p class="lede" style="margin:0 0 24px;color:var(--ink-dim);max-width:640px">เก็บไว้ทุกครั้งที่เปิดไพ่หรือดูดวง — ย้อนกลับไปอ่านได้ตลอด</p>
 
-    <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
-      <a href="{{ route('account.chats') }}" class="btn btn-ghost">ดูประวัติการสนทนา →</a>
-      <a href="{{ route('wallet.index') }}" class="btn btn-ghost">วอลเลต</a>
-    </div>
-
-    <div style="display:grid;gap:14px;margin-top:32px">
+    <div style="display:grid;gap:14px">
       @forelse ($readings as $r)
         <div class="panel" style="padding:24px">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
@@ -54,6 +52,7 @@
     </div>
 
     <div style="margin-top:32px">{{ $readings->links() }}</div>
+    </div>
   </div>
 </section>
 @endsection

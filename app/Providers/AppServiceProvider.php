@@ -5,6 +5,7 @@ namespace App\Providers;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -67,6 +68,30 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('topup', function (Request $request) {
             $key = $request->user()?->id ?: 'ip:' . $request->ip();
             return Limit::perMinute(10)->by((string) $key);
+        });
+
+        // Account-area sidebar — shared balance + pending top-up badge so
+        // every /account/* and /wallet/* page renders identical chrome
+        // without each controller having to compute it. Wrapped defensively
+        // so the partial renders even if wallet tables aren't set up yet.
+        View::composer('partials.account-sidebar', function ($view) {
+            $user = auth()->user();
+            if (!$user) return;
+            try {
+                $wallet = app(\App\Services\Wallet\WalletService::class);
+                $balance = $wallet->balance($user);
+                $pending = \App\Models\WalletTransaction::where('user_id', $user->id)
+                    ->where('type', 'topup')->where('status', 'pending')->count();
+            } catch (\Throwable $e) {
+                $balance = 0;
+                $pending = 0;
+            }
+            $view->with([
+                'sidebarUser'          => $user,
+                'sidebarBalance'       => $balance,
+                'sidebarPendingTopups' => $pending,
+                'sidebarHasMlm'        => method_exists($user, 'isThaipromptLinked') && $user->isThaipromptLinked(),
+            ]);
         });
     }
 }

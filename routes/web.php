@@ -90,8 +90,21 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
 // Account / member area
 Route::middleware('auth')->prefix('account')->name('account.')->group(function () {
     Route::get('/dashboard', [AccountController::class, 'dashboard'])->name('dashboard');
-    Route::get('/history', [AccountController::class, 'history'])->name('history');
-    Route::get('/chats',   [AccountController::class, 'chats'])->name('chats');
+    Route::get('/history',   [AccountController::class, 'history'])->name('history');
+    Route::get('/chats',     [AccountController::class, 'chats'])->name('chats');
+
+    // Astrology profile (DOB / birth time / zodiacs) — feeds horoscope/numerology etc.
+    Route::get('/astrology',   [AccountController::class, 'astrology'])->name('astrology');
+    Route::patch('/astrology', [AccountController::class, 'astrologyUpdate'])->name('astrology.update');
+
+    // Sessions & API tokens (Sanctum). The throttle prevents brute-forcing
+    // the current-password gate on logoutOtherBrowsers.
+    Route::get('/security',                [AccountController::class, 'security'])->name('security');
+    Route::delete('/tokens/{tokenId}',     [AccountController::class, 'revokeToken'])->whereNumber('tokenId')->name('tokens.revoke');
+    Route::post('/tokens/revoke-all',      [AccountController::class, 'revokeAllTokens'])->name('tokens.revoke-all');
+    Route::post('/sessions/logout-others', [AccountController::class, 'logoutOtherBrowsers'])
+        ->middleware('throttle:6,1')
+        ->name('sessions.logout-others');
 });
 
 // Wallet — credit balance, top-up via PromptPay slip, transaction history.
@@ -99,6 +112,7 @@ Route::middleware('auth')->prefix('account')->name('account.')->group(function (
 // back through PHP after verifying the requester is the owner or an admin.
 Route::middleware('auth')->prefix('wallet')->name('wallet.')->controller(WalletController::class)->group(function () {
     Route::get('/',                   'index')->name('index');
+    Route::get('/topups',             'topups')->name('topups');
     Route::get('/topup',              'topupForm')->name('topup');
     Route::post('/topup',             'topupSubmit')->middleware('throttle:topup')->name('topup.submit');
     Route::get('/topup/{tx}',         'topupShow')->name('topup.show');

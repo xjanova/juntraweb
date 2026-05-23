@@ -2,15 +2,18 @@
 @section('title', 'ประวัติการสนทนา')
 
 @section('content')
-<section class="canvas" style="padding-top:160px">
-  <div style="max-width:880px;margin:0 auto">
+<section class="canvas" style="padding-top:120px">
+  <div class="account-shell">
+    @include('partials.account-sidebar', ['active' => 'chats'])
+
+    <div class="account-content">
     <div class="eyebrow">บทสนทนากับแม่หมอ</div>
-    <h2 style="font-family:var(--serif);font-size:clamp(40px,5vw,68px);font-weight:400">
+    <h2 style="font-family:var(--serif);font-size:clamp(32px,4vw,52px);font-weight:400;margin:8px 0 12px">
       <em style="color:var(--gold)">บันทึก</em> การสนทนา
     </h2>
-    <p class="lede" style="margin:14px 0 0;color:var(--ink-dim)">เปิดอ่านทุกบทคุยที่ผ่านมา ทั้งจากเว็บนี้และผ่าน Facebook / LINE (ที่เชื่อมไว้)</p>
+    <p class="lede" style="margin:0 0 24px;color:var(--ink-dim);max-width:640px">เปิดอ่านทุกบทคุยที่ผ่านมา ทั้งจากเว็บนี้และผ่าน Facebook / LINE (ที่เชื่อมไว้)</p>
 
-    <div style="display:grid;gap:14px;margin-top:48px">
+    <div style="display:grid;gap:14px">
       @forelse ($conversations as $c)
         @php
           $first = $c->messages()->where('role', 'user')->first();
@@ -49,6 +52,7 @@
     </div>
 
     <div style="margin-top:32px">{{ $conversations->links() }}</div>
+    </div>
   </div>
 </section>
 @endsection
