@@ -41,6 +41,11 @@ Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
+// Static legal pages — theme-agnostic Blade (the ThemeServiceProvider view
+// composer injects $activeTheme/$themeConfig into every view, so Route::view works).
+Route::view('/privacy', 'pages.legal.privacy')->name('legal.privacy');
+Route::view('/terms',   'pages.legal.terms')->name('legal.terms');
+
 // Tarot — paid actions throttled (per-user, see AppServiceProvider) so a
 // rapid double-submit can't double-charge.
 Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->group(function () {

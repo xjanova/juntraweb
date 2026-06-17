@@ -44,6 +44,10 @@
   </div>
   <div class="foot-bottom">
     <span>© {{ date('Y') }} MAE MOR CHANTRA · ALL RIGHTS RESERVED</span>
+    <nav style="display:flex;gap:20px;flex-wrap:wrap">
+      <a href="{{ route('legal.privacy') }}" style="color:var(--ink-dim)">นโยบายความเป็นส่วนตัว</a>
+      <a href="{{ route('legal.terms') }}" style="color:var(--ink-dim)">ข้อตกลงการใช้งาน</a>
+    </nav>
     <span>CRAFTED UNDER THE MOON ☾</span>
   </div>
 </footer>

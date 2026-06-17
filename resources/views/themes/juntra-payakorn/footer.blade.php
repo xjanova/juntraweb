@@ -39,6 +39,10 @@
   </div>
   <div class="footer-bottom">
     <span>© {{ date('Y') }} Juntra Payakorn. All energies reserved.</span>
+    <nav style="display:flex;gap:20px;flex-wrap:wrap">
+      <a href="{{ route('legal.privacy') }}" style="color:var(--ink-dim)">นโยบายความเป็นส่วนตัว</a>
+      <a href="{{ route('legal.terms') }}" style="color:var(--ink-dim)">ข้อตกลงการใช้งาน</a>
+    </nav>
     <span>Made with ✦ xman studio</span>
   </div>
 </footer>
