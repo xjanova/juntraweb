@@ -10,10 +10,12 @@ use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\TarotSpreads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 /**
  * Mobile reading history — tarot / numerology / palmistry / auspicious
@@ -43,7 +45,10 @@ class HistoryController extends Controller
         $request->validate([
             'limit'  => 'sometimes|integer|min:1|max:100',
             'cursor' => 'sometimes|nullable|string',
-            'type'   => 'sometimes|string|in:tarot_three,tarot_celtic,numerology,palmistry,auspicious',
+            'type'   => ['sometimes', 'string', Rule::in([
+                ...array_map(fn ($k) => "tarot_{$k}", TarotSpreads::keys()),
+                'numerology', 'palmistry', 'auspicious', 'chat',
+            ])],
         ]);
         $limit = (int) $request->input('limit', 20);
 
@@ -107,14 +112,14 @@ class HistoryController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'type'           => 'required|in:tarot_three,tarot_celtic',
+            'type'           => ['required', Rule::in(array_map(fn ($k) => "tarot_{$k}", TarotSpreads::keys()))],
             'question'       => 'nullable|string|max:500',
             'picks'          => 'required|array',
             'picks.*.slug'   => 'required|string|max:64',
             'picks.*.reversed' => 'sometimes|boolean',
         ]);
 
-        $needed = $data['type'] === 'tarot_celtic' ? 10 : 3;
+        $needed = TarotSpreads::cardCount(TarotSpreads::keyFromType($data['type']));
         if (count($data['picks']) !== $needed) {
             return response()->json([
                 'message'     => sprintf('สเปรดนี้ต้องเลือก %d ใบ', $needed),
@@ -175,7 +180,7 @@ class HistoryController extends Controller
         // server resources and a successful one always has a paired tx.
         try {
             $tx = $cost > 0
-                ? $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . ($positions[0] ?? '') . ' (' . $data['type'] . ')', [
+                ? $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . (TarotSpreads::nameForType($data['type']) ?? 'ไพ่ยิปซี'), [
                     'reference_type' => 'reading',
                     'method'         => 'system',
                 ])
@@ -253,29 +258,14 @@ class HistoryController extends Controller
     }
 
     /**
-     * Canonical position labels per spread — kept in sync with the web
-     * TarotController so the same reading rendered on mobile and web
-     * shows identical position names. If you add a new spread type,
-     * update {@see \App\Http\Controllers\TarotController} as well.
+     * Canonical position labels per spread — sourced from the shared
+     * config/tarot_spreads.php registry so mobile and web always render
+     * identical position names for every spread.
      */
     private static function positionsFor(string $type): array
     {
-        return match ($type) {
-            'tarot_three'  => ['อดีต', 'ปัจจุบัน', 'อนาคต'],
-            'tarot_celtic' => [
-                'สถานการณ์ปัจจุบัน',
-                'สิ่งที่ขวางกั้น',
-                'รากฐานของเรื่อง',
-                'อดีตที่ผ่านมา',
-                'เป้าหมาย / สิ่งที่อาจเกิด',
-                'อนาคตอันใกล้',
-                'ตัวตนของคุณ',
-                'สิ่งแวดล้อมรอบตัว',
-                'ความหวังและความกลัว',
-                'ผลลัพธ์สุดท้าย',
-            ],
-            default => [],
-        };
+        $key = TarotSpreads::keyFromType($type);
+        return $key ? TarotSpreads::positionLabels($key) : [];
     }
 
     private function readingDetail(Reading $reading): array

@@ -119,7 +119,11 @@ class FortuneBotClient
         if (!$sessionId) {
             return null;
         }
-        $resp = $this->send($user, $sessionId, $this->buildTarotPrompt($payload));
+        // Prefer the Card-First Mandate prompt built upstream by
+        // TarotPromptBuilder; fall back to the legacy generic builder only if
+        // the caller didn't supply one.
+        $prompt = !empty($payload['prompt']) ? $payload['prompt'] : $this->buildTarotPrompt($payload);
+        $resp = $this->send($user, $sessionId, $prompt);
         if (!$resp || empty($resp['reply'])) {
             return null;
         }

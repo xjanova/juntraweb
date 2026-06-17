@@ -5,144 +5,151 @@ namespace Database\Seeders;
 use App\Models\TarotCard;
 use Illuminate\Database\Seeder;
 
+/**
+ * Seeds all 78 Rider-Waite cards.
+ *
+ * Card STRUCTURE (slug, names, arcana, suit, number) is fixed and lives
+ * here. The RICH Thai MEANINGS (keywords + upright/reversed + love/career/
+ * money) live in database/data/tarot_meanings.php — "แม่หมอจันทรา"'s
+ * knowledge base — so content can be improved without touching code.
+ *
+ * Idempotent: re-runnable on every deploy. Meaning text is refreshed each
+ * run; image_path is only set on first insert so admin-uploaded / imported
+ * art is preserved.
+ *
+ * Minor Arcana names follow the Thaiprompt convention (no "แห่ง"):
+ * e.g. "ห้าดาบ", "ราชาเหรียญ".
+ */
 class TarotCardSeeder extends Seeder
 {
     public function run(): void
     {
-        // Major Arcana — 22 cards
-        $major = [
-            ['fool',              0,  'The Fool',           'คนโง่',                'การเริ่มต้น/อิสระ/ไร้เดียงสา', 'การเริ่มต้นใหม่ การก้าวเดินอย่างกล้าหาญ จิตใจที่เปิดกว้าง', 'ความประมาท การกระทำที่ไร้คิด ความเสี่ยงที่ไม่จำเป็น'],
-            ['magician',          1,  'The Magician',       'นักมายากล',            'พลัง/สร้างสรรค์/เริ่มต้น',     'พลังในการเริ่มต้นสิ่งใหม่ ความสามารถที่จะเปลี่ยนความฝันให้เป็นจริง', 'การหลอกลวง การใช้พลังในทางที่ผิด ทักษะที่ไม่ได้พัฒนา'],
-            ['high-priestess',    2,  'The High Priestess', 'นักบวชหญิง',           'ปัญญาภายใน/ความลับ/สัญชาตญาณ', 'สัญชาตญาณ ปัญญาภายใน ความรู้ที่ลึกซึ้ง', 'การปิดกั้นเสียงในใจ การไม่รับฟังตนเอง'],
-            ['empress',           3,  'The Empress',        'จักรพรรดินี',          'ความอุดมสมบูรณ์/แม่/ธรรมชาติ', 'ความอุดมสมบูรณ์ ความรักจากแม่ ความคิดสร้างสรรค์', 'การพึ่งพา การสมดุลที่หาย ความเฉื่อยชา'],
-            ['emperor',           4,  'The Emperor',        'จักรพรรดิ',           'อำนาจ/โครงสร้าง/บิดา',          'อำนาจ ความมั่นคง การเป็นผู้นำ โครงสร้างที่มั่นคง', 'การกดขี่ ความตึงเครียด การควบคุมที่มากเกินไป'],
-            ['hierophant',        5,  'The Hierophant',     'พระสงฆ์',              'ประเพณี/ศาสนา/การเรียน',        'ประเพณี ความเชื่อ การศึกษา ครูที่มีปัญญา', 'การไม่ยอมรับสิ่งใหม่ การยึดติดกฎเกณฑ์เกินไป'],
-            ['lovers',            6,  'The Lovers',         'คู่รัก',                'ความรัก/การเลือก/ความสัมพันธ์', 'ความรักลึกซึ้ง การเลือกที่สำคัญ ความสัมพันธ์ที่กลมกลืน', 'ความขัดแย้งในใจ การเลือกผิด ความสัมพันธ์ไม่สมดุล'],
-            ['chariot',           7,  'The Chariot',        'รถศึก',                'ชัยชนะ/วินัย/ก้าวไป',           'ชัยชนะ ความก้าวหน้า การควบคุมตนเอง', 'การหลงทาง ความล้มเหลว ขาดวินัย'],
-            ['strength',          8,  'Strength',           'พลังใจ',               'ความกล้า/ความอ่อนโยน/พลังภายใน', 'พลังใจ ความกล้าหาญ การเอาชนะอุปสรรคด้วยใจ', 'ความอ่อนแอ ความสงสัยในตนเอง'],
-            ['hermit',            9,  'The Hermit',         'ฤๅษี',                 'การค้นหา/ความสันโดษ/ปัญญา',     'การหลีกเร้นเพื่อค้นหาคำตอบ ปัญญาจากภายใน', 'ความโดดเดี่ยว การถอนตัวมากเกินไป'],
-            ['wheel-of-fortune', 10,  'Wheel of Fortune',   'กงล้อแห่งโชค',          'โชคชะตา/วงล้อ/การเปลี่ยน',       'การเปลี่ยนแปลงครั้งใหญ่ โชคดี วงจรชีวิต', 'โชคร้าย การต่อต้านการเปลี่ยนแปลง'],
-            ['justice',          11,  'Justice',            'ความยุติธรรม',          'ความเป็นธรรม/ความจริง/กรรม',    'ความยุติธรรม การตัดสินที่ถูกต้อง ผลของกรรม', 'ความไม่ยุติธรรม การหลีกเลี่ยงความรับผิดชอบ'],
-            ['hanged-man',       12,  'The Hanged Man',     'คนถูกแขวน',            'มุมมอง/การเสียสละ/หยุดนิ่ง',     'มุมมองใหม่ การเสียสละเพื่อสิ่งที่ใหญ่กว่า', 'การติดอยู่ในที่เดิม การยอมแพ้'],
-            ['death',            13,  'Death',              'ความตาย',              'จุดจบ/การเปลี่ยน/เริ่มใหม่',     'การปิดวงจรเก่าเพื่อเริ่มใหม่ การเปลี่ยนแปลงที่ลึกซึ้ง', 'การต่อต้านการเปลี่ยน ความกลัวสิ่งใหม่'],
-            ['temperance',       14,  'Temperance',         'ความพอประมาณ',          'สมดุล/ความอดทน/ผสมผสาน',         'ความสมดุล การผสมผสานที่ลงตัว ความอดทน', 'ความสุดโต่ง การขาดความสมดุล'],
-            ['devil',            15,  'The Devil',          'ปีศาจ',                'พันธะ/วัตถุ/ความหลง',            'พันธะที่กักขัง ความหลงใหลในวัตถุ การติดในกิเลส', 'การปลดปล่อยตนเอง การเอาชนะกิเลส'],
-            ['tower',            16,  'The Tower',          'หอคอย',                'การพังทลาย/การเปิดเผย/ฟ้าผ่า',    'การเปลี่ยนแปลงฉับพลัน การพังทลายของสิ่งเท็จ', 'การหลีกเลี่ยงการเปลี่ยนแปลง การปฏิเสธความจริง'],
-            ['star',             17,  'The Star',           'ดวงดาว',               'ความหวัง/แรงบันดาลใจ/การเยียวยา', 'ความหวัง แรงบันดาลใจ การเยียวยาจิตใจ', 'การสูญเสียศรัทธา ความสิ้นหวัง'],
-            ['moon',             18,  'The Moon',           'พระจันทร์',             'จินตนาการ/ความฝัน/สับสน',         'สัญชาตญาณ ความฝัน ความลึกลับของจิตใต้สำนึก', 'ความสับสน ความหลงผิด ภาพลวงตา'],
-            ['sun',              19,  'The Sun',            'พระอาทิตย์',           'ความสุข/ความสำเร็จ/พลังบวก',       'ความรุ่งโรจน์ ความสุข พลังบวกที่ส่องสว่าง', 'ความสุขที่ไม่ยั่งยืน การประมาท'],
-            ['judgement',        20,  'Judgement',          'การตัดสิน',            'การตื่นรู้/การปลดปล่อย/การเรียก',  'การตื่นรู้ทางจิตวิญญาณ การให้อภัย การเริ่มต้นใหม่', 'การไม่กล้าเปลี่ยนแปลง การยึดติดอดีต'],
-            ['world',            21,  'The World',          'โลก',                  'ความสำเร็จ/ปิดวงจร/ครบสมบูรณ์',     'ความสำเร็จที่สมบูรณ์ การปิดวงจรเก่าเพื่อก้าวสู่บทใหม่', 'การไม่สามารถปิดงานได้ ความล่าช้าที่ยืดเยื้อ'],
-        ];
+        $meanings = $this->loadMeanings();
 
-        $imageMap = [
+        foreach ($this->scaffold() as $row) {
+            $m = $meanings[$row['slug']] ?? [];
+
+            $card = TarotCard::firstOrNew(['slug' => $row['slug']]);
+            $card->fill([
+                'name_en'             => $row['name_en'],
+                'name_th'             => $row['name_th'],
+                'arcana'              => $row['arcana'],
+                'suit'                => $row['suit'],
+                'number'              => $row['number'],
+                'keywords_th'         => $m['keywords_th']         ?? $row['fallback_keywords'],
+                'upright_meaning_th'  => $m['upright_meaning_th']  ?? $row['fallback_upright'],
+                'reversed_meaning_th' => $m['reversed_meaning_th'] ?? $row['fallback_reversed'],
+                'love_th'             => $m['love_th']             ?? null,
+                'career_th'           => $m['career_th']           ?? null,
+                'money_th'            => $m['money_th']             ?? null,
+                'active'              => true,
+            ]);
+
+            // Only set image on FIRST insert — preserve imported/uploaded art on re-run.
+            if (!$card->exists) {
+                $card->image_path = $row['image_path'];
+            }
+            $card->save();
+        }
+    }
+
+    /** slug => rich meanings, from the knowledge-base data file (if present). */
+    private function loadMeanings(): array
+    {
+        $path = database_path('data/tarot_meanings.php');
+        if (!is_file($path)) {
+            return [];
+        }
+        $data = require $path;
+        return is_array($data) ? $data : [];
+    }
+
+    /**
+     * The fixed structure of all 78 cards + a deterministic fallback meaning
+     * so the seeder is never blocked by a missing knowledge-base entry.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function scaffold(): array
+    {
+        $rows = [];
+
+        /* ---------- Major Arcana (22) ---------- */
+        $placeholders = [
             'magician' => 'images/card-magician.png',
             'sun'      => 'images/card-sun.png',
             'world'    => 'images/card-world.png',
         ];
 
-        foreach ($major as [$slug, $num, $en, $th, $kw, $up, $rev]) {
-            $card = TarotCard::firstOrNew(['slug' => $slug]);
-            $card->fill([
-                'name_en' => $en, 'name_th' => $th, 'arcana' => 'major', 'suit' => 'major',
-                'number' => $num,
-                'keywords_th' => $kw,
-                'upright_meaning_th' => $up, 'reversed_meaning_th' => $rev,
-                'active' => true,
-            ]);
-            // Only set image_path on FIRST insert. Re-runs (deploy.sh) preserve any image
-            // imported via TarotImporter or uploaded via Filament admin.
-            if (!$card->exists) {
-                $card->image_path = $imageMap[$slug] ?? 'images/card-magician.png';
-            }
-            $card->save();
+        $major = [
+            ['fool',             0,  'The Fool',           'คนโง่',         'การเริ่มต้น/อิสระ/ไร้เดียงสา'],
+            ['magician',         1,  'The Magician',       'นักมายากล',     'พลัง/สร้างสรรค์/เริ่มต้น'],
+            ['high-priestess',   2,  'The High Priestess', 'นักบวชหญิง',    'ปัญญาภายใน/ความลับ/สัญชาตญาณ'],
+            ['empress',          3,  'The Empress',        'จักรพรรดินี',   'ความอุดมสมบูรณ์/แม่/ธรรมชาติ'],
+            ['emperor',          4,  'The Emperor',        'จักรพรรดิ',     'อำนาจ/โครงสร้าง/บิดา'],
+            ['hierophant',       5,  'The Hierophant',     'พระสงฆ์',       'ประเพณี/ศาสนา/การเรียน'],
+            ['lovers',           6,  'The Lovers',         'คู่รัก',         'ความรัก/การเลือก/ความสัมพันธ์'],
+            ['chariot',          7,  'The Chariot',        'รถศึก',         'ชัยชนะ/วินัย/ก้าวไป'],
+            ['strength',         8,  'Strength',           'พลังใจ',        'ความกล้า/ความอ่อนโยน/พลังภายใน'],
+            ['hermit',           9,  'The Hermit',         'ฤๅษี',          'การค้นหา/ความสันโดษ/ปัญญา'],
+            ['wheel-of-fortune', 10, 'Wheel of Fortune',   'กงล้อแห่งโชค',  'โชคชะตา/วงล้อ/การเปลี่ยน'],
+            ['justice',          11, 'Justice',            'ความยุติธรรม',  'ความเป็นธรรม/ความจริง/กรรม'],
+            ['hanged-man',       12, 'The Hanged Man',     'คนถูกแขวน',     'มุมมอง/การเสียสละ/หยุดนิ่ง'],
+            ['death',            13, 'Death',              'ความตาย',       'จุดจบ/การเปลี่ยน/เริ่มใหม่'],
+            ['temperance',       14, 'Temperance',         'ความพอประมาณ',  'สมดุล/ความอดทน/ผสมผสาน'],
+            ['devil',            15, 'The Devil',          'ปีศาจ',         'พันธะ/วัตถุ/ความหลง'],
+            ['tower',            16, 'The Tower',          'หอคอย',         'การพังทลาย/การเปิดเผย/ฟ้าผ่า'],
+            ['star',             17, 'The Star',           'ดวงดาว',        'ความหวัง/แรงบันดาลใจ/การเยียวยา'],
+            ['moon',             18, 'The Moon',           'พระจันทร์',     'จินตนาการ/ความฝัน/สับสน'],
+            ['sun',              19, 'The Sun',            'พระอาทิตย์',    'ความสุข/ความสำเร็จ/พลังบวก'],
+            ['judgement',        20, 'Judgement',          'การตัดสิน',     'การตื่นรู้/การปลดปล่อย/การเรียก'],
+            ['world',            21, 'The World',          'โลก',           'ความสำเร็จ/ปิดวงจร/ครบสมบูรณ์'],
+        ];
+
+        foreach ($major as [$slug, $num, $en, $th, $kw]) {
+            $rows[] = [
+                'slug' => $slug, 'name_en' => $en, 'name_th' => $th,
+                'arcana' => 'major', 'suit' => 'major', 'number' => $num,
+                'image_path' => $placeholders[$slug] ?? 'images/card-magician.png',
+                'fallback_keywords' => $kw,
+                'fallback_upright'  => "พลังของไพ่{$th}ในด้านบวก: {$kw}",
+                'fallback_reversed' => "ไพ่{$th}กลับหัว: พลังด้านนี้ติดขัดหรือกลับด้าน ควรทบทวนและระวัง",
+            ];
         }
 
-        // Minor Arcana — 56 cards (4 suits × 14)
+        /* ---------- Minor Arcana (56) ---------- */
         $suits = [
-            'wands'      => ['ไม้เท้า',  'พลังงาน ความคิดสร้างสรรค์ การเริ่มต้น'],
-            'cups'       => ['ถ้วย',    'อารมณ์ ความรัก จิตใต้สำนึก ความสัมพันธ์'],
-            'swords'     => ['ดาบ',     'ความคิด สติปัญญา ความขัดแย้ง การตัดสินใจ'],
-            'pentacles'  => ['เหรียญ',  'วัตถุ การเงิน การงาน สุขภาพ'],
+            'wands'     => ['ไม้เท้า', 'Wands',     'พลังงาน ความคิดสร้างสรรค์ การเริ่มต้น การงาน'],
+            'cups'      => ['ถ้วย',   'Cups',      'อารมณ์ ความรัก จิตใจ ความสัมพันธ์'],
+            'swords'    => ['ดาบ',    'Swords',    'ความคิด สติปัญญา ความขัดแย้ง การตัดสินใจ'],
+            'pentacles' => ['เหรียญ', 'Pentacles', 'การเงิน การงานที่จับต้องได้ ทรัพย์สิน สุขภาพ'],
         ];
 
         $ranks = [
-            ['ace',    1,  'Ace'],
-            ['two',    2,  'Two'],
-            ['three',  3,  'Three'],
-            ['four',   4,  'Four'],
-            ['five',   5,  'Five'],
-            ['six',    6,  'Six'],
-            ['seven',  7,  'Seven'],
-            ['eight',  8,  'Eight'],
-            ['nine',   9,  'Nine'],
-            ['ten',    10, 'Ten'],
-            ['page',   11, 'Page'],
-            ['knight', 12, 'Knight'],
-            ['queen',  13, 'Queen'],
-            ['king',   14, 'King'],
+            ['ace', 1, 'Ace', 'เอซ'], ['two', 2, 'Two', 'สอง'], ['three', 3, 'Three', 'สาม'],
+            ['four', 4, 'Four', 'สี่'], ['five', 5, 'Five', 'ห้า'], ['six', 6, 'Six', 'หก'],
+            ['seven', 7, 'Seven', 'เจ็ด'], ['eight', 8, 'Eight', 'แปด'], ['nine', 9, 'Nine', 'เก้า'],
+            ['ten', 10, 'Ten', 'สิบ'], ['page', 11, 'Page', 'เพจ'], ['knight', 12, 'Knight', 'อัศวิน'],
+            ['queen', 13, 'Queen', 'ราชินี'], ['king', 14, 'King', 'ราชา'],
         ];
 
-        $rankTh = [
-            'ace'=>'เอซ', 'two'=>'สอง', 'three'=>'สาม', 'four'=>'สี่', 'five'=>'ห้า',
-            'six'=>'หก', 'seven'=>'เจ็ด', 'eight'=>'แปด', 'nine'=>'เก้า', 'ten'=>'สิบ',
-            'page'=>'อัศวินรอง', 'knight'=>'อัศวิน', 'queen'=>'ราชินี', 'king'=>'พระราชา',
-        ];
-
-        $rankUp = [
-            'ace'=>'การเริ่มต้นใหม่ พลังบริสุทธิ์ ของขวัญ',
-            'two'=>'ทางเลือก การตัดสินใจ ความสมดุล',
-            'three'=>'การเติบโต การวางแผน ความร่วมมือ',
-            'four'=>'ความมั่นคง พักผ่อน รากฐาน',
-            'five'=>'การเปลี่ยนแปลง ความท้าทาย ความขัดแย้ง',
-            'six'=>'ความกลมเกลียว ความสำเร็จ ของขวัญ',
-            'seven'=>'การไตร่ตรอง การเลือก ความเพียร',
-            'eight'=>'การเคลื่อนไหว ความก้าวหน้า การกระทำ',
-            'nine'=>'ความสำเร็จที่ใกล้สำเร็จ ความสมหวัง',
-            'ten'=>'จุดสุดยอด ความสำเร็จ การปิดวงจร',
-            'page'=>'การเรียนรู้ ความอยากรู้ ข่าวใหม่',
-            'knight'=>'การกระทำ ความกล้า การเดินทาง',
-            'queen'=>'ความเป็นผู้ใหญ่ การดูแล ความเชี่ยวชาญ',
-            'king'=>'ความเป็นผู้นำ ความเชี่ยวชาญ อำนาจ',
-        ];
-
-        $rankRev = [
-            'ace'=>'พลาดโอกาส การเริ่มต้นที่ล่าช้า',
-            'two'=>'ตัดสินใจไม่ได้ ขาดความสมดุล',
-            'three'=>'การทำงานเดี่ยว ขาดการสนับสนุน',
-            'four'=>'ความซบเซา การยึดติด',
-            'five'=>'การคืนดี การเอาชนะอุปสรรค',
-            'six'=>'การหยุดชะงัก ความไม่สม่ำเสมอ',
-            'seven'=>'ความไม่ตัดสินใจ การหลีกเลี่ยง',
-            'eight'=>'ความล่าช้า การถอยหลัง',
-            'nine'=>'ความผิดหวังเล็กน้อย การไม่สมบูรณ์',
-            'ten'=>'การเปลี่ยนแปลงที่ยังไม่จบ การล่าช้า',
-            'page'=>'ความไม่เป็นผู้ใหญ่ ข่าวที่ล่าช้า',
-            'knight'=>'ความหุนหัน การเดินทางที่ล่าช้า',
-            'queen'=>'การปกป้องที่มากเกิน ความไม่มั่นคง',
-            'king'=>'การควบคุมที่มากเกิน การไม่ฟังคนอื่น',
-        ];
-
-        foreach ($suits as $suitKey => [$suitTh, $suitMeaning]) {
-            foreach ($ranks as [$rankSlug, $rankNum, $rankEn]) {
-                $slug = "$rankSlug-of-$suitKey";
-                $card = TarotCard::firstOrNew(['slug' => $slug]);
-                $card->fill([
-                    'name_en' => "$rankEn of " . ucfirst($suitKey),
-                    'name_th' => $rankTh[$rankSlug] . 'แห่ง' . $suitTh,
-                    'arcana' => 'minor',
-                    'suit'   => $suitKey,
-                    'number' => $rankNum,
-                    'keywords_th' => $suitMeaning,
-                    'upright_meaning_th' => $rankUp[$rankSlug] . ' (' . $suitMeaning . ')',
-                    'reversed_meaning_th' => $rankRev[$rankSlug],
-                    'active' => true,
-                ]);
-                if (!$card->exists) {
-                    $card->image_path = 'images/card-magician.png';
-                }
-                $card->save();
+        foreach ($suits as $suitKey => [$suitTh, $suitEn, $suitMeaning]) {
+            foreach ($ranks as [$rankSlug, $rankNum, $rankEn, $rankTh]) {
+                $slug   = "{$rankSlug}-of-{$suitKey}";
+                $nameTh = $rankTh . $suitTh;   // no "แห่ง" — "ห้าดาบ", "ราชาเหรียญ"
+                $rows[] = [
+                    'slug' => $slug,
+                    'name_en' => "{$rankEn} of {$suitEn}",
+                    'name_th' => $nameTh,
+                    'arcana' => 'minor', 'suit' => $suitKey, 'number' => $rankNum,
+                    'image_path' => 'images/card-magician.png',
+                    'fallback_keywords' => $suitMeaning,
+                    'fallback_upright'  => "ไพ่{$nameTh}: พลังของเลข{$rankTh}ในด้าน{$suitMeaning}",
+                    'fallback_reversed' => "ไพ่{$nameTh}กลับหัว: พลังด้านนี้ติดขัด ล่าช้า หรือยังไม่ลงตัว ควรปรับและระวัง",
+                ];
             }
         }
+
+        return $rows;
     }
 }

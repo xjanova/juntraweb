@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Reading;
 use App\Models\Setting;
 use App\Models\Zodiac;
+use App\Services\FortuneBot\TarotPromptBuilder;
+use App\Support\TarotSpreads;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -40,18 +42,12 @@ class AiOracle
     public function interpretTarotReading(Reading $reading): string
     {
         $cards = $reading->tarotCards()->with('card')->orderBy('position')->get();
-        $cardSummary = $cards->map(function ($pc) {
-            $direction = $pc->reversed ? '(กลับหัว)' : '(ตั้งตรง)';
-            $meaning = $pc->reversed
-                ? $pc->card->reversed_meaning_th
-                : $pc->card->upright_meaning_th;
-            return "[{$pc->position_label}] {$pc->card->name_th} {$direction} — {$meaning}";
-        })->implode("\n");
 
-        $question = $reading->question ?: 'คำถามทั่วไปเกี่ยวกับชีวิต';
-        $prompt = "ลูกค้าถาม: {$question}\n\nไพ่ที่เปิดได้:\n{$cardSummary}\n\nกรุณาวิเคราะห์ภาพรวมของคำพยากรณ์ในบทเดียวกัน 3-5 ย่อหน้า ภาษาไทยล้วน เป็นกันเอง ไม่ขู่ ปิดท้ายด้วยคำแนะนำเชิงสร้างสรรค์";
+        // Same Card-First Mandate prompt the upstream Mae-Mor bot uses, so the
+        // local fallback reads card × position (ตรง/ฟันธง) instead of generic.
+        $prompt = TarotPromptBuilder::userPrompt($reading);
 
-        return $this->complete($prompt, fallback: $this->fallbackTarot($cards, $reading->question));
+        return $this->complete($prompt, fallback: $this->fallbackTarot($reading, $cards));
     }
 
     public function generateDailyHoroscope(Zodiac $zodiac, Carbon $date): array
@@ -181,16 +177,31 @@ class AiOracle
         return null;
     }
 
-    private function fallbackTarot($cards, ?string $question): string
+    /**
+     * Deterministic reading used only when no AI key is configured. Still
+     * reads card × position (using each slot's `asks`) so even the offline
+     * path is on-topic rather than a generic blurb.
+     */
+    private function fallbackTarot(Reading $reading, $cards): string
     {
-        $intro = $question ? "เกี่ยวกับคำถาม \"{$question}\" " : '';
-        $body = $cards->map(function ($pc) {
-            $dir = $pc->reversed ? '(กลับหัว)' : '(ตั้งตรง)';
+        $key      = TarotSpreads::keyFromType($reading->type);
+        $asks     = $key ? array_column(TarotSpreads::positions($key), 'asks') : [];
+        $question = trim((string) $reading->question);
+
+        $intro = $question !== ''
+            ? "เกี่ยวกับคำถาม \"{$question}\" ไพ่ที่คุณเปิดได้บอกเล่าทีละตำแหน่งดังนี้:"
+            : "ไพ่ที่คุณเปิดได้บอกเล่าทีละตำแหน่งดังนี้:";
+
+        $body = $cards->map(function ($pc) use ($asks) {
+            $dir     = $pc->reversed ? '(กลับหัว)' : '(ตั้งตรง)';
             $meaning = $pc->reversed ? $pc->card->reversed_meaning_th : $pc->card->upright_meaning_th;
-            return "**{$pc->position_label}** — {$pc->card->name_th} {$dir}\n{$meaning}";
+            $ask     = $asks[$pc->position - 1] ?? null;
+            $head    = "**{$pc->position_label}** — {$pc->card->name_th} {$dir}";
+            $hint    = $ask ? "_({$ask})_\n" : '';
+            return "{$head}\n{$hint}{$meaning}";
         })->implode("\n\n");
 
-        return $intro . "ไพ่บอกเล่าเรื่องราวของคุณดังนี้:\n\n{$body}\n\nคำแนะนำของแม่หมอ: เปิดใจรับสิ่งที่เกิดขึ้น แต่ละไพ่เป็นเหมือนเข็มทิศ — เลือกทิศที่ใจคุณรู้สึกถูกต้อง แล้วก้าวไปอย่างมั่นใจ";
+        return "{$intro}\n\n{$body}\n\nคำแนะนำของแม่หมอ: อ่านไพ่แต่ละใบตามตำแหน่งของมัน แล้วร้อยเป็นเรื่องเดียวกัน — ไพ่ตั้งตรงคือพลังที่ไหลลื่น ไพ่กลับหัวคือสิ่งที่ยังติดขัดหรือต้องระวัง เลือกก้าวไปในทางที่ไพ่ส่วนใหญ่ชี้ด้วยความมั่นใจนะคะ";
     }
 
     private function fallbackChat(array $messages): string

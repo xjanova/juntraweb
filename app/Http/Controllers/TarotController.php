@@ -9,9 +9,11 @@ use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\TarotSpreads;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class TarotController extends Controller
 {
@@ -24,10 +26,17 @@ class TarotController extends Controller
 
     public function index()
     {
+        // Decorate each registered spread with its live resolved price so the
+        // landing page lists every "รูปแบบการวางไพ่" without hardcoding.
+        $spreads = collect(TarotSpreads::all())->map(function ($meta, $key) {
+            $meta['key']   = $key;
+            $meta['count'] = count($meta['positions']);
+            $meta['price'] = Pricing::for(TarotSpreads::priceKey($key));
+            return $meta;
+        })->values()->all();
+
         return view('pages.tarot.index', [
-            'cards'        => TarotCard::where('active', true)->get(),
-            'priceThree'   => Pricing::for('tarot_three'),
-            'priceCeltic'  => Pricing::for('tarot_celtic'),
+            'spreads' => $spreads,
         ]);
     }
 
@@ -38,7 +47,7 @@ class TarotController extends Controller
     public function begin(Request $request)
     {
         $data = $request->validate([
-            'spread'   => 'required|in:three,celtic',
+            'spread'   => ['required', Rule::in(TarotSpreads::keys())],
             'question' => 'nullable|string|max:500',
         ]);
 
@@ -51,74 +60,59 @@ class TarotController extends Controller
     }
 
     /**
-     * Step 2 → render 78 face-down cards in a fan, user picks N (3 or 10).
+     * Step 2 → render 78 face-down cards in a fan, user picks N cards
+     * (N = the chosen spread's card count).
      */
     public function pick(Request $request)
     {
         $sess = $request->session()->get('tarot_pick');
-        if (!$sess) {
+        if (!$sess || !TarotSpreads::has($sess['spread'] ?? '')) {
             return redirect()->route('tarot.index')
                 ->with('status', 'กรุณาเลือกรูปแบบการดูดวงก่อน');
         }
 
-        $needed = $sess['spread'] === 'celtic' ? 10 : 3;
-        $cards  = TarotCard::where('active', true)
+        $key   = $sess['spread'];
+        $cards = TarotCard::where('active', true)
             ->inRandomOrder()
             ->get(['id', 'slug', 'name_th']);
 
-        $type = $sess['spread'] === 'celtic' ? 'tarot_celtic' : 'tarot_three';
-
         return view('pages.tarot.pick', [
             'cards'       => $cards,
-            'needed'      => $needed,
-            'spread'      => $sess['spread'],
+            'needed'      => TarotSpreads::cardCount($key),
+            'spread'      => $key,
+            'spreadName'  => TarotSpreads::get($key)['name_th'] ?? 'ไพ่ยิปซี',
             'question'    => $sess['question'],
-            'targetRoute' => $sess['spread'] === 'celtic' ? 'tarot.celtic-cross' : 'tarot.three-card',
-            'cost'        => Pricing::for($type),
+            'targetRoute' => 'tarot.cast',
+            'cost'        => Pricing::for(TarotSpreads::priceKey($key)),
             'balance'     => $request->user() ? $this->wallet->balance($request->user()) : null,
         ]);
     }
 
-    public function threeCardSpread(Request $request)
+    /**
+     * Step 3 → user has picked N cards; create the reading for ANY spread.
+     *
+     * The spread is taken from the POST and validated against the registry;
+     * `picked` must contain exactly that spread's card count or we fall back
+     * to a random draw of the right size (resolvePickedCards). Because the
+     * price is derived from the validated spread AND the card count is forced
+     * to match it, a tampered `spread`/`picked` can never buy a 10-card
+     * reading at the 1-card price.
+     */
+    public function cast(Request $request)
     {
         $data = $request->validate([
+            'spread'   => ['required', Rule::in(TarotSpreads::keys())],
             'question' => 'nullable|string|max:500',
-            'picked'   => 'nullable|array|size:3',
+            'picked'   => 'nullable|array',
             'picked.*' => 'integer|exists:tarot_cards,id',
         ]);
 
-        $cards = $this->resolvePickedCards($data['picked'] ?? null, 3);
-        $positions = ['อดีต', 'ปัจจุบัน', 'อนาคต'];
+        $key       = $data['spread'];
+        $needed    = TarotSpreads::cardCount($key);
+        $cards     = $this->resolvePickedCards($data['picked'] ?? null, $needed);
+        $positions = TarotSpreads::positionLabels($key);
 
-        return $this->createReading($request, 'tarot_three', $cards, $positions);
-    }
-
-    public function celticCross(Request $request)
-    {
-        $data = $request->validate([
-            'question' => 'nullable|string|max:500',
-            'picked'   => 'nullable|array|size:10',
-            'picked.*' => 'integer|exists:tarot_cards,id',
-        ]);
-
-        $cards = $this->resolvePickedCards($data['picked'] ?? null, 10);
-        // Canonical Rider-Waite Celtic Cross positions (Stuart Kaplan ordering):
-        //   1 ปัจจุบัน · 2 ขวางกั้น · 3 รากฐาน · 4 อดีต · 5 เป้าหมาย
-        //   6 อนาคตอันใกล้ · 7 ตัวตน · 8 สิ่งแวดล้อม · 9 ความหวัง/ความกลัว · 10 ผลลัพธ์
-        $positions = [
-            'สถานการณ์ปัจจุบัน',
-            'สิ่งที่ขวางกั้น',
-            'รากฐานของเรื่อง',
-            'อดีตที่ผ่านมา',
-            'เป้าหมาย / สิ่งที่อาจเกิด',
-            'อนาคตอันใกล้',
-            'ตัวตนของคุณ',
-            'สิ่งแวดล้อมรอบตัว',
-            'ความหวังและความกลัว',
-            'ผลลัพธ์สุดท้าย',
-        ];
-
-        return $this->createReading($request, 'tarot_celtic', $cards, $positions);
+        return $this->createReading($request, TarotSpreads::typeFromKey($key), $cards, $positions);
     }
 
     /**
@@ -169,7 +163,8 @@ class TarotController extends Controller
         $tx = null;
         if ($cost > 0) {
             try {
-                $tx = $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . ($positions[0] ?? '') . ' (' . $type . ')', [
+                $spreadLabel = TarotSpreads::nameForType($type) ?? 'ไพ่ยิปซี';
+                $tx = $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . $spreadLabel, [
                     'reference_type' => 'reading',
                     'method'         => 'system',
                 ]);
@@ -249,7 +244,7 @@ class TarotController extends Controller
 
     public function show(Reading $reading)
     {
-        if (!in_array($reading->type, ['tarot_three', 'tarot_celtic'])) {
+        if (!TarotSpreads::isTarotType($reading->type)) {
             abort(404);
         }
 

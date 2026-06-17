@@ -3,14 +3,14 @@
 
 @section('content')
 @php
-  $typeLabels = [
-    'tarot_three'  => 'ไพ่ 3 ใบ',
-    'tarot_celtic' => 'Celtic Cross',
-    'numerology'   => 'เลขศาสตร์',
-    'palmistry'    => 'ลายมือ',
-    'auspicious'   => 'ฤกษ์ยาม',
-    'chat'         => 'AI Chat',
-  ];
+  $typeLabels = collect(\App\Support\TarotSpreads::all())
+    ->mapWithKeys(fn ($m, $k) => ['tarot_' . $k => $m['name_th']])
+    ->merge([
+      'numerology' => 'เลขศาสตร์',
+      'palmistry'  => 'ลายมือ',
+      'auspicious' => 'ฤกษ์ยาม',
+      'chat'       => 'AI Chat',
+    ])->all();
   $hasAstro = $profile && ($profile->birth_date || $profile->zodiac_slug);
 @endphp
 

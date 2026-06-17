@@ -21,7 +21,7 @@
       <div class="eyebrow" style="display:inline-flex">เลือกไพ่ของคุณ</div>
       <h1 class="display" style="font-size:clamp(40px,5vw,72px);margin-bottom:16px">
         จับ <em>{{ $needed }} ใบ</em>
-        @if($needed === 10)<span style="font-size:.55em;letter-spacing:.18em;display:inline-block;vertical-align:middle;color:var(--gold,#e7c97a)">CELTIC CROSS</span>@endif
+        @isset($spreadName)<span style="font-size:.5em;letter-spacing:.14em;display:inline-block;vertical-align:middle;color:var(--gold,#e7c97a)">{{ $spreadName }}</span>@endisset
       </h1>
       <p class="lede" style="margin:0 auto">
         @if ($question)
@@ -99,6 +99,7 @@
             x-data="{submitting:false}" @submit="submitting=true">
         @csrf
         <input type="hidden" name="_idem" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <input type="hidden" name="spread" value="{{ $spread }}">
         <input type="hidden" name="question" value="{{ $question }}">
         <template x-for="id in picked" :key="id">
           <input type="hidden" name="picked[]" :value="id">

@@ -52,8 +52,7 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/', 'index')->name('index');
     Route::post('/begin', 'begin')->name('begin');                  // step 1 → save spread+question, redirect to pick
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
-    Route::post('/three-card', 'threeCardSpread')->middleware('throttle:reading')->name('three-card');
-    Route::post('/celtic-cross', 'celticCross')->middleware('throttle:reading')->name('celtic-cross');
+    Route::post('/cast', 'cast')->middleware('throttle:reading')->name('cast'); // step 3 → any spread
     Route::get('/result/{reading}', 'show')->name('show');
 });
 
