@@ -4,7 +4,9 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChatController;
 use App\Http\Controllers\Api\V1\HistoryController;
 use App\Http\Controllers\Api\V1\MlmController;
+use App\Http\Controllers\Api\V1\SmsPaymentController;
 use App\Http\Controllers\Api\V1\WalletController;
+use App\Http\Middleware\VerifySmsCheckerDevice;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -93,4 +95,17 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('readings/{reading}', [HistoryController::class, 'show'])->name('show');
         });
     });
+});
+
+// ─── SMS Checker payment gateway (thaiprompt-smschecker-v1) ──────────
+// Device-authenticated (X-Api-Key + AES-GCM/HMAC), NOT Sanctum. The juntra
+// SMS Checker Android app POSTs encrypted bank-SMS here; matches credit the
+// reserved wallet top-up automatically.
+Route::prefix('v1/sms-payment')->middleware(VerifySmsCheckerDevice::class)->name('api.v1.sms.')->group(function () {
+    Route::post('notify',           [SmsPaymentController::class, 'notify'])->middleware('throttle:300,1')->name('notify');
+    Route::post('register-device',  [SmsPaymentController::class, 'registerDevice'])->middleware('throttle:300,1')->name('register');
+    Route::post('register-fcm-token', [SmsPaymentController::class, 'registerFcmToken'])->middleware('throttle:300,1')->name('fcm');
+    Route::get('status',            [SmsPaymentController::class, 'status'])->middleware('throttle:120,1')->name('status');
+    Route::get('device-settings',   [SmsPaymentController::class, 'getDeviceSettings'])->middleware('throttle:120,1')->name('settings.get');
+    Route::put('device-settings',   [SmsPaymentController::class, 'updateDeviceSettings'])->middleware('throttle:120,1')->name('settings.put');
 });

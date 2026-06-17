@@ -6,6 +6,7 @@ use App\Exceptions\DuplicateSlipException;
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
+use App\Services\SmsPayment\SmsCheckerService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use App\Support\PromptPayQr;
@@ -92,20 +93,20 @@ class WalletController extends Controller
      *   (b) Implement native slip upload + a future POST .../topup/{tx}/slip
      *       endpoint (not in scope this round).
      */
-    public function topupPromptPay(Request $request): JsonResponse
+    public function topupPromptPay(Request $request, SmsCheckerService $sms): JsonResponse
     {
         $data = $request->validate([
             'amount' => 'required|numeric|min:' . config('pricing.min_topup', 20)
                                   . '|max:' . config('pricing.max_topup', 50000),
         ]);
 
+        // When the SMS gateway is on, charge a UNIQUE amount (e.g. ฿100.37) so an
+        // incoming bank SMS maps to exactly this top-up and auto-credits.
+        $base    = (float) $data['amount'];
+        $payable = config('smschecker.enabled') ? $sms->uniqueAmountFor($base) : $base;
+
         try {
-            $tx = $this->wallet->recordPendingTopup(
-                $request->user(),
-                (float) $data['amount'],
-                null,
-                'promptpay',
-            );
+            $tx = $this->wallet->recordPendingTopup($request->user(), $payable, null, 'promptpay');
         } catch (\RuntimeException $e) {
             // Pending-cap reached.
             return response()->json([
@@ -113,23 +114,30 @@ class WalletController extends Controller
                 'reason_code' => 'too_many_pending',
             ], 409);
         }
+        if (abs($payable - $base) > 0.0001) {
+            $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base])]);
+        }
 
         $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id'));
 
         return response()->json([
             'data' => [
                 'transaction'    => $this->txPayload($tx),
+                'base_amount'    => $base,
+                'payable_amount' => (float) $payable,
+                'auto_confirm'   => (bool) config('smschecker.enabled'),
                 'promptpay'      => [
                     'id'   => $promptpayId,
                     'name' => Setting::get('promptpay_name', config('pricing.promptpay_name')),
                     // EMVCo payload (render natively) + ready-made SVG data URI,
-                    // both carrying the exact amount so the app can scan-to-pay.
-                    'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, (float) $data['amount']) : null,
-                    'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, (float) $data['amount']) : null,
+                    // both carrying the EXACT payable amount so scan-to-pay matches.
+                    'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, (float) $payable) : null,
+                    'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, (float) $payable) : null,
                 ],
                 'slip_upload_url' => url('/wallet/topup/' . $tx->id),
-                'instructions'    => 'สแกน QR หรือโอนตามจำนวน แล้วอัปโหลดสลิปผ่านแอป '
-                                  . 'หลังโอนสำเร็จแอดมินจะอนุมัติภายในไม่กี่นาที',
+                'instructions'    => config('smschecker.enabled')
+                    ? 'โอนยอดให้ตรงเป๊ะตาม QR/ยอดที่ระบุ — ระบบจะเครดิตอัตโนมัติเมื่อเงินเข้า (หรืออัปโหลดสลิปก็ได้)'
+                    : 'สแกน QR หรือโอนตามจำนวน แล้วอัปโหลดสลิป — แอดมินจะอนุมัติภายในไม่กี่นาที',
             ],
         ], 201);
     }

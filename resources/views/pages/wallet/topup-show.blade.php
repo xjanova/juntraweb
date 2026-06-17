@@ -61,7 +61,14 @@
           <div class="eyebrow" style="display:inline-flex;margin-bottom:10px">สแกนเพื่อจ่าย ฿{{ number_format($tx->amount, 2) }}</div>
           <div><img src="{{ $promptpayQr }}" alt="PromptPay QR" style="width:220px;height:220px;background:#fff;border-radius:14px;padding:10px"></div>
           @if (!empty($promptpayName))<div style="color:var(--ink-dim);font-size:13px;margin-top:8px">{{ $promptpayName }}</div>@endif
-          <div style="font-size:12px;color:var(--ink-faint);margin-top:6px">โอนแล้วอัปโหลดสลิป — แอดมินจะอนุมัติเครดิตให้</div>
+          <div style="font-size:12px;color:var(--ink-faint);margin-top:6px">
+            @if (config('smschecker.enabled'))
+              โอนยอด <b style="color:var(--gold)">฿{{ number_format($tx->amount, 2) }}</b> ให้ตรงเป๊ะ —
+              ระบบจะเครดิตเข้าวอลเลตอัตโนมัติเมื่อเงินเข้า (หรืออัปโหลดสลิปให้แอดมินตรวจก็ได้)
+            @else
+              โอนแล้วอัปโหลดสลิป — แอดมินจะอนุมัติเครดิตให้
+            @endif
+          </div>
         </div>
       @endif
 

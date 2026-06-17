@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\DuplicateSlipException;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
+use App\Services\SmsPayment\SmsCheckerService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use App\Support\PromptPayQr;
@@ -93,7 +94,7 @@ class WalletController extends Controller
         ]);
     }
 
-    public function topupSubmit(Request $request)
+    public function topupSubmit(Request $request, SmsCheckerService $sms)
     {
         $min = (int) config('pricing.min_topup', 20);
         $max = (int) config('pricing.max_topup', 50000);
@@ -104,6 +105,13 @@ class WalletController extends Controller
             'slip'   => 'nullable|image|max:4096',
             'note'   => 'nullable|string|max:255',
         ]);
+
+        // When the SMS gateway is on, a PromptPay top-up is charged a UNIQUE
+        // amount so an incoming bank SMS maps to exactly this request.
+        $base    = (float) $data['amount'];
+        $payable = (config('smschecker.enabled') && $data['method'] === 'promptpay')
+            ? $sms->uniqueAmountFor($base)
+            : $base;
 
         // Slips contain bank info — store on the PRIVATE 'local' disk, not 'public'.
         // The image is served back to the owner/admin via topupSlip() with auth.
@@ -126,7 +134,7 @@ class WalletController extends Controller
         try {
             $tx = $this->wallet->recordPendingTopup(
                 $request->user(),
-                (float) $data['amount'],
+                $payable,
                 $slipPath,
                 $data['method'],
                 $slipHash,
@@ -140,8 +148,15 @@ class WalletController extends Controller
             return back()->withInput()->withErrors(['amount' => $e->getMessage()]);
         }
 
+        $meta = [];
+        if (abs($payable - $base) > 0.0001) {
+            $meta['base_amount'] = $base;
+        }
         if (!empty($data['note'])) {
-            $tx->update(['meta' => array_merge((array) $tx->meta, ['note' => $data['note']])]);
+            $meta['note'] = $data['note'];
+        }
+        if ($meta) {
+            $tx->update(['meta' => array_merge((array) $tx->meta, $meta)]);
         }
 
         return redirect()

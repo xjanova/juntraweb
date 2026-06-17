@@ -257,6 +257,40 @@ class WalletService
         return $result;
     }
 
+    /**
+     * Auto-confirm a pending top-up that the SMS gateway matched to a bank
+     * transfer. NO admin gate — this is only ever called by the trusted
+     * SmsCheckerService AFTER it has cryptographically verified the device and
+     * matched the exact unique amount. Same atomic lock + bcmath as approve.
+     */
+    public function confirmTopupAuto(WalletTransaction $tx, array $meta = []): WalletTransaction
+    {
+        if ($tx->type !== 'topup') {
+            throw new \RuntimeException('Not a top-up');
+        }
+        $result = DB::transaction(function () use ($tx, $meta) {
+            $locked = WalletTransaction::where('id', $tx->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'pending') {
+                throw new \RuntimeException('Not a pending top-up');
+            }
+            $wallet = Wallet::where('id', $locked->wallet_id)->lockForUpdate()->firstOrFail();
+            $newBal = bcadd((string) $wallet->balance, (string) $locked->amount, 2);
+            $wallet->balance = $newBal;
+            $wallet->save();
+
+            $locked->update([
+                'status'        => 'success',
+                'balance_after' => $newBal,
+                'slip_amount'   => $locked->amount, // SMS-verified amount == charged amount
+                'approved_at'   => now(),
+                'meta'          => array_merge((array) $locked->meta, $meta),
+            ]);
+            return $locked->fresh();
+        });
+        Cache::forget('wallet:pending_topup_count');
+        return $result;
+    }
+
     /** Owner cancels their own still-pending top-up (and we drop the slip file). */
     public function cancelTopup(WalletTransaction $tx, User $owner): WalletTransaction
     {
