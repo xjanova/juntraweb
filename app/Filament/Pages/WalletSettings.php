@@ -45,19 +45,23 @@ class WalletSettings extends Page implements HasForms
             Section::make('ราคาต่อบริการ (THB)')
                 ->description('แอดมินตั้งราคาที่นี่ — มีผลทันทีกับผู้ใช้ทุกคน. ตั้ง 0 เพื่อปิดการคิดเงิน (ใช้ฟรี)')
                 ->schema([
-                    TextInput::make('pricing_tarot_three')->label('ไพ่ 3 ใบ')->prefix('฿')->numeric()->default(19),
-                    TextInput::make('pricing_tarot_celtic')->label('Celtic Cross 10 ใบ')->prefix('฿')->numeric()->default(99),
-                    TextInput::make('pricing_numerology')->label('เลขศาสตร์')->prefix('฿')->numeric()->default(9),
-                    TextInput::make('pricing_palmistry')->label('ลายมือ')->prefix('฿')->numeric()->default(29),
-                    TextInput::make('pricing_auspicious')->label('ฤกษ์ยาม')->prefix('฿')->numeric()->default(19),
-                    TextInput::make('pricing_chat_message')->label('แชท (ต่อข้อความ)')->prefix('฿')->numeric()->default(2),
+                    TextInput::make('pricing_tarot_three')->label('ไพ่ 3 ใบ')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(19),
+                    TextInput::make('pricing_tarot_celtic')->label('Celtic Cross 10 ใบ')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(99),
+                    TextInput::make('pricing_numerology')->label('เลขศาสตร์')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(9),
+                    TextInput::make('pricing_palmistry')->label('ลายมือ')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(29),
+                    TextInput::make('pricing_auspicious')->label('ฤกษ์ยาม')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(19),
+                    TextInput::make('pricing_chat_message')->label('แชท (ต่อข้อความ)')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(2),
                 ])->columns(3),
 
             Section::make('PromptPay (สำหรับเติมเงิน)')
-                ->description('ข้อมูลที่จะแสดงในหน้าเติมเงินของผู้ใช้')
+                ->description('ข้อมูลที่จะแสดงในหน้าเติมเงินของผู้ใช้ — ใส่เบอร์ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก (ตัวเลขล้วน)')
                 ->schema([
-                    TextInput::make('promptpay_id')->label('PromptPay ID/เบอร์')->placeholder('0812345678'),
-                    TextInput::make('promptpay_name')->label('ชื่อบัญชี')->placeholder('นาย AB CD'),
+                    TextInput::make('promptpay_id')->label('PromptPay ID/เบอร์')->placeholder('0812345678')
+                        ->maxLength(20)
+                        ->rule('nullable')
+                        ->rule('regex:/^[0-9]{10}$|^[0-9]{13}$/')
+                        ->validationMessages(['regex' => 'ต้องเป็นเบอร์ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก (ตัวเลขล้วน)']),
+                    TextInput::make('promptpay_name')->label('ชื่อบัญชี')->placeholder('นาย AB CD')->maxLength(120),
                 ])->columns(2),
         ])->statePath('data');
     }

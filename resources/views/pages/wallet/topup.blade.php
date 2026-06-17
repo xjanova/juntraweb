@@ -27,6 +27,12 @@
             <div style="font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin-bottom:6px">PromptPay</div>
             <div style="font-size:22px;font-family:var(--display);letter-spacing:.04em;font-weight:500">{{ $promptpayId }}</div>
             @if (!empty($promptpayName))<div style="color:var(--ink-dim);font-size:13px;margin-top:4px">ชื่อบัญชี: {{ $promptpayName }}</div>@endif
+            @if (!empty($promptpayQr))
+              <div style="margin-top:16px;text-align:center">
+                <img src="{{ $promptpayQr }}" alt="PromptPay QR" style="width:180px;height:180px;background:#fff;border-radius:12px;padding:8px">
+                <div style="font-size:11px;color:var(--ink-faint);margin-top:6px">สแกนด้วยแอปธนาคาร แล้วกรอกจำนวนเงินที่ต้องการเติม</div>
+              </div>
+            @endif
             <div style="margin-top:14px;font-size:13px;color:var(--ink-dim);line-height:1.7">
               1. โอนตามจำนวนที่ระบุด้านขวา<br>
               2. แคปเจอร์สลิปแล้วอัปโหลดด้านขวา<br>

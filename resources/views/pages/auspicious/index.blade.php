@@ -18,6 +18,7 @@
     <form action="{{ route('auspicious.find') }}" method="POST" class="panel"
           x-data="{submitting:false}" @submit="submitting=true">
       @csrf
+      <input type="hidden" name="_idem" value="{{ \Illuminate\Support\Str::uuid() }}">
       <div class="field">
         <label for="occasion">โอกาส</label>
         <input type="text" id="occasion" name="occasion" value="{{ old('occasion') }}" placeholder="เช่น แต่งงาน, เปิดร้านอาหาร, ขึ้นบ้านใหม่, ออกรถ" required>

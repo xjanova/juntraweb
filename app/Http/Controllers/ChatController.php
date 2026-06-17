@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\InsufficientFundsException;
+use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Services\AiOracle;
@@ -29,6 +30,8 @@ use Illuminate\Support\Str;
  */
 class ChatController extends Controller
 {
+    use PreventsDuplicateCharges;
+
     public function __construct(
         private FortuneBotClient $bot,
         private AiOracle $oracle,
@@ -95,6 +98,13 @@ class ChatController extends Controller
         $token = $request->session()->get('chat_token');
         abort_unless($token, 403);
 
+        // Idempotency — block a double-submit of the same message.
+        if ($this->guardCharge($request, 'chat') === false) {
+            return $request->wantsJson()
+                ? response()->json(['error' => 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409)
+                : redirect()->route('chat.index')->with('status', 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่');
+        }
+
         $cost = Pricing::for('chat_message');
         $balance = $this->wallet->balance($user);
         if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
@@ -120,9 +130,10 @@ class ChatController extends Controller
 
         // Debit only AFTER we have a successful reply — fairer to the user
         // when upstream blips. Race-safe because debit() locks the wallet row.
+        $debitTx = null;
         if ($cost > 0) {
             try {
-                $this->wallet->debit($user, $cost, 'AI chat message', [
+                $debitTx = $this->wallet->debit($user, $cost, 'AI chat message', [
                     'reference_type' => 'chat_message',
                     'reference_id'   => $userMessage->id,
                 ]);
@@ -135,11 +146,32 @@ class ChatController extends Controller
             }
         }
 
-        ChatMessage::create([
-            'chat_conversation_id' => $conversation->id,
-            'role'    => 'assistant',
-            'content' => $reply,
-        ]);
+        // We've already debited — if persisting the reply now fails, the user
+        // would be charged for a message they never see. Refund on failure.
+        try {
+            ChatMessage::create([
+                'chat_conversation_id' => $conversation->id,
+                'role'    => 'assistant',
+                'content' => $reply,
+            ]);
+        } catch (\Throwable $e) {
+            if ($debitTx) {
+                try {
+                    $this->wallet->refund($debitTx, 'บันทึกข้อความตอบกลับไม่สำเร็จ');
+                } catch (\Throwable $refundErr) {
+                    Log::critical('Chat refund FAILED after persist failure — manual intervention needed', [
+                        'tx_id' => $debitTx->id, 'err' => $refundErr->getMessage(),
+                    ]);
+                }
+            }
+            Log::error('Chat assistant message persist failed after debit', [
+                'user_id' => $user->id, 'err' => $e->getMessage(),
+            ]);
+            $errMsg = 'ระบบขัดข้องชั่วคราว — ' . ($debitTx ? 'เครดิตถูกคืนแล้ว ' : '') . 'กรุณาลองใหม่อีกครั้ง';
+            return $request->wantsJson()
+                ? response()->json(['error' => $errMsg, 'reason_code' => 'persist_failed'], 500)
+                : redirect()->route('chat.index')->with('status', $errMsg);
+        }
 
         if ($request->wantsJson()) {
             return response()->json([

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\InsufficientFundsException;
+use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\Reading;
 use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
@@ -14,6 +15,8 @@ use Illuminate\Support\Str;
 
 class TarotController extends Controller
 {
+    use PreventsDuplicateCharges;
+
     public function __construct(
         private FortuneAiService $ai,
         private WalletService $wallet,
@@ -149,19 +152,30 @@ class TarotController extends Controller
                 ->with('status', 'กรุณาเข้าสู่ระบบเพื่อเปิดไพ่ — เครดิตจะถูกหักจากวอลเลตของคุณ');
         }
 
+        // Idempotency — block a double-submit of this exact reading.
+        if ($this->guardCharge($request, 'reading') === false) {
+            return redirect()->route('tarot.index')
+                ->with('status', 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่');
+        }
+
         $cost = Pricing::for($type);
 
         // Reserve credit BEFORE we touch the AI, so a failed reading doesn't
         // leak server resources and a successful one always has a paired tx.
         // If insufficient, bounce to /wallet so the user can top up — their
         // session pick state is preserved so they can retry after.
-        try {
-            $tx = $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . ($positions[0] ?? '') . ' (' . $type . ')', [
-                'reference_type' => 'reading',
-                'method'         => 'system',
-            ]);
-        } catch (InsufficientFundsException $e) {
-            return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต');
+        // Guarded by cost > 0 so admin can set the price to 0 (free reading)
+        // without debit() throwing InvalidArgumentException.
+        $tx = null;
+        if ($cost > 0) {
+            try {
+                $tx = $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . ($positions[0] ?? '') . ' (' . $type . ')', [
+                    'reference_type' => 'reading',
+                    'method'         => 'system',
+                ]);
+            } catch (InsufficientFundsException $e) {
+                return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต');
+            }
         }
 
         // Consume the session pick state — we're committed now.
@@ -179,7 +193,7 @@ class TarotController extends Controller
                 'payload'       => [
                     'positions'    => $positions,
                     'cost'         => $cost,
-                    'wallet_tx_id' => $tx->id,
+                    'wallet_tx_id' => $tx?->id,
                 ],
             ]);
 
@@ -201,24 +215,33 @@ class TarotController extends Controller
             $reading->save();
 
             // Link the wallet transaction back to the reading (audit trail).
-            $tx->update(['reference_id' => $reading->id]);
+            if ($tx) {
+                $tx->update(['reference_id' => $reading->id]);
+            }
         } catch (\Throwable $e) {
             Log::error('Tarot reading creation failed after debit — refunding', [
                 'user_id' => $user->id,
-                'tx_id'   => $tx->id,
+                'tx_id'   => $tx?->id,
                 'type'    => $type,
                 'err'     => $e->getMessage(),
             ]);
-            try {
-                $this->wallet->refund($tx, 'ระบบขัดข้องระหว่างเปิดไพ่');
-            } catch (\Throwable $refundErr) {
-                Log::critical('Refund FAILED after reading failure — manual intervention needed', [
-                    'tx_id' => $tx->id,
-                    'err'   => $refundErr->getMessage(),
-                ]);
+            // Track whether the refund actually succeeded so we don't tell the
+            // user "เครดิตถูกคืนแล้ว" when it didn't.
+            $refunded = true;
+            if ($tx) {
+                try {
+                    $this->wallet->refund($tx, 'ระบบขัดข้องระหว่างเปิดไพ่');
+                } catch (\Throwable $refundErr) {
+                    $refunded = false;
+                    Log::critical('Refund FAILED after reading failure — manual intervention needed', [
+                        'tx_id' => $tx->id,
+                        'err'   => $refundErr->getMessage(),
+                    ]);
+                }
             }
-            return redirect()->route('tarot.index')
-                ->with('status', 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนเข้าวอลเลตแล้ว กรุณาลองใหม่อีกครั้ง');
+            return redirect()->route('tarot.index')->with('status', $refunded
+                ? 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนเข้าวอลเลตแล้ว กรุณาลองใหม่อีกครั้ง'
+                : 'ระบบขัดข้องชั่วคราว — ทีมงานกำลังตรวจสอบและคืนเครดิตให้คุณ หากยอดไม่กลับคืนกรุณาติดต่อแอดมิน');
         }
 
         return redirect()->route('tarot.show', $reading);

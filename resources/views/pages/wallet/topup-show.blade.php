@@ -56,6 +56,15 @@
         @endif
       </dl>
 
+      @if (!empty($promptpayQr))
+        <div style="margin-top:24px;text-align:center;border-top:1px solid var(--line);padding-top:24px">
+          <div class="eyebrow" style="display:inline-flex;margin-bottom:10px">สแกนเพื่อจ่าย ฿{{ number_format($tx->amount, 2) }}</div>
+          <div><img src="{{ $promptpayQr }}" alt="PromptPay QR" style="width:220px;height:220px;background:#fff;border-radius:14px;padding:10px"></div>
+          @if (!empty($promptpayName))<div style="color:var(--ink-dim);font-size:13px;margin-top:8px">{{ $promptpayName }}</div>@endif
+          <div style="font-size:12px;color:var(--ink-faint);margin-top:6px">โอนแล้วอัปโหลดสลิป — แอดมินจะอนุมัติเครดิตให้</div>
+        </div>
+      @endif
+
       @if ($slipUrl)
         <div style="margin-top:24px">
           <div class="eyebrow" style="display:inline-flex;margin-bottom:8px">สลิปที่อัปโหลด</div>
@@ -71,6 +80,13 @@
       <a href="{{ route('wallet.index') }}" class="btn btn-ghost">← กลับวอลเลต</a>
       @if ($tx->status === 'failed')
         <a href="{{ route('wallet.topup') }}" class="btn btn-primary">เติมเงินใหม่</a>
+      @endif
+      @if (!empty($canCancel))
+        <form method="POST" action="{{ route('wallet.topup.cancel', $tx) }}" style="display:inline"
+              onsubmit="return confirm('ยืนยันยกเลิกรายการเติมเงินนี้?')">
+          @csrf
+          <button type="submit" class="btn btn-ghost" style="border-color:#c2382e;color:#c2382e">ยกเลิกรายการนี้</button>
+        </form>
       @endif
     </div>
   </div>

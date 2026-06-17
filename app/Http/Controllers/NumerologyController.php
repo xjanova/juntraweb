@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\InsufficientFundsException;
+use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\Reading;
 use App\Services\Numerology;
 use App\Services\Wallet\WalletService;
@@ -13,6 +14,8 @@ use Illuminate\Support\Str;
 
 class NumerologyController extends Controller
 {
+    use PreventsDuplicateCharges;
+
     public function __construct(private WalletService $wallet) {}
 
     public function index()
@@ -31,6 +34,10 @@ class NumerologyController extends Controller
 
         if (!$request->user()) {
             return redirect()->route('login')->with('status', 'กรุณาเข้าสู่ระบบเพื่อใช้บริการดูเลขศาสตร์');
+        }
+
+        if ($this->guardCharge($request, 'reading') === false) {
+            return redirect()->route('numerology.index')->with('status', 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่');
         }
 
         $cost = Pricing::for('numerology');

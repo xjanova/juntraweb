@@ -18,6 +18,7 @@
     <form action="{{ route('numerology.calculate') }}" method="POST" class="panel"
           x-data="{submitting:false}" @submit="submitting=true">
       @csrf
+      <input type="hidden" name="_idem" value="{{ \Illuminate\Support\Str::uuid() }}">
       <div class="field">
         <label for="name">ชื่อ-นามสกุลจริง</label>
         <input type="text" id="name" name="name" value="{{ old('name') }}" placeholder="เช่น จันทรา ศรีพยากรณ์" required>

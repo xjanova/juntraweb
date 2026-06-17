@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\DuplicateSlipException;
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\PromptPayQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -97,25 +99,78 @@ class WalletController extends Controller
                                   . '|max:' . config('pricing.max_topup', 50000),
         ]);
 
-        $tx = $this->wallet->recordPendingTopup(
-            $request->user(),
-            (float) $data['amount'],
-            null,
-            'promptpay',
-        );
+        try {
+            $tx = $this->wallet->recordPendingTopup(
+                $request->user(),
+                (float) $data['amount'],
+                null,
+                'promptpay',
+            );
+        } catch (\RuntimeException $e) {
+            // Pending-cap reached.
+            return response()->json([
+                'message'     => $e->getMessage(),
+                'reason_code' => 'too_many_pending',
+            ], 409);
+        }
+
+        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id'));
 
         return response()->json([
             'data' => [
                 'transaction'    => $this->txPayload($tx),
                 'promptpay'      => [
-                    'id'   => Setting::get('promptpay_id', config('pricing.promptpay_id')),
+                    'id'   => $promptpayId,
                     'name' => Setting::get('promptpay_name', config('pricing.promptpay_name')),
+                    // EMVCo payload (render natively) + ready-made SVG data URI,
+                    // both carrying the exact amount so the app can scan-to-pay.
+                    'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, (float) $data['amount']) : null,
+                    'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, (float) $data['amount']) : null,
                 ],
                 'slip_upload_url' => url('/wallet/topup/' . $tx->id),
-                'instructions'    => 'โอนตามจำนวนแล้วอัปโหลดสลิปที่หน้าเว็บลิงก์ slip_upload_url '
+                'instructions'    => 'สแกน QR หรือโอนตามจำนวน แล้วอัปโหลดสลิปผ่านแอป '
                                   . 'หลังโอนสำเร็จแอดมินจะอนุมัติภายในไม่กี่นาที',
             ],
         ], 201);
+    }
+
+    /** List the user's top-up requests (optionally filtered by status). */
+    public function topups(Request $request): JsonResponse
+    {
+        $request->validate([
+            'status' => 'sometimes|in:pending,success,failed,refunded,cancelled',
+        ]);
+        $q = WalletTransaction::where('user_id', $request->user()->id)
+            ->where('type', 'topup')
+            ->orderByDesc('created_at');
+        if ($status = $request->input('status')) {
+            $q->where('status', $status);
+        }
+
+        return response()->json([
+            'data' => $q->limit(50)->get()->map(fn (WalletTransaction $tx) => array_merge($this->txPayload($tx), [
+                'slip_uploaded' => !empty($tx->slip_path),
+                'expires_at'    => optional($tx->expires_at)->toIso8601String(),
+            ]))->values(),
+            'meta' => ['pending_count' => $this->wallet->pendingTopupCount($request->user())],
+        ]);
+    }
+
+    /** Cancel one of the user's own still-pending top-ups. */
+    public function topupCancel(Request $request, int $tx): JsonResponse
+    {
+        $row = WalletTransaction::where('id', $tx)
+            ->where('user_id', $request->user()->id)
+            ->firstOrFail();
+        try {
+            $this->wallet->cancelTopup($row, $request->user());
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'message'     => $e->getMessage(),
+                'reason_code' => 'cannot_cancel',
+            ], 409);
+        }
+        return response()->json(['data' => $this->txPayload($row->fresh())]);
     }
 
     public function topupShow(Request $request, int $tx): JsonResponse
@@ -178,12 +233,25 @@ class WalletController extends Controller
             'slip' => 'required|image|max:4096', // 4 MB
         ]);
 
+        // sha256 dedup — reject a slip already credited to another top-up
+        // (excluding this same row in case of a re-upload).
+        $file     = $request->file('slip');
+        $slipHash = hash_file('sha256', $file->getRealPath());
+        try {
+            $this->wallet->assertSlipNotReused($slipHash, $row->id);
+        } catch (DuplicateSlipException $e) {
+            return response()->json([
+                'message'     => $e->getMessage(),
+                'reason_code' => 'duplicate_slip',
+            ], 409);
+        }
+
         // Snapshot the old path BEFORE we overwrite, so we can delete
         // it after the new save succeeds. If the new save throws, the
         // old slip stays intact — never delete first.
         $oldPath = $row->slip_path;
-        $newPath = $request->file('slip')->store('topup-slips', 'local');
-        $row->update(['slip_path' => $newPath]);
+        $newPath = $file->store('topup-slips', 'local');
+        $row->update(['slip_path' => $newPath, 'slip_hash' => $slipHash]);
         if ($oldPath && $oldPath !== $newPath && Storage::disk('local')->exists($oldPath)) {
             Storage::disk('local')->delete($oldPath);
         }

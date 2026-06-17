@@ -29,6 +29,14 @@ return [
     'min_topup'     => env('PRICING_MIN_TOPUP', 20),
     'max_topup'     => env('PRICING_MAX_TOPUP', 50000),
 
+    // A pending top-up (slip awaiting admin approval) auto-expires after this
+    // many hours so abandoned requests + their slip images don't accumulate.
+    // Cleaned by `php artisan wallet:cleanup-expired-topups` (scheduled hourly).
+    'topup_pending_ttl_hours' => env('PRICING_TOPUP_TTL_HOURS', 48),
+
+    // Max pending top-ups a single user may have open at once (anti-spam).
+    'max_pending_topups' => env('PRICING_MAX_PENDING_TOPUPS', 5),
+
     // Static PromptPay info (operator can override via .env or Setting)
     'promptpay_id'   => env('PROMPTPAY_ID', ''),         // e.g. 0812345678 or 1101700000000
     'promptpay_name' => env('PROMPTPAY_NAME', ''),

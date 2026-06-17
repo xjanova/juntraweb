@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\InsufficientFundsException;
+use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\Reading;
 use App\Services\AiOracle;
 use App\Services\Wallet\WalletService;
@@ -13,6 +14,8 @@ use Illuminate\Support\Str;
 
 class PalmistryController extends Controller
 {
+    use PreventsDuplicateCharges;
+
     public function __construct(private WalletService $wallet) {}
 
     public function index()
@@ -31,6 +34,10 @@ class PalmistryController extends Controller
 
         if (!$request->user()) {
             return redirect()->route('login')->with('status', 'กรุณาเข้าสู่ระบบเพื่อใช้บริการดูลายมือ');
+        }
+
+        if ($this->guardCharge($request, 'reading') === false) {
+            return redirect()->route('palmistry.index')->with('status', 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่');
         }
 
         $cost = Pricing::for('palmistry');

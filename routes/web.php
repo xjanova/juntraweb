@@ -122,6 +122,7 @@ Route::middleware('auth')->prefix('wallet')->name('wallet.')->controller(WalletC
     Route::post('/topup',             'topupSubmit')->middleware('throttle:topup')->name('topup.submit');
     Route::get('/topup/{tx}',         'topupShow')->name('topup.show');
     Route::get('/topup/{tx}/slip',    'topupSlip')->name('topup.slip');
+    Route::post('/topup/{tx}/cancel', 'topupCancel')->middleware('throttle:topup')->name('topup.cancel');
 });
 
 // MLM dashboard — reads canonical data from Thaiprompt-Affiliate via OAuth bearer.

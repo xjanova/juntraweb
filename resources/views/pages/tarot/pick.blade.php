@@ -98,6 +98,7 @@
       <form action="{{ route($targetRoute) }}" method="POST" x-show="picked.length === needed" x-transition.duration.500ms style="display:inline-block"
             x-data="{submitting:false}" @submit="submitting=true">
         @csrf
+        <input type="hidden" name="_idem" value="{{ \Illuminate\Support\Str::uuid() }}">
         <input type="hidden" name="question" value="{{ $question }}">
         <template x-for="id in picked" :key="id">
           <input type="hidden" name="picked[]" :value="id">

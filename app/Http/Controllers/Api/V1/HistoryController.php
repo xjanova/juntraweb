@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Exceptions\InsufficientFundsException;
+use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Http\Controllers\Controller;
 use App\Models\Reading;
 use App\Models\TarotCard;
@@ -30,6 +31,8 @@ use Illuminate\Support\Str;
  */
 class HistoryController extends Controller
 {
+    use PreventsDuplicateCharges;
+
     public function __construct(
         private FortuneAiService $ai,
         private WalletService $wallet,
@@ -145,6 +148,10 @@ class HistoryController extends Controller
         }
 
         $user = $request->user();
+        // Idempotency — block a double-submit of this reading (Idempotency-Key header).
+        if ($this->guardCharge($request, 'reading') === false) {
+            return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
+        }
         $cost = Pricing::for($data['type']);
         $balance = $this->wallet->balance($user);
 

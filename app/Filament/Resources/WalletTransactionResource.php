@@ -2,7 +2,10 @@
 
 namespace App\Filament\Resources;
 
+use App\Exceptions\DuplicateSlipException;
+use App\Exceptions\SlipAmountMismatchException;
 use App\Filament\Resources\WalletTransactionResource\Pages;
+use App\Models\User;
 use App\Models\WalletTransaction;
 use App\Services\Wallet\WalletService;
 use Filament\Forms;
@@ -68,6 +71,24 @@ class WalletTransactionResource extends Resource
                         '<a href="' . e($url) . '" target="_blank"><img src="' . e($url) . '" style="max-width:320px;border:1px solid #ccc;border-radius:8px"></a>'
                     );
                 }),
+            Forms\Components\Placeholder::make('approval_info')
+                ->label('การอนุมัติ/ปฏิเสธ')
+                ->content(function (?WalletTransaction $record) {
+                    if (!$record) return '—';
+                    $lines = [];
+                    if ($record->approved_by) {
+                        $who  = optional($record->approver)->name ?? ('#' . $record->approved_by);
+                        $when = optional($record->approved_at)->format('d/m/Y H:i');
+                        $verb = $record->status === 'failed' ? 'ปฏิเสธโดย ' : 'ดำเนินการโดย ';
+                        $lines[] = e($verb . $who . ' เมื่อ ' . $when);
+                    }
+                    if ($reason = data_get($record->meta, 'reject_reason')) {
+                        $lines[] = e('เหตุผลที่ปฏิเสธ: ' . $reason);
+                    }
+                    return $lines
+                        ? new \Illuminate\Support\HtmlString(implode('<br>', $lines))
+                        : '—';
+                }),
         ]);
     }
 
@@ -100,7 +121,7 @@ class WalletTransactionResource extends Resource
                         'success' => 'success',
                         'warning' => 'pending',
                         'danger'  => 'failed',
-                        'gray'    => 'refunded',
+                        'gray'    => ['refunded', 'cancelled'],
                     ]),
                 Tables\Columns\TextColumn::make('reference_code')->label('Ref')->copyable()->toggleable(),
                 Tables\Columns\IconColumn::make('slip_path')
@@ -114,10 +135,11 @@ class WalletTransactionResource extends Resource
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
                     ->options([
-                        'pending'  => 'รอตรวจสอบ',
-                        'success'  => 'สำเร็จ',
-                        'failed'   => 'ปฏิเสธ',
-                        'refunded' => 'คืนเงิน',
+                        'pending'   => 'รอตรวจสอบ',
+                        'success'   => 'สำเร็จ',
+                        'failed'    => 'ปฏิเสธ',
+                        'refunded'  => 'คืนเงิน',
+                        'cancelled' => 'ยกเลิกโดยผู้ใช้',
                     ]),
                 Tables\Filters\SelectFilter::make('type')
                     ->options([
@@ -133,23 +155,50 @@ class WalletTransactionResource extends Resource
                     ->label('อนุมัติ')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(fn (WalletTransaction $r) => $r->type === 'topup' && $r->status === 'pending')
-                    ->requiresConfirmation()
-                    ->modalDescription(fn (WalletTransaction $r) => 'จะเครดิต ฿' . number_format((float) $r->amount, 2) . ' ให้ ' . ($r->user->name ?? '#' . $r->user_id))
-                    ->action(function (WalletTransaction $r) {
+                    ->visible(fn (WalletTransaction $r) => $r->type === 'topup' && $r->status === 'pending' && (bool) auth()->user()?->isAdmin())
+                    ->modalHeading('อนุมัติการเติมเงิน')
+                    ->modalDescription(fn (WalletTransaction $r) => 'ตรวจสลิปแล้วกรอกยอดที่เห็นจริงบนสลิปเพื่อยืนยัน — จะเครดิตให้ ' . ($r->user->name ?? '#' . $r->user_id))
+                    ->form([
+                        Forms\Components\TextInput::make('slip_amount')
+                            ->label('ยอดที่เห็นบนสลิป (฿)')
+                            ->numeric()->minValue(0)->required()
+                            ->default(fn (WalletTransaction $r) => (float) $r->amount)
+                            ->helperText('ต้องตรงกับยอดที่ผู้ใช้แจ้ง มิฉะนั้นระบบจะไม่อนุมัติ (กันการแจ้งยอดเกินจริง)'),
+                    ])
+                    ->action(function (WalletTransaction $r, array $data) {
                         try {
-                            app(WalletService::class)->approveTopup($r, auth()->user());
+                            app(WalletService::class)->approveTopup($r, auth()->user(), (float) $data['slip_amount']);
                             Cache::forget('wallet:pending_topup_count');
                             Notification::make()->title('อนุมัติเรียบร้อย')->success()->send();
+                        } catch (SlipAmountMismatchException | DuplicateSlipException $e) {
+                            Notification::make()->title($e->getMessage())->danger()->persistent()->send();
                         } catch (\Throwable $e) {
                             Notification::make()->title('อนุมัติไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
+                        }
+                    }),
+                Action::make('reverse')
+                    ->label('เรียกคืน')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->visible(fn (WalletTransaction $r) => $r->type === 'topup' && $r->status === 'success' && (bool) auth()->user()?->isAdmin())
+                    ->requiresConfirmation()
+                    ->modalDescription(fn (WalletTransaction $r) => 'จะหักคืน ฿' . number_format((float) $r->amount, 2) . ' จากวอลเลตของ ' . ($r->user->name ?? '#' . $r->user_id) . ' (ถ้ายอดคงเหลือไม่พอจะหักเท่าที่มี)')
+                    ->form([
+                        Forms\Components\Textarea::make('reason')->label('เหตุผลที่เรียกคืน')->rows(2)->required(),
+                    ])
+                    ->action(function (WalletTransaction $r, array $data) {
+                        try {
+                            app(WalletService::class)->reverseTopup($r, auth()->user(), $data['reason'] ?? null);
+                            Notification::make()->title('เรียกคืนเรียบร้อย')->success()->send();
+                        } catch (\Throwable $e) {
+                            Notification::make()->title('เรียกคืนไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
                         }
                     }),
                 Action::make('reject')
                     ->label('ปฏิเสธ')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
-                    ->visible(fn (WalletTransaction $r) => $r->type === 'topup' && $r->status === 'pending')
+                    ->visible(fn (WalletTransaction $r) => $r->type === 'topup' && $r->status === 'pending' && (bool) auth()->user()?->isAdmin())
                     ->form([
                         Forms\Components\Textarea::make('reason')->label('เหตุผล')->rows(2)->required(),
                     ])
@@ -160,6 +209,40 @@ class WalletTransactionResource extends Resource
                             Notification::make()->title('ปฏิเสธเรียบร้อย')->success()->send();
                         } catch (\Throwable $e) {
                             Notification::make()->title('ปฏิเสธไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
+                        }
+                    }),
+            ])
+            ->headerActions([
+                Action::make('adjust')
+                    ->label('ปรับยอดผู้ใช้')
+                    ->icon('heroicon-o-plus-circle')
+                    ->color('gray')
+                    ->visible(fn () => (bool) auth()->user()?->isAdmin())
+                    ->modalHeading('ปรับยอดวอลเลตผู้ใช้ (manual adjustment)')
+                    ->form([
+                        Forms\Components\Select::make('user_id')
+                            ->label('ผู้ใช้')
+                            ->required()
+                            ->searchable()
+                            ->getSearchResultsUsing(fn (string $search) => User::query()
+                                ->where('name', 'like', "%{$search}%")
+                                ->orWhere('email', 'like', "%{$search}%")
+                                ->limit(20)->pluck('name', 'id')->toArray())
+                            ->getOptionLabelUsing(fn ($value) => optional(User::find($value))->name),
+                        Forms\Components\TextInput::make('amount')
+                            ->label('จำนวน')
+                            ->numeric()->required()
+                            ->helperText('เช่น 50 = เพิ่ม ฿50 ให้ผู้ใช้, -50 = หัก ฿50 (จะไม่ทำให้ติดลบ)'),
+                        Forms\Components\Textarea::make('reason')->label('เหตุผล')->rows(2)->required(),
+                    ])
+                    ->action(function (array $data) {
+                        try {
+                            $user = User::findOrFail($data['user_id']);
+                            app(WalletService::class)->adjust($user, (float) $data['amount'], $data['reason'], auth()->user());
+                            Cache::forget('wallet:pending_topup_count');
+                            Notification::make()->title('ปรับยอดเรียบร้อย')->success()->send();
+                        } catch (\Throwable $e) {
+                            Notification::make()->title('ปรับยอดไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
                         }
                     }),
             ])

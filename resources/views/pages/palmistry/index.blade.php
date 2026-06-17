@@ -18,6 +18,7 @@
     <form action="{{ route('palmistry.analyze') }}" method="POST" enctype="multipart/form-data" class="panel"
           x-data="{submitting:false}" @submit="submitting=true">
       @csrf
+      <input type="hidden" name="_idem" value="{{ \Illuminate\Support\Str::uuid() }}">
       <div class="field">
         <label for="image">รูปฝ่ามือ (JPG/PNG, ≤ 4MB)</label>
         <input type="file" id="image" name="image" accept="image/*" required>

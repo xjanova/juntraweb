@@ -153,6 +153,7 @@ document.addEventListener('alpine:init', () => {
       this.message = '';
       this.thinking = true;
       this.scrollToBottom();
+      const idem = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (String(Date.now()) + Math.random());
       try {
         const r = await fetch(@js(route('chat.send')), {
           method: 'POST',
@@ -162,6 +163,7 @@ document.addEventListener('alpine:init', () => {
             'Accept': 'application/json',
             'X-Requested-With': 'XMLHttpRequest',
             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+            'Idempotency-Key': idem,
           },
           body: JSON.stringify({ message: text }),
         });
@@ -180,6 +182,12 @@ document.addEventListener('alpine:init', () => {
         // 429 = rate-limited. Tell the user to slow down.
         if (r.status === 429) {
           this.appendBubble('assistant', 'พิมพ์เร็วเกินไปนะคะ ลูก — รอสักครู่แล้วลองใหม่อีกครั้ง');
+          return;
+        }
+
+        // 409 = the same message is already in flight (idempotency guard).
+        if (r.status === 409) {
+          this.appendBubble('assistant', 'ข้อความก่อนหน้ากำลังส่งอยู่ค่ะ รอสักครู่นะคะ');
           return;
         }
 

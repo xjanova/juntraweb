@@ -17,9 +17,11 @@ class Pricing
     {
         $val = Setting::get("pricing_$feature");
         if ($val !== null && $val !== '' && is_numeric($val)) {
-            return (float) $val;
+            // Clamp negatives to 0 — a negative price would make debit() throw
+            // InvalidArgumentException and 500 the whole reading/chat request.
+            return max(0.0, (float) $val);
         }
-        return (float) config("pricing.$feature", 0);
+        return max(0.0, (float) config("pricing.$feature", 0));
     }
 
     public static function format(float $amount): string

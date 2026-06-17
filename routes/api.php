@@ -52,11 +52,14 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::prefix('wallet')->name('wallet.')->group(function () {
             Route::get('/',                   [WalletController::class, 'index'])->name('index');
             Route::get('transactions',        [WalletController::class, 'transactions'])->name('transactions');
+            Route::get('topups',              [WalletController::class, 'topups'])->name('topups');
             Route::post('topup/promptpay',    [WalletController::class, 'topupPromptPay'])
                 ->middleware('throttle:topup')->name('topup.promptpay');
             Route::get('topup/{tx}',          [WalletController::class, 'topupShow'])->name('topup.show');
             Route::post('topup/{tx}/slip',    [WalletController::class, 'topupUploadSlip'])
                 ->middleware('throttle:topup')->name('topup.slip');
+            Route::delete('topup/{tx}',       [WalletController::class, 'topupCancel'])
+                ->middleware('throttle:topup')->name('topup.cancel');
         });
 
         // Mae Mor AI Chat — conversations + send
