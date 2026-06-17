@@ -64,9 +64,11 @@ class AiOracle
                 'career'  => $parsed['career']  ?? 'มีโอกาสใหม่เข้ามา',
                 'money'   => $parsed['money']   ?? 'การเงินเริ่มเข้าสู่ความสมดุล',
                 'health'  => $parsed['health']  ?? 'พักผ่อนให้พอเพียง',
-                'lucky_number' => (string) ($parsed['lucky_number'] ?? random_int(1, 99)),
-                'lucky_color'  => $parsed['lucky_color'] ?? 'ทองอ่อน',
-                'lucky_card'   => $parsed['lucky_card']  ?? 'The Star',
+                // Clamp to the daily_horoscopes column widths (8/32/64) so a
+                // verbose AI value can't throw "Data too long" and 500 the page.
+                'lucky_number' => mb_substr((string) ($parsed['lucky_number'] ?? random_int(1, 99)), 0, 8),
+                'lucky_color'  => mb_substr((string) ($parsed['lucky_color'] ?? 'ทองอ่อน'), 0, 32),
+                'lucky_card'   => mb_substr((string) ($parsed['lucky_card']  ?? 'The Star'), 0, 64),
                 'ai_generated' => $this->isConfigured(),
             ];
         }
@@ -95,10 +97,22 @@ class AiOracle
         return $this->complete($prompt, fallback: "ระบบได้คำนวณวันมงคลตามหลักเลขศาสตร์และเลขผลรวมหารด้วย 9 ลงตัว — แนะนำให้เลือกวันที่คะแนนสูงสุด 3 อันดับ และทำพิธีในช่วงเช้า 06.09–09.09 น. ซึ่งเป็นเวลามงคลตามคติไทย");
     }
 
+    /**
+     * Palmistry REQUIRES a vision model — there is NO heuristic fallback for
+     * reading an image. So this THROWS on any failure (unconfigured OR a
+     * dead/empty Gemini response) instead of returning a "sorry, not ready"
+     * string. That matters because the controller debits the wallet BEFORE
+     * calling this: a thrown error trips the controller's refund path, while
+     * a returned string would silently charge the user for a non-answer.
+     * Callers should ALSO gate on isConfigured() before debiting so the
+     * common "no key set" case never charges at all.
+     *
+     * @throws \RuntimeException when no AI is configured or the call fails.
+     */
     public function analyzePalmImage(string $absolutePath, ?string $question): string
     {
         if (!$this->isConfigured()) {
-            return "ระบบดูลายมือ AI ยังไม่ได้เชื่อมต่อกับ API — กรุณาให้ผู้ดูแลเปิดใช้งานในหน้า Admin → Settings (AI). คำถามของคุณถูกบันทึกไว้แล้ว เมื่อระบบพร้อม คำตอบจะถูกส่งไปที่อีเมลของคุณ";
+            throw new \RuntimeException('palmistry: AI not configured');
         }
 
         // Gemini supports image input via inlineData; this method only attempts when configured.
@@ -112,7 +126,11 @@ class AiOracle
             ]],
         ];
 
-        return $this->callGemini($payload) ?? 'ระบบไม่สามารถอ่านลายมือได้ในตอนนี้ กรุณาลองใหม่อีกครั้ง';
+        $reply = $this->callGemini($payload);
+        if (!$reply || trim($reply) === '') {
+            throw new \RuntimeException('palmistry: empty AI response');
+        }
+        return $reply;
     }
 
     public function chat(array $messages): string
@@ -143,7 +161,13 @@ class AiOracle
                 ]],
             ];
             $reply = $this->callGemini($payload);
-            return $reply ?? ($fallback ?? 'ระบบไม่สามารถตอบในขณะนี้');
+            // Blank-check, not null-check: Gemini can return HTTP 200 with an
+            // empty/whitespace text part (e.g. truncated or filtered output).
+            // `?? ` only catches null, so "" would slip through and get saved
+            // as an empty reading — charged but blank. Treat empty as failure.
+            return (is_string($reply) && trim($reply) !== '')
+                ? $reply
+                : ($fallback ?? 'ระบบไม่สามารถตอบในขณะนี้');
         } catch (\Throwable $e) {
             Log::warning('AiOracle complete failed: ' . $e->getMessage());
             return $fallback ?? 'ระบบไม่สามารถตอบในขณะนี้';

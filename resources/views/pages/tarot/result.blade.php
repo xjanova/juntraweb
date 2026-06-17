@@ -81,7 +81,7 @@
 
     <div class="panel" style="margin-top:48px">
       <div class="eyebrow" style="display:inline-flex">บทวิเคราะห์รวม</div>
-      <div class="summary">{!! nl2br(e($reading->result)) !!}</div>
+      <x-reading-prose :text="$reading->result" />
     </div>
 
     <div style="text-align:center;margin-top:48px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap">

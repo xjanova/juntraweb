@@ -29,7 +29,9 @@ class NumerologyController extends Controller
     {
         $data = $request->validate([
             'name'       => 'required|string|max:128',
-            'birth_date' => 'required|date',
+            // Reject impossible birthdates (future / absurd years) before we
+            // charge — they'd produce a meaningless numerology result.
+            'birth_date' => 'required|date|before_or_equal:today|after:1900-01-01',
         ]);
 
         if (!$request->user()) {

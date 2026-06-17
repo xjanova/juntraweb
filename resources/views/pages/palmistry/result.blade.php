@@ -13,7 +13,7 @@
       </div>
       <div class="panel">
         <div class="eyebrow" style="display:inline-flex">บทวิเคราะห์</div>
-        <div class="summary">{!! nl2br(e($reading->result)) !!}</div>
+        <x-reading-prose :text="$reading->result" />
       </div>
     </div>
 

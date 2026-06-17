@@ -46,6 +46,17 @@ class AuspiciousController extends Controller
             return redirect()->route('login')->with('status', 'กรุณาเข้าสู่ระบบเพื่อใช้บริการหาฤกษ์ยาม');
         }
 
+        // Compute candidate days BEFORE charging. The scoring is local + cheap,
+        // and if the chosen window has no auspicious day we must bail without
+        // debiting — never charge for a result page that shows zero dates.
+        $from = isset($data['from_date']) ? Carbon::parse($data['from_date']) : Carbon::today();
+        $to   = isset($data['to_date'])   ? Carbon::parse($data['to_date'])   : $from->copy()->addDays(60);
+        $candidates = $this->candidateDays($from, $to);
+        if (empty($candidates)) {
+            return redirect()->route('auspicious.index')
+                ->with('status', 'ไม่พบวันมงคลในช่วงที่เลือก กรุณาขยายช่วงวันให้กว้างขึ้น — ยังไม่มีการหักเครดิต');
+        }
+
         if ($this->guardCharge($request, 'reading') === false) {
             return redirect()->route('auspicious.index')->with('status', 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่');
         }
@@ -63,10 +74,6 @@ class AuspiciousController extends Controller
         }
 
         try {
-            $from = isset($data['from_date']) ? Carbon::parse($data['from_date']) : Carbon::today();
-            $to   = isset($data['to_date'])   ? Carbon::parse($data['to_date'])   : $from->copy()->addDays(60);
-
-            $candidates = $this->candidateDays($from, $to);
             $advice = $oracle->adviseAuspiciousDates($data['occasion'], $candidates);
 
             $reading = Reading::create([

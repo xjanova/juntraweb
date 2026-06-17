@@ -146,6 +146,14 @@ class TarotController extends Controller
                 ->with('status', 'กรุณาเข้าสู่ระบบเพื่อเปิดไพ่ — เครดิตจะถูกหักจากวอลเลตของคุณ');
         }
 
+        // Safety: only proceed if the deck actually yielded enough cards for
+        // this spread (a mis-seeded or over-deactivated deck could return
+        // fewer). Never charge full price for an incomplete spread.
+        if (count($cards) !== count($positions)) {
+            return redirect()->route('tarot.index')
+                ->with('status', 'ขออภัย ชุดไพ่ยังไม่พร้อมสำหรับการเปิดรูปแบบนี้ — ยังไม่มีการหักเครดิต');
+        }
+
         // Idempotency — block a double-submit of this exact reading.
         if ($this->guardCharge($request, 'reading') === false) {
             return redirect()->route('tarot.index')

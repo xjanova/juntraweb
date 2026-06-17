@@ -29,10 +29,19 @@ class HoroscopeController extends Controller
 
         if (!$horoscope) {
             $payload = $oracle->generateDailyHoroscope($zodiac, $today);
-            $horoscope = DailyHoroscope::create(array_merge($payload, [
-                'zodiac_id' => $zodiac->id,
-                'date'      => $today,
-            ]));
+            try {
+                $horoscope = DailyHoroscope::create(array_merge($payload, [
+                    'zodiac_id' => $zodiac->id,
+                    'date'      => $today,
+                ]));
+            } catch (\Illuminate\Database\QueryException $e) {
+                // A concurrent first-view inserted the row between our read and
+                // write (the [zodiac_id, date] unique index fires). Use theirs
+                // instead of bubbling a raw duplicate-key 500 to the visitor.
+                $horoscope = DailyHoroscope::where('zodiac_id', $zodiac->id)
+                    ->whereDate('date', $today)
+                    ->firstOrFail();
+            }
         }
 
         return view('pages.horoscope.show', [

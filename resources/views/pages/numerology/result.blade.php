@@ -27,7 +27,7 @@
 
     <div class="panel" style="margin-top:32px">
       <div class="eyebrow" style="display:inline-flex">บทวิเคราะห์</div>
-      <div class="summary">{!! nl2br(e($result['narrative'])) !!}</div>
+      <x-reading-prose :text="$result['narrative']" />
     </div>
 
     <div style="text-align:center;margin-top:48px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
