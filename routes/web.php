@@ -11,6 +11,7 @@ use App\Http\Controllers\MlmController;
 use App\Http\Controllers\NumerologyController;
 use App\Http\Controllers\PalmistryController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ReferralController;
 use App\Http\Controllers\TarotController;
 use App\Http\Controllers\WalletController;
 use Illuminate\Support\Facades\Route;
@@ -40,6 +41,13 @@ Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
 });
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
+
+// Affiliate invite landing — the Juntra app shares จันทรา.online/r/<code>.
+// Captures the referral code in a cookie + lands on home (was a 404 before).
+// Full commission attribution still requires Thaiprompt upstream support.
+Route::get('/r/{code}', [ReferralController::class, 'show'])
+    ->where('code', '[A-Za-z0-9_-]+')
+    ->name('referral');
 
 // Static legal pages — theme-agnostic Blade (the ThemeServiceProvider view
 // composer injects $activeTheme/$themeConfig into every view, so Route::view works).
