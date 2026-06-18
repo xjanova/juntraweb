@@ -33,7 +33,7 @@ class FortuneBotClient
         try {
             $resp = $this->client($user)->post($this->chatUrl('/start'));
             if (!$resp->successful()) {
-                $this->clearTokenIfUnauthorized($user, $resp->status());
+                $this->handleUnauthorized($user, $resp->status());
                 Log::warning('FortuneBotClient::start failed', ['status' => $resp->status(), 'body' => $resp->body()]);
                 return null;
             }
@@ -54,7 +54,7 @@ class FortuneBotClient
                 'text'       => $text,
             ]);
             if (!$resp->successful()) {
-                $this->clearTokenIfUnauthorized($user, $resp->status());
+                $this->handleUnauthorized($user, $resp->status());
                 Log::warning('FortuneBotClient::send failed', ['status' => $resp->status(), 'body' => $resp->body()]);
                 return null;
             }
@@ -85,7 +85,7 @@ class FortuneBotClient
             }
             // 404/405 → endpoint not deployed yet; 422 → bad payload; anything else → log + fall through
             if (!in_array($resp->status(), [404, 405], true)) {
-                $this->clearTokenIfUnauthorized($user, $resp->status());
+                $this->handleUnauthorized($user, $resp->status());
                 Log::info('FortuneBotClient::interpretTarot non-200, falling back to chat pipeline', [
                     'status' => $resp->status(),
                     'body'   => mb_substr((string) $resp->body(), 0, 400),
@@ -112,14 +112,22 @@ class FortuneBotClient
        ============================================================ */
 
     /**
-     * A dead upstream token (401/403) is NOT a transient outage — the token
-     * was revoked or expired. Clear it so isAvailable() flips to false (local
-     * fallback kicks in) and the app's "not linked / re-link" path triggers on
-     * the next gated call, instead of silently degrading forever.
+     * A 401/403 from the pool means the token is expired/revoked. First try a
+     * refresh-token grant; only if that fails do we clear the token (so
+     * isAvailable() flips to local fallback and the app's "re-link" path
+     * triggers on the next gated call) instead of degrading silently forever.
      */
-    private function clearTokenIfUnauthorized(User $user, int $status): void
+    private function handleUnauthorized(User $user, int $status): void
     {
-        if (($status === 401 || $status === 403) && !empty($user->thaiprompt_token)) {
+        if ($status !== 401 && $status !== 403) {
+            return;
+        }
+        // Renew in place if we hold a refresh token — next call uses the new one.
+        if (app(\App\Services\ThaipromptTokenService::class)->refresh($user)) {
+            Log::info('FortuneBotClient: refreshed thaiprompt_token after upstream ' . $status, ['user_id' => $user->id]);
+            return;
+        }
+        if (!empty($user->thaiprompt_token)) {
             $user->forceFill(['thaiprompt_token' => null])->saveQuietly();
             Log::info('FortuneBotClient: cleared dead thaiprompt_token after upstream ' . $status, ['user_id' => $user->id]);
         }

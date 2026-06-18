@@ -156,6 +156,12 @@ class ThaipromptController extends Controller
         $user->name = $name;
         $user->thaiprompt_user_id = $tpId !== '' ? $tpId : $user->thaiprompt_user_id;
         $user->thaiprompt_token   = $token['access_token'];
+        // Keep the refresh token + expiry so a stale access token can be
+        // renewed (ThaipromptTokenService) instead of forcing a re-link.
+        $user->thaiprompt_refresh_token = $token['refresh_token'] ?? null;
+        $user->thaiprompt_token_expires_at = isset($token['expires_in'])
+            ? now()->addSeconds((int) $token['expires_in'])
+            : null;
         $user->thaiprompt_synced_at = now();
 
         // Refresh FB/LINE link from upstream — never blank out a previously
