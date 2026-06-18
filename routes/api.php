@@ -46,6 +46,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 
         Route::get('auth/me',     [AuthController::class, 'me'])->name('auth.me');
         Route::post('auth/logout',[AuthController::class, 'logout'])->name('auth.logout');
+        // Short-lived single-use code for the web OAuth bootstrap, so the
+        // long-lived bearer never travels in the mobile-start URL.
+        Route::post('auth/handoff',[AuthController::class, 'handoff'])
+            ->middleware('throttle:10,1')->name('auth.handoff');
 
         // Wallet — balance, history, top-up start + native slip upload.
         // The slip POST goes through the same `topup` 10/min/user bucket

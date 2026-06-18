@@ -9,6 +9,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -31,21 +32,21 @@ class ThaipromptController extends Controller
      * Mobile bootstrap for the OAuth flow.
      *
      * The Juntra Flutter app can't share its Sanctum bearer with the web
-     * browser, so it passes the token via `?bearer=...` here. We resolve
-     * the token to a user, log them into the web session (so the upstream
-     * Thaiprompt callback identifies the same user), tag the session as
-     * "started from mobile", then forward into the normal /redirect
-     * flow.
+     * browser. PREFERRED: the app calls POST /api/v1/auth/handoff (bearer in
+     * the header) and passes the returned short-lived single-use `?code=` here.
+     * We resolve the code to a user, log them into the web session (so the
+     * upstream Thaiprompt callback identifies the same user), tag the session
+     * as "started from mobile", then forward into the normal /redirect flow.
+     *
+     * DEPRECATED fallback: `?bearer=<sanctum token>` for older app builds.
+     * This leaks a long-lived token into URL/history — remove once all
+     * installs use the code path.
      *
      * Security:
-     *   - Only resolves valid Sanctum tokens via PersonalAccessToken
-     *     (rotated/revoked tokens fail closed).
-     *   - HTTPS-only; the token in the URL is only exposed in the
-     *     mobile→browser handoff (a launchUrl call) — never logged or
-     *     forwarded onward. We do NOT include it in the redirect to
-     *     Thaiprompt or in any analytics hit.
-     *   - The token-creator and the now-logged-in web session are the
-     *     same user; we never login-as a different user.
+     *   - The handoff code is single-use (Cache::pull) and expires in 120s, so
+     *     a logged/leaked URL can't be replayed.
+     *   - The bearer fallback only resolves valid Sanctum tokens (rotated/
+     *     revoked fail closed); we never login-as a different user.
      */
     public function mobileStart(Request $request, ThaipromptClient $client): RedirectResponse
     {
@@ -54,23 +55,10 @@ class ThaipromptController extends Controller
                 ->withErrors(['email' => 'ระบบเข้าสู่ระบบ Thaiprompt ยังไม่ได้เปิดใช้งาน']);
         }
 
-        $bearer = (string) $request->query('bearer', '');
-        if ($bearer === '') {
-            return redirect()->route('login')
-                ->withErrors(['email' => 'ลิงก์เชื่อมต่อไม่ถูกต้อง — กรุณากลับไปที่แอพแล้วลองใหม่']);
-        }
-
-        $sanctum = PersonalAccessToken::findToken($bearer);
-        if (!$sanctum || !$sanctum->tokenable_id) {
-            return redirect()->route('login')
-                ->withErrors(['email' => 'เซสชั่นหมดอายุ — กรุณาเข้าสู่ระบบในแอพแล้วลองเชื่อมต่อใหม่']);
-        }
-
-        /** @var User|null $user */
-        $user = User::find($sanctum->tokenable_id);
+        $user = $this->resolveHandoffUser($request);
         if (!$user) {
             return redirect()->route('login')
-                ->withErrors(['email' => 'ไม่พบบัญชีผู้ใช้ที่ผูกกับ token นี้']);
+                ->withErrors(['email' => 'ลิงก์เชื่อมต่อหมดอายุหรือไม่ถูกต้อง — กรุณากลับไปที่แอพแล้วลองใหม่']);
         }
 
         // Establish a web session for the same user so the OAuth callback
@@ -84,6 +72,31 @@ class ThaipromptController extends Controller
         $request->session()->put('thaiprompt_oauth_origin', 'mobile');
 
         return redirect()->route('thaiprompt.redirect');
+    }
+
+    /**
+     * Resolve the mobile-bootstrap user from a single-use `?code=` (preferred)
+     * or a deprecated `?bearer=` Sanctum token. Returns null on miss/expiry.
+     */
+    private function resolveHandoffUser(Request $request): ?User
+    {
+        $code = (string) $request->query('code', '');
+        if ($code !== '') {
+            // Single-use: pull = get + forget, so a replayed URL fails.
+            $userId = Cache::pull('mobile_handoff:' . hash('sha256', $code));
+            return $userId ? User::find($userId) : null;
+        }
+
+        // Deprecated fallback — long-lived bearer in the URL (older app builds).
+        $bearer = (string) $request->query('bearer', '');
+        if ($bearer === '') {
+            return null;
+        }
+        $sanctum = PersonalAccessToken::findToken($bearer);
+        if (!$sanctum || !$sanctum->tokenable_id) {
+            return null;
+        }
+        return User::find($sanctum->tokenable_id);
     }
 
     /**

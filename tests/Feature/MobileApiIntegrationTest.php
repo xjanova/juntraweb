@@ -38,6 +38,19 @@ class MobileApiIntegrationTest extends TestCase
         $this->assertSame(100.0, app(WalletService::class)->balance($u), 'degraded reply must be free');
     }
 
+    /** Auth handoff mints a short-lived code (so the bearer stays out of the OAuth URL). */
+    public function test_auth_handoff_mints_a_short_lived_code(): void
+    {
+        $u = User::factory()->create();
+        Sanctum::actingAs($u);
+
+        $r = $this->postJson('/api/v1/auth/handoff');
+
+        $r->assertOk();
+        $this->assertNotEmpty($r->json('data.code'));
+        $this->assertSame(120, $r->json('data.expires_in'));
+    }
+
     /** topupShow must include the promptpay/QR block so the slip re-upload sheet renders. */
     public function test_topup_show_includes_promptpay_block(): void
     {

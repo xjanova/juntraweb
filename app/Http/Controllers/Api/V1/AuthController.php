@@ -7,8 +7,10 @@ use App\Models\User;
 use App\Services\Wallet\WalletService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 
 /**
@@ -100,6 +102,32 @@ class AuthController extends Controller
         // Revokes the *current* token only — other devices stay logged in.
         $request->user()->currentAccessToken()->delete();
         return response()->json(['data' => ['message' => 'ออกจากระบบเรียบร้อย']]);
+    }
+
+    /**
+     * Mint a SHORT-LIVED, single-use handoff code for the web OAuth bootstrap
+     * (Thaiprompt SSO link).
+     *
+     * The app must hand its session to the browser to finish the SSO link, but
+     * putting the long-lived Sanctum bearer in the mobile-start URL leaks it
+     * into browser history / server logs. Instead the app calls THIS with the
+     * bearer in the Authorization header and passes the returned code (valid
+     * 120s, usable once) in the URL. Even if the code is logged it's useless
+     * after it expires and can't be replayed. The raw code is never stored —
+     * only its SHA-256 — so a cache dump doesn't reveal usable codes.
+     */
+    public function handoff(Request $request): JsonResponse
+    {
+        $code = Str::random(48);
+        Cache::put(
+            'mobile_handoff:' . hash('sha256', $code),
+            $request->user()->id,
+            now()->addSeconds(120),
+        );
+
+        return response()->json([
+            'data' => ['code' => $code, 'expires_in' => 120],
+        ]);
     }
 
     /**
