@@ -27,7 +27,7 @@ class ThaipromptClient
 
     public function baseUrl(): string
     {
-        return rtrim(Setting::get('thaiprompt_base_url', 'https://thaiprompt.com'), '/');
+        return rtrim(Setting::get('thaiprompt_base_url', 'https://main.thaiprompt.online'), '/');
     }
 
     public function clientId(): string

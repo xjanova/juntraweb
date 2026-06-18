@@ -55,7 +55,7 @@ class MembershipIntegration extends Page implements HasForms
                     TextInput::make('thaiprompt_base_url')
                         ->label('Thaiprompt Base URL')
                         ->url()
-                        ->placeholder('https://thaiprompt.com')
+                        ->placeholder('https://main.thaiprompt.online')
                         ->helperText('โดเมนหลักของ Thaiprompt ที่ทำหน้าที่เป็น OAuth provider'),
                     TextInput::make('thaiprompt_client_id')
                         ->label('Client ID')

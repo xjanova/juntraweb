@@ -57,6 +57,19 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * True only when we hold a usable Thaiprompt token — i.e. upstream calls
+     * (MLM, AI pool) will actually authenticate. Distinct from
+     * isThaipromptLinked() (which is true once the account was EVER linked,
+     * even after the token expired/was cleared). Gate upstream-dependent
+     * features on THIS so a dead token surfaces as "re-link" instead of an
+     * empty dashboard.
+     */
+    public function isThaipromptUsable(): bool
+    {
+        return !empty($this->thaiprompt_token);
+    }
+
+    /**
      * True only when the membership originated from Facebook OR LINE —
      * the rule the operator wants for the AI chat gate.
      */

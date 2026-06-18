@@ -187,8 +187,21 @@ class WalletController extends Controller
             ->where('user_id', $request->user()->id)
             ->firstOrFail();
 
+        // Include the SAME promptpay block as topupPromptPay so the app's
+        // slip RE-upload sheet can render the QR + exact payable amount
+        // (previously it opened blank because this block was missing).
+        $payable     = abs((float) $row->amount);
+        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id'));
+
         return response()->json([
             'data' => array_merge($this->txPayload($row), [
+                'payable_amount'  => $payable,
+                'promptpay'       => [
+                    'id'         => $promptpayId,
+                    'name'       => Setting::get('promptpay_name', config('pricing.promptpay_name')),
+                    'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, $payable) : null,
+                    'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, $payable) : null,
+                ],
                 'slip_upload_url' => url('/wallet/topup/' . $row->id),
                 'slip_uploaded'   => !empty($row->slip_path),
             ]),

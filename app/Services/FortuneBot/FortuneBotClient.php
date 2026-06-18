@@ -33,6 +33,7 @@ class FortuneBotClient
         try {
             $resp = $this->client($user)->post($this->chatUrl('/start'));
             if (!$resp->successful()) {
+                $this->clearTokenIfUnauthorized($user, $resp->status());
                 Log::warning('FortuneBotClient::start failed', ['status' => $resp->status(), 'body' => $resp->body()]);
                 return null;
             }
@@ -53,6 +54,7 @@ class FortuneBotClient
                 'text'       => $text,
             ]);
             if (!$resp->successful()) {
+                $this->clearTokenIfUnauthorized($user, $resp->status());
                 Log::warning('FortuneBotClient::send failed', ['status' => $resp->status(), 'body' => $resp->body()]);
                 return null;
             }
@@ -83,6 +85,7 @@ class FortuneBotClient
             }
             // 404/405 → endpoint not deployed yet; 422 → bad payload; anything else → log + fall through
             if (!in_array($resp->status(), [404, 405], true)) {
+                $this->clearTokenIfUnauthorized($user, $resp->status());
                 Log::info('FortuneBotClient::interpretTarot non-200, falling back to chat pipeline', [
                     'status' => $resp->status(),
                     'body'   => mb_substr((string) $resp->body(), 0, 400),
@@ -107,6 +110,20 @@ class FortuneBotClient
     /* ============================================================
        INTERNAL
        ============================================================ */
+
+    /**
+     * A dead upstream token (401/403) is NOT a transient outage — the token
+     * was revoked or expired. Clear it so isAvailable() flips to false (local
+     * fallback kicks in) and the app's "not linked / re-link" path triggers on
+     * the next gated call, instead of silently degrading forever.
+     */
+    private function clearTokenIfUnauthorized(User $user, int $status): void
+    {
+        if (($status === 401 || $status === 403) && !empty($user->thaiprompt_token)) {
+            $user->forceFill(['thaiprompt_token' => null])->saveQuietly();
+            Log::info('FortuneBotClient: cleared dead thaiprompt_token after upstream ' . $status, ['user_id' => $user->id]);
+        }
+    }
 
     /** Run a tarot prompt through the chat pipeline as a one-shot. */
     private function interpretViaChat(User $user, array $payload): ?array
@@ -176,7 +193,7 @@ class FortuneBotClient
 
     private function base(): string
     {
-        return rtrim((string) Setting::get('thaiprompt_base_url', 'https://thaiprompt.com'), '/');
+        return rtrim((string) Setting::get('thaiprompt_base_url', 'https://main.thaiprompt.online'), '/');
     }
 
     private function client(User $user): PendingRequest
