@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\AuspiciousDate;
 use App\Models\Reading;
 use App\Services\AiOracle;
+use App\Services\AuspiciousScorer;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use Carbon\Carbon;
@@ -34,7 +35,7 @@ class AuspiciousController extends Controller
         ]);
     }
 
-    public function find(Request $request, AiOracle $oracle)
+    public function find(Request $request, AiOracle $oracle, AuspiciousScorer $scorer)
     {
         $data = $request->validate([
             'occasion'  => 'required|string|max:128',
@@ -51,7 +52,7 @@ class AuspiciousController extends Controller
         // debiting — never charge for a result page that shows zero dates.
         $from = isset($data['from_date']) ? Carbon::parse($data['from_date']) : Carbon::today();
         $to   = isset($data['to_date'])   ? Carbon::parse($data['to_date'])   : $from->copy()->addDays(60);
-        $candidates = $this->candidateDays($from, $to);
+        $candidates = $scorer->candidateDays($from, $to);
         if (empty($candidates)) {
             return redirect()->route('auspicious.index')
                 ->with('status', 'ไม่พบวันมงคลในช่วงที่เลือก กรุณาขยายช่วงวันให้กว้างขึ้น — ยังไม่มีการหักเครดิต');
@@ -120,40 +121,5 @@ class AuspiciousController extends Controller
             'advice'     => $advice,
             'reading'    => $reading,
         ]);
-    }
-
-    private function candidateDays(Carbon $from, Carbon $to): array
-    {
-        $days = [];
-        $cursor = $from->copy();
-        while ($cursor <= $to && count($days) < 30) {
-            $score = $this->dayScore($cursor);
-            if ($score >= 7) {
-                $days[] = [
-                    'date' => $cursor->copy(),
-                    'score' => $score,
-                    'label' => $this->dayLabel($cursor),
-                ];
-            }
-            $cursor->addDay();
-        }
-        usort($days, fn($a, $b) => $b['score'] <=> $a['score']);
-        return array_slice($days, 0, 10);
-    }
-
-    private function dayScore(Carbon $date): int
-    {
-        $score = 5;
-        if (in_array($date->dayOfWeek, [Carbon::TUESDAY, Carbon::THURSDAY, Carbon::SATURDAY])) $score += 2;
-        if ($date->day === 9 || $date->day === 19 || $date->day === 29) $score += 2;
-        $sumDigits = array_sum(str_split($date->format('Ymd')));
-        if ($sumDigits % 9 === 0) $score += 2;
-        return min(10, $score);
-    }
-
-    private function dayLabel(Carbon $d): string
-    {
-        $days = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
-        return 'วัน' . $days[$d->dayOfWeek] . ' ที่ ' . $d->format('d/m/Y');
     }
 }

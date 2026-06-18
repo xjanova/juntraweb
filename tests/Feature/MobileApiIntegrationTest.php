@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\ChatConversation;
 use App\Models\User;
+use App\Models\Zodiac;
 use App\Services\Wallet\WalletService;
+use App\Support\Pricing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -64,5 +66,54 @@ class MobileApiIntegrationTest extends TestCase
         $r->assertOk()->assertJsonPath('data.promptpay.id', '0812345678');
         $this->assertNotEmpty($r->json('data.promptpay.qr_payload'));
         $this->assertEquals(137.0, $r->json('data.payable_amount'));
+    }
+
+    /** Mobile numerology create — charges once + returns a reading. */
+    public function test_mobile_numerology_creates_reading_and_charges(): void
+    {
+        $u = User::factory()->create();
+        app(WalletService::class)->credit($u, 100, 'seed');
+        Sanctum::actingAs($u);
+        $cost = Pricing::for('numerology');
+
+        $r = $this->postJson('/api/v1/fortune/numerology', [
+            'name' => 'Somchai', 'birth_date' => '1990-05-15',
+        ]);
+
+        $r->assertCreated()->assertJsonPath('data.type', 'numerology');
+        $this->assertNotEmpty($r->json('data.result'));
+        $this->assertNotNull($r->json('data.id'));
+        $this->assertSame(100.0 - $cost, app(WalletService::class)->balance($u));
+    }
+
+    /** A date window with no auspicious day must not charge. */
+    public function test_mobile_auspicious_empty_window_does_not_charge(): void
+    {
+        $u = User::factory()->create();
+        app(WalletService::class)->credit($u, 100, 'seed');
+        Sanctum::actingAs($u);
+
+        // 2025-01-06 (Mon, day 6, digit-sum 16) scores 5 (<7) → no candidates.
+        $r = $this->postJson('/api/v1/fortune/auspicious', [
+            'occasion' => 'แต่งงาน', 'from_date' => '2025-01-06', 'to_date' => '2025-01-06',
+        ]);
+
+        $r->assertStatus(422)->assertJsonPath('reason_code', 'no_auspicious_day');
+        $this->assertSame(100.0, app(WalletService::class)->balance($u));
+    }
+
+    /** Daily horoscope is free + returns a reading for a seeded sign. */
+    public function test_mobile_horoscope_returns_daily_reading(): void
+    {
+        Zodiac::create([
+            'slug' => 'aries', 'name_en' => 'Aries', 'name_th' => 'เมษ', 'glyph' => '♈',
+            'element' => 'Fire', 'ruler' => 'Mars', 'date_range' => '13 เม.ย. - 13 พ.ค.',
+            'order_index' => 1, 'traits_th' => 'กล้าหาญ มุ่งมั่น',
+        ]);
+
+        $r = $this->getJson('/api/v1/horoscope/aries');
+
+        $r->assertOk()->assertJsonPath('data.zodiac.slug', 'aries');
+        $this->assertNotEmpty($r->json('data.summary'));
     }
 }
