@@ -62,6 +62,33 @@ return [
             ]) : [],
         ],
 
+        /*
+        | Read-only sibling connection to the Thaiprompt-Affiliate database.
+        | Used by App\Services\TarotImporter to resolve the CURRENT tarot card
+        | image filenames live (immune to Laravel's random-filename rotation).
+        | Leave THAIPROMPT_DB_* unset on environments that don't import from
+        | Thaiprompt — the importer fails gracefully if the connection is absent.
+        | SECURITY: point THAIPROMPT_DB_USERNAME at a user granted SELECT-only.
+        */
+        'thaiprompt' => [
+            'driver' => 'mysql',
+            'host' => env('THAIPROMPT_DB_HOST', '127.0.0.1'),
+            'port' => env('THAIPROMPT_DB_PORT', '3306'),
+            'database' => env('THAIPROMPT_DB_DATABASE'),
+            'username' => env('THAIPROMPT_DB_USERNAME'),
+            'password' => env('THAIPROMPT_DB_PASSWORD', ''),
+            'unix_socket' => env('THAIPROMPT_DB_SOCKET', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
         'mariadb' => [
             'driver' => 'mariadb',
             'url' => env('DB_URL'),

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\TarotCard;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -22,9 +23,11 @@ use Illuminate\Support\Facades\Storage;
  *     Minor Arcana ranks accept either the english name (`ace`, `two` … `king`)
  *     OR the number (`1` … `14`).
  *
- *  B. **Thaiprompt-Affiliate sibling layout** — flat directory with the random
- *     storage filenames captured from production. Used when juntra and Thaiprompt
- *     share a server. Only Major Arcana mapped (legacy).
+ *  B. **Thaiprompt-Affiliate live import** — joins Thaiprompt's `tarot_cards`
+ *     table (read-only `thaiprompt` connection) on name_en to resolve each
+ *     card's CURRENT image_url, then copies the file from the shared filesystem
+ *     (or downloads image_url over HTTPS as a fallback). Covers all 78 cards and
+ *     is immune to Laravel's random storage-filename rotation.
  *
  * Both produce a report with counts + per-card errors.
  */
@@ -64,34 +67,9 @@ class TarotImporter
         'pentacles' => 'pentacles', 'pentacle' => 'pentacles', 'coins' => 'pentacles',
     ];
 
-    /**
-     * Static fallback map — Thaiprompt Major Arcana files by name_en.
-     * (Captured from production 2026-05-07. Update if Thaiprompt rotates filenames.)
-     */
-    private const THAIPROMPT_MAJOR = [
-        'The Fool'           => 'FaIZl0coOvIVKBbCbtYutJxMWkF2f0NE1KoIv5oc.webp',
-        'The Magician'       => '1Q3wb5eQpzExScL4MaZWF6EYk88ItcKvIMjP1xqd.webp',
-        'The High Priestess' => 'EZy0TG6zQihDW1WY1TFdDo7aDcPw2KWkPrNEMiK0.webp',
-        'The Empress'        => 'voZS2fXheO4czNH46Ux04pXmikExrvnyiBzLV4gj.webp',
-        'The Emperor'        => '0eePBDIYWqzMBEtmAXd2ZMB9Kneen4lYfRPykW7f.webp',
-        'The Hierophant'     => '0dv0JrgUzWON8QoURgUJmGrxVc4X9Cumwd2gmimB.webp',
-        'The Lovers'         => 'mfDEee6m3Ahw4jfRl3Wae0XE8bfkKh89klrxAHus.webp',
-        'The Chariot'        => 'W0s8RPNyCnckJa91JvrduoSvtGSgWd6Ssp6yPFA4.webp',
-        'Strength'           => 'd5wNJJOsHH3rYeoVUcpXRBv7pgJP0HCtaHHl4kn2.webp',
-        'The Hermit'         => 'XRcer1W0MSAtWvlXIKQnNQpkr4Qz1mAnU96ieY4A.webp',
-        'Wheel of Fortune'   => 'affnc2qgUR7YZyzkvFpX4Y8LbqlOmZjw5fvbLjxW.webp',
-        'Justice'            => 'ubwXoSAVpKQAblpCfaW5D8XMs0oNDRgnmgVEL3OG.webp',
-        'The Hanged Man'     => 'fnch00EwOgaT4PdLSLN2s8XtDBE08y42dT0FgUD8.webp',
-        'Death'              => 'wWXwrFXVZYmp9aEcYpMyRaji3rKDVWvAydrmpE9Y.webp',
-        'Temperance'         => 'gSsgbBRPgF5PNC4paWGW3m0WkhiIkR2AUj21xrFa.webp',
-        'The Devil'          => 'A0ZaiogY4saSahMoZKIkaCtXFAgffKagTdVLDoPf.webp',
-        'The Tower'          => '5wJVsAY096zGZ8IxMEwE6aJ25993AYAxDPtfYQhT.webp',
-        'The Star'           => 'ZZTjAWXEy4y7zmUAoUD5L0YPJzoddLRzYmRgjVn8.webp',
-        'The Moon'           => 'PN6gTggArP9JQ0OW4CuhgvETrB913MjUpdUBsC52.webp',
-        'The Sun'            => 'BHpCQQSZcT2oCZEirUTlNO69Lptg92AlpyH7VIU8.webp',
-        'Judgement'          => '0HJEsPSd4eQfsqpVS1vYXmW8gV4Q0OrCdOUiHy77.webp',
-        'The World'          => 'YHxQOWUnxO2WtKYG8ZGM3b1FFyF19NdHrj3hxccN.webp',
-    ];
+    /** Reject any image payload larger than this (defense-in-depth on the download path).
+     *  Real card webp files are ~150–200 KB, so 5 MB is a generous ceiling. */
+    private const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
     public function defaultSourcePath(): string
     {
@@ -249,62 +227,192 @@ class TarotImporter
     }
 
     /**
-     * Legacy Thaiprompt-style flat-directory import (Major Arcana only).
-     * Kept for backwards compatibility with the existing admin button.
+     * Import card faces from the sibling Thaiprompt-Affiliate site (all 78 cards).
+     *
+     * Resolves each card's CURRENT filename live from Thaiprompt's own database
+     * (read-only `thaiprompt` connection) keyed by name_en, so it is immune to
+     * Laravel's random storage-filename rotation. For every card it copies the
+     * file from the shared filesystem ($sourceDir, same-server, fast) and falls
+     * back to an HTTPS download of the stored image_url when the local file is
+     * unavailable (different host / local dev). The HTTP fallback only fetches
+     * from the configured Thaiprompt host (SSRF guard).
+     *
+     * @param string|null $sourceDir Filesystem base for the shared-disk copy
+     *                               (defaults to defaultSourcePath()).
      */
     public function importFromPath(?string $sourceDir = null): array
     {
         $sourceDir = $sourceDir ?: $this->defaultSourcePath();
-        $report = ['source' => $sourceDir, 'imported' => 0, 'skipped_missing' => 0, 'updated' => 0, 'errors' => []];
+        $report = ['source' => $sourceDir, 'remote_total' => 0, 'imported' => 0, 'skipped_missing' => 0, 'updated' => 0, 'errors' => []];
 
-        if (!is_dir($sourceDir)) {
-            $report['errors'][] = "Source directory not found: $sourceDir";
+        // Deliberate batch (up to 78 images); don't let the PHP time limit abort mid-run.
+        @set_time_limit(0);
+
+        // 1) Pull the live name_en → image_url map from Thaiprompt's DB (read-only).
+        $connection = config('tarot.thaiprompt_connection', 'thaiprompt');
+        $table      = config('tarot.thaiprompt_table', 'tarot_cards');
+
+        try {
+            $remoteRows = DB::connection($connection)
+                ->table($table)
+                ->select('name_en', 'image_url')
+                ->get();
+        } catch (\Throwable $e) {
+            $report['errors'][] = "เชื่อมฐานข้อมูล Thaiprompt ไม่ได้ (connection \"$connection\") — ตรวจ THAIPROMPT_DB_* ใน .env";
+            Log::warning('TarotImporter thaiprompt DB unreachable', ['connection' => $connection, 'error' => $e->getMessage()]);
             return $report;
         }
+
+        if ($remoteRows->isEmpty()) {
+            $report['errors'][] = "ไม่มีข้อมูลในตาราง `$table` ฝั่ง Thaiprompt — ไม่มีอะไรให้นำเข้า";
+            return $report;
+        }
+        $report['remote_total'] = $remoteRows->count();
+
+        // 2) Index juntra cards by lower-cased name_en for an exact join.
+        $localByName = TarotCard::all()->keyBy(fn ($c) => mb_strtolower(trim((string) $c->name_en)));
 
         $publicDest = public_path('images/tarot');
         if (!is_dir($publicDest)) {
             File::makeDirectory($publicDest, 0755, true);
         }
 
-        DB::transaction(function () use ($sourceDir, $publicDest, &$report) {
-            foreach (self::THAIPROMPT_MAJOR as $nameEn => $filename) {
-                $src = rtrim($sourceDir, '/\\') . DIRECTORY_SEPARATOR . $filename;
-                if (!is_file($src)) {
-                    $report['skipped_missing']++;
-                    $report['errors'][] = "Missing on source: $nameEn → $filename";
-                    continue;
-                }
+        $allowHttp   = (bool) config('tarot.allow_http_fallback', true);
+        $allowedHost = $this->thaipromptHost();
 
-                $card = TarotCard::where('name_en', $nameEn)->first();
-                if (!$card) {
-                    $report['errors'][] = "Card not in DB: $nameEn";
-                    continue;
-                }
-
-                $destFilename = $card->slug . '.webp';
-                $destPath = $publicDest . DIRECTORY_SEPARATOR . $destFilename;
-
-                if (!@copy($src, $destPath)) {
-                    $report['errors'][] = "Copy failed for $nameEn ($src → $destPath)";
-                    continue;
-                }
-
-                $card->image_path = "images/tarot/$destFilename";
-                $card->save();
-
-                $report['imported']++;
-                $report['updated']++;
+        // No wrapping DB transaction: this loop does blocking file/network I/O, and
+        // the import is naturally idempotent + partial-success (each card commits on
+        // its own). A transaction here would only hold row locks on the public
+        // tarot_cards table across that I/O for zero atomicity benefit.
+        foreach ($remoteRows as $row) {
+            $nameEn = trim((string) $row->name_en);
+            $card   = $localByName->get(mb_strtolower($nameEn));
+            if (!$card) {
+                $report['errors'][] = "ไม่พบไพ่ในฐานข้อมูล juntra: $nameEn";
+                continue;
             }
-        });
 
-        Log::info('TarotImporter run', $report);
+            $imageUrl = trim((string) ($row->image_url ?? ''));
+            if ($imageUrl === '') {
+                $report['skipped_missing']++;
+                $report['errors'][] = "Thaiprompt ไม่มี image_url: $nameEn";
+                continue;
+            }
+
+            // Safe basename + whitelisted extension from the URL path.
+            $basename = basename((string) parse_url($imageUrl, PHP_URL_PATH));
+            $ext      = strtolower(pathinfo($basename, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['webp', 'png', 'jpg', 'jpeg'], true)) {
+                $ext = 'webp';
+            }
+
+            // a) Prefer the shared filesystem (same-server, fast).
+            $bytes = null;
+            if ($basename !== '') {
+                $localSrc = rtrim($sourceDir, '/\\') . DIRECTORY_SEPARATOR . $basename;
+                if (is_file($localSrc)) {
+                    $bytes = @file_get_contents($localSrc);
+                }
+            }
+
+            // b) Fall back to an HTTPS download of image_url (SSRF-guarded).
+            if ($bytes === null || $bytes === false) {
+                if (!$allowHttp) {
+                    $report['skipped_missing']++;
+                    $report['errors'][] = "ไฟล์ไม่อยู่บนดิสก์ (ปิด HTTP fallback): $nameEn → $basename";
+                    continue;
+                }
+                if (!$this->urlHostAllowed($imageUrl, $allowedHost)) {
+                    $report['errors'][] = "ปฏิเสธ image_url นอกโดเมน Thaiprompt ($nameEn): " . parse_url($imageUrl, PHP_URL_HOST);
+                    continue;
+                }
+                try {
+                    // withoutRedirecting(): the host allowlist only vetted the INITIAL
+                    // URL — following a 30x could land on an internal host (SSRF).
+                    $resp = Http::connectTimeout(5)->timeout(15)->withoutRedirecting()->get($imageUrl);
+                    if ($resp->redirect()) {
+                        $report['skipped_missing']++;
+                        $report['errors'][] = "ปฏิเสธ redirect จาก image_url ($nameEn): {$resp->status()}";
+                        continue;
+                    }
+                    if (!$resp->successful()) {
+                        $report['skipped_missing']++;
+                        $report['errors'][] = "ดาวน์โหลดไม่สำเร็จ ({$resp->status()}): $nameEn";
+                        continue;
+                    }
+                    $bytes = $resp->body();
+                } catch (\Throwable $e) {
+                    $report['skipped_missing']++;
+                    $report['errors'][] = "ดาวน์โหลดผิดพลาด ($nameEn): " . $e->getMessage();
+                    continue;
+                }
+            }
+
+            // Validate the payload before it lands under the public web root.
+            if ($bytes === null || $bytes === false || strlen($bytes) === 0) {
+                $report['skipped_missing']++;
+                $report['errors'][] = "ไฟล์ภาพว่างเปล่า: $nameEn";
+                continue;
+            }
+            if (strlen($bytes) > self::MAX_IMAGE_BYTES) {
+                $report['errors'][] = "ไฟล์ใหญ่เกินกำหนด ($nameEn): " . round(strlen($bytes) / 1048576, 1) . ' MB';
+                continue;
+            }
+            if (@getimagesizefromstring($bytes) === false) {
+                $report['errors'][] = "ไฟล์ไม่ใช่รูปภาพที่ถูกต้อง ($nameEn)";
+                continue;
+            }
+
+            $destFilename = $card->slug . '.' . $ext;
+            $destPath     = $publicDest . DIRECTORY_SEPARATOR . $destFilename;
+
+            if (@file_put_contents($destPath, $bytes) === false) {
+                $report['errors'][] = "เขียนไฟล์ไม่สำเร็จ ($nameEn): $destPath";
+                continue;
+            }
+
+            $card->image_path = "images/tarot/$destFilename";
+            $card->save();
+
+            $report['imported']++;
+            $report['updated']++;
+        }
+
+        Log::info('TarotImporter thaiprompt DB run', [
+            'source' => $sourceDir,
+            'imported' => $report['imported'],
+            'updated' => $report['updated'],
+            'skipped_missing' => $report['skipped_missing'],
+            'errors' => count($report['errors']),
+        ]);
+
         return $report;
     }
 
     /* =========================================================================
        INTERNAL HELPERS
        ========================================================================= */
+
+    /** Host that the HTTP fallback is allowed to fetch from (from config base URL). */
+    private function thaipromptHost(): ?string
+    {
+        $base = (string) config('tarot.thaiprompt_base_url', '');
+        $host = $base !== '' ? parse_url($base, PHP_URL_HOST) : null;
+
+        return $host ? strtolower($host) : null;
+    }
+
+    /** True only for http(s) URLs whose host equals the allowed Thaiprompt host (SSRF guard). */
+    private function urlHostAllowed(string $url, ?string $allowedHost): bool
+    {
+        if (!$allowedHost) {
+            return false;
+        }
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        $host   = strtolower((string) parse_url($url, PHP_URL_HOST));
+
+        return in_array($scheme, ['http', 'https'], true) && $host === $allowedHost;
+    }
 
     /** Locate `<rootDir>/<one of $names>` (case-insensitive); return abs path or null. */
     private function resolveSubdir(string $rootDir, array $names): ?string
