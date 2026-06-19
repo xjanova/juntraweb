@@ -66,8 +66,13 @@
 </section>
 
 @php
-function __thaiElement($e) {
-  return ['Fire'=>'ไฟ','Earth'=>'ดิน','Air'=>'ลม','Water'=>'น้ำ'][$e] ?? $e;
+// function_exists guard: Blade compiles this declaration into a file that can
+// be included more than once per worker (persistent workers / Octane), which
+// would fatal with "Cannot redeclare".
+if (!function_exists('__thaiElement')) {
+    function __thaiElement($e) {
+        return ['Fire'=>'ไฟ','Earth'=>'ดิน','Air'=>'ลม','Water'=>'น้ำ'][$e] ?? $e;
+    }
 }
 @endphp
 @endsection

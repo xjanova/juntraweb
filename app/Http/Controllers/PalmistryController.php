@@ -36,6 +36,15 @@ class PalmistryController extends Controller
             return redirect()->route('login')->with('status', 'กรุณาเข้าสู่ระบบเพื่อใช้บริการดูลายมือ');
         }
 
+        // Palmistry needs a vision model and has NO heuristic fallback. If the
+        // AI isn't configured, refuse BEFORE charging — never debit for a
+        // reading we cannot produce. (A configured-but-failed call is handled
+        // by the refund path below, since analyzePalmImage() now throws.)
+        if (!$oracle->isConfigured()) {
+            return redirect()->route('palmistry.index')
+                ->with('status', 'ขออภัย บริการดูลายมือ AI ยังไม่พร้อมให้บริการในขณะนี้ — ยังไม่มีการหักเครดิต กรุณาลองบริการอื่นก่อนนะคะ');
+        }
+
         if ($this->guardCharge($request, 'reading') === false) {
             return redirect()->route('palmistry.index')->with('status', 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่');
         }

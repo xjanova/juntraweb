@@ -2,73 +2,66 @@
 @section('title', 'ไพ่ยิปซี · Tarot Reading')
 
 @section('content')
+@php
+  // Compact meta for the Alpine submit-label + count lookup.
+  $spreadJs = collect($spreads)->mapWithKeys(fn ($s) => [$s['key'] => ['count' => $s['count'], 'name' => $s['name_th']]]);
+@endphp
+
 <section class="canvas" style="padding-top:160px">
-  <div style="text-align:center;max-width:780px;margin:0 auto 60px">
-    <div class="eyebrow" style="display:inline-flex">ไพ่ยิปซี Rider-Waite</div>
+  <div style="text-align:center;max-width:820px;margin:0 auto 48px">
+    <div class="eyebrow" style="display:inline-flex">ไพ่ยิปซี Rider-Waite · 78 ใบ</div>
     <h1 class="display" style="font-size:clamp(48px,6vw,84px);margin-bottom:24px">เปิดไพ่ <em>ค้นหาคำตอบ</em></h1>
-    <p class="lede" style="margin:0 auto">เลือกรูปแบบการดูดวง — สามใบสำหรับเรื่องด่วน, Celtic Cross 10 ใบสำหรับเรื่องลึก แม่หมอจันทรา AI จะวิเคราะห์ให้ทันที</p>
+    <p class="lede" style="margin:0 auto">เลือกรูปแบบการวางไพ่ที่ตรงกับใจคุณ — ตั้งแต่ไพ่ใบเดียวฟันธงเร็ว ไปจนถึง Celtic Cross 10 ใบ และพยากรณ์รายปี 12 เดือน แม่หมอจันทรา AI จะอ่านไพ่ × ตำแหน่งให้คุณอย่างแม่นยำ</p>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;max-width:1080px;margin:0 auto" x-data="{spread: 'three', question: ''}">
+  <form action="{{ route('tarot.begin') }}" method="POST" style="max-width:1080px;margin:0 auto"
+        x-data="{ spread: 'three', question: '', meta: {{ $spreadJs->toJson() }} }">
+    @csrf
+    <input type="hidden" name="spread" :value="spread">
 
-    <div class="panel">
-      <div class="eyebrow" style="display:inline-flex">เลือกรูปแบบ</div>
-      <div style="display:flex;flex-direction:column;gap:14px;margin-top:16px">
-        <label style="display:flex;gap:14px;padding:18px 20px;border:1px solid var(--line-soft);border-radius:14px;cursor:pointer;align-items:center" :style="spread==='three' ? 'border-color:var(--gold);background:rgba(244,207,106,.08)' : ''">
-          <input type="radio" name="spread" value="three" x-model="spread" style="accent-color:var(--gold)">
-          <div>
-            <div style="font-family:var(--display);letter-spacing:.18em;color:var(--gold);font-size:13px;text-transform:uppercase">3 ใบ · อดีต ปัจจุบัน อนาคต</div>
-            <div style="font-size:13px;color:var(--ink-dim);margin-top:4px">เร็วที่สุด เหมาะกับคำถามตรง ๆ ใช้เวลา 3 นาที</div>
-            @if (isset($priceThree))
-              <div style="font-family:var(--display);font-size:11px;color:var(--gold);letter-spacing:.18em;margin-top:6px">฿{{ number_format($priceThree, $priceThree == intval($priceThree) ? 0 : 2) }} / ครั้ง</div>
-            @endif
+    <div class="eyebrow" style="display:inline-flex;margin-bottom:16px">เลือกรูปแบบการวางไพ่</div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
+      @foreach ($spreads as $s)
+        <label
+          style="display:flex;flex-direction:column;gap:8px;padding:20px;border:1px solid var(--line-soft);border-radius:16px;cursor:pointer;height:100%"
+          :style="spread==='{{ $s['key'] }}' ? 'border-color:var(--gold);background:rgba(244,207,106,.08);box-shadow:0 0 0 1px var(--gold)' : ''">
+          <div style="display:flex;align-items:flex-start;gap:12px">
+            <input type="radio" name="spread_radio" value="{{ $s['key'] }}" x-model="spread" style="accent-color:var(--gold);margin-top:4px">
+            <div style="flex:1">
+              <div style="font-family:var(--display);letter-spacing:.16em;color:var(--gold);font-size:12px;text-transform:uppercase">{{ $s['eyebrow'] }}</div>
+              <div style="font-family:var(--serif,serif);font-size:20px;color:var(--ink,#f6efe0);margin-top:4px;line-height:1.2">{{ $s['name_th'] }}</div>
+              <div style="font-size:11px;color:var(--ink-dim);letter-spacing:.12em;text-transform:uppercase">{{ $s['name_en'] }}</div>
+            </div>
+          </div>
+          <div style="font-size:13px;color:var(--ink-dim);line-height:1.5;flex:1">{{ $s['tagline'] }}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px">
+            <span style="font-size:12px;color:var(--ink-dim)">{{ $s['count'] }} ใบ · ~{{ $s['est'] }}</span>
+            <span style="font-family:var(--display);font-size:13px;color:var(--gold);letter-spacing:.14em">
+              @if ($s['price'] > 0)
+                ฿{{ number_format($s['price'], $s['price'] == intval($s['price']) ? 0 : 2) }}
+              @else
+                ฟรี
+              @endif
+            </span>
           </div>
         </label>
-        <label style="display:flex;gap:14px;padding:18px 20px;border:1px solid var(--line-soft);border-radius:14px;cursor:pointer;align-items:center" :style="spread==='celtic' ? 'border-color:var(--gold);background:rgba(244,207,106,.08)' : ''">
-          <input type="radio" name="spread" value="celtic" x-model="spread" style="accent-color:var(--gold)">
-          <div>
-            <div style="font-family:var(--display);letter-spacing:.18em;color:var(--gold);font-size:13px;text-transform:uppercase">Celtic Cross · 10 ใบ</div>
-            <div style="font-size:13px;color:var(--ink-dim);margin-top:4px">ลึก ครบ 360° วิเคราะห์ทั้งภายในและภายนอก</div>
-            @if (isset($priceCeltic))
-              <div style="font-family:var(--display);font-size:11px;color:var(--gold);letter-spacing:.18em;margin-top:6px">฿{{ number_format($priceCeltic, $priceCeltic == intval($priceCeltic) ? 0 : 2) }} / ครั้ง</div>
-            @endif
-          </div>
-        </label>
-      </div>
-
-      <form action="{{ route('tarot.begin') }}" method="POST" style="margin-top:32px">
-        @csrf
-        {{-- the spread radios above also write to this hidden mirror so Alpine reactivity is irrelevant on submit --}}
-        <input type="hidden" name="spread" :value="spread">
-        <div class="field">
-          <label for="question">คำถาม (ไม่ใส่ก็ได้)</label>
-          <textarea id="question" name="question" rows="3" x-model="question" placeholder="เช่น ดวงเดือนนี้เป็นอย่างไร, ความสัมพันธ์กับคนรักจะดีขึ้นไหม"></textarea>
-        </div>
-        <button class="btn btn-primary" style="width:100%;justify-content:center">
-          <span x-text="spread==='three' ? 'เลือกไพ่ 3 ใบ →' : 'เลือกไพ่ Celtic Cross 10 ใบ →'"></span>
-        </button>
-        <div style="margin-top:14px;font-size:12px;color:var(--ink-dim);text-align:center;letter-spacing:.04em">
-          ระบบจะกางไพ่ทั้ง 78 ใบให้คุณเลือกด้วยตัวเองในขั้นตอนถัดไป ✨
-        </div>
-      </form>
+      @endforeach
     </div>
 
-    <div style="display:grid;place-items:center">
-      <div class="reading-stage" style="gap:18px">
-        <div class="tarot" onclick="this.classList.toggle('flipped')">
-          <div class="tarot-glow"></div>
-          <div class="face back"><div class="back-inner">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=".7"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19"/></svg>
-          </div></div>
-          <div class="face front">
-            <img src="{{ asset('images/card-magician.png') }}" alt="">
-            <div class="meaning">ลองหมุนเบาๆ ทำใจให้สงบก่อนเริ่มเปิดไพ่จริง</div>
-            <div class="label">PREVIEW</div>
-          </div>
-        </div>
+    <div class="panel" style="margin-top:28px">
+      <div class="field" style="margin-bottom:18px">
+        <label for="question">คำถามของคุณ (ไม่ใส่ก็ได้ — ใส่ให้แม่หมออ่านได้ตรงขึ้น)</label>
+        <textarea id="question" name="question" rows="3" x-model="question" maxlength="500"
+                  placeholder="เช่น ความสัมพันธ์กับคนรักจะไปทางไหน, ปีนี้การงานการเงินเป็นอย่างไร, ควรเปลี่ยนงานดีไหม"></textarea>
+      </div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" type="submit">
+        <span x-text="meta[spread] ? `เลือกไพ่ ${meta[spread].count} ใบ — ${meta[spread].name} →` : 'เลือกไพ่ของคุณ →'"></span>
+      </button>
+      <div style="margin-top:14px;font-size:12px;color:var(--ink-dim);text-align:center;letter-spacing:.04em">
+        ระบบจะกางไพ่ทั้ง 78 ใบให้คุณเลือกด้วยตัวเองในขั้นตอนถัดไป ✨ · เครดิตจะถูกหักจากวอลเลตเมื่อเปิดไพ่เท่านั้น
       </div>
     </div>
-
-  </div>
+  </form>
 </section>
 @endsection

@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChatController;
+use App\Http\Controllers\Api\V1\FortuneController;
 use App\Http\Controllers\Api\V1\HistoryController;
+use App\Http\Controllers\Api\V1\HoroscopeController;
 use App\Http\Controllers\Api\V1\MlmController;
 use App\Http\Controllers\Api\V1\SmsPaymentController;
 use App\Http\Controllers\Api\V1\WalletController;
@@ -41,11 +43,19 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         'time'    => now()->toIso8601String(),
     ]))->name('app.health');
 
+    // Daily horoscope — free + read-only (no auth, no debit).
+    Route::get('horoscope',           [HoroscopeController::class, 'index'])->name('horoscope.index');
+    Route::get('horoscope/{zodiac}',  [HoroscopeController::class, 'show'])->name('horoscope.show');
+
     // ─── Authenticated (Sanctum bearer) ───────────────────────
     Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('auth/me',     [AuthController::class, 'me'])->name('auth.me');
         Route::post('auth/logout',[AuthController::class, 'logout'])->name('auth.logout');
+        // Short-lived single-use code for the web OAuth bootstrap, so the
+        // long-lived bearer never travels in the mobile-start URL.
+        Route::post('auth/handoff',[AuthController::class, 'handoff'])
+            ->middleware('throttle:10,1')->name('auth.handoff');
 
         // Wallet — balance, history, top-up start + native slip upload.
         // The slip POST goes through the same `topup` 10/min/user bucket
@@ -82,6 +92,13 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('stats',       [MlmController::class, 'stats'])->name('stats');
             Route::get('tree',        [MlmController::class, 'tree'])->name('tree');
             Route::get('commissions', [MlmController::class, 'commissions'])->name('commissions');
+        });
+
+        // Paid non-tarot readings — same `reading` rate-limit + debit/refund.
+        Route::prefix('fortune')->name('fortune.')->middleware('throttle:reading')->group(function () {
+            Route::post('numerology', [FortuneController::class, 'numerology'])->name('numerology');
+            Route::post('auspicious', [FortuneController::class, 'auspicious'])->name('auspicious');
+            Route::post('palmistry',  [FortuneController::class, 'palmistry'])->name('palmistry');
         });
 
         // Reading history (tarot / numerology / palmistry / auspicious).

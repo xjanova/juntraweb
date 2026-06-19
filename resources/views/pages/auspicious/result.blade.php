@@ -24,7 +24,7 @@
 
     <div class="panel" style="margin-top:32px">
       <div class="eyebrow" style="display:inline-flex">คำแนะนำของแม่หมอ</div>
-      <div class="summary">{!! nl2br(e($advice)) !!}</div>
+      <x-reading-prose :text="$advice" />
     </div>
 
     <div style="text-align:center;margin-top:48px">

@@ -125,7 +125,7 @@ class InstallerController extends Controller
         return view('install.integrations', [
             'data' => $request->session()->get('install.integrations', [
                 'thaiprompt_enabled' => false,
-                'thaiprompt_base_url' => 'https://thaiprompt.com',
+                'thaiprompt_base_url' => 'https://main.thaiprompt.online',
                 'thaiprompt_client_id' => '',
                 'thaiprompt_client_secret' => '',
                 'ai_provider' => 'gemini',

@@ -84,6 +84,16 @@
         </template>
       </div>
 
+      @if (($readonly ?? false))
+        {{-- History view — this conversation isn't the live session, so the
+             send form (which posts to the live thread) is hidden. --}}
+        <div style="text-align:center;padding:20px 8px 4px">
+          <p style="color:var(--ink-dim);font-size:14px;margin-bottom:14px">นี่คือประวัติการสนทนา — เปิดอ่านได้อย่างเดียว</p>
+          <a href="{{ route('chat.index') }}" class="btn btn-primary">ไปคุยกับแม่หมอต่อ
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+      @else
       <form @submit.prevent="send" class="chat-input-row field" style="margin-bottom:0">
         @csrf
         <input
@@ -102,6 +112,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </button>
       </form>
+      @endif
     </div>
 
     @if ($gate['allowed'])

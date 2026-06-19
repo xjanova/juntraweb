@@ -77,6 +77,7 @@ class ChatController extends Controller
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => Pricing::for('chat_message'),
             'balance'      => $user ? $this->wallet->balance($user) : null,
+            'readonly'     => false, // live chat room — input is active
         ]);
     }
 
@@ -126,12 +127,16 @@ class ChatController extends Controller
             'content' => $data['message'],
         ]);
 
-        $reply = $this->dispatchToUpstream($request, $user, $data['message']);
+        $dispatch = $this->dispatchToUpstream($request, $user, $data['message']);
+        $reply    = $dispatch['reply'];
+        $degraded = $dispatch['degraded'] ?? false;
 
-        // Debit only AFTER we have a successful reply — fairer to the user
-        // when upstream blips. Race-safe because debit() locks the wallet row.
+        // Debit only AFTER a successful reply — fairer to the user when upstream
+        // blips. And NEVER charge for a degraded placeholder (no AI key AND
+        // upstream unreachable): the user gets the "not ready" note for free.
+        // Race-safe because debit() locks the wallet row.
         $debitTx = null;
-        if ($cost > 0) {
+        if ($cost > 0 && !$degraded) {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'AI chat message', [
                     'reference_type' => 'chat_message',
@@ -198,6 +203,10 @@ class ChatController extends Controller
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => Pricing::for('chat_message'),
             'balance'      => $user ? $this->wallet->balance($user) : null,
+            // Viewing past history: the send form posts to the LIVE session
+            // conversation, so disable input here to avoid appending replies to
+            // the wrong thread. The user goes to /chat to continue chatting.
+            'readonly'     => true,
         ]);
     }
 
@@ -211,10 +220,10 @@ class ChatController extends Controller
      * fall back to the local AiOracle — juntra's chat NEVER breaks, even
      * when upstream is down.
      */
-    private function dispatchToUpstream(Request $request, $user, string $message): string
+    private function dispatchToUpstream(Request $request, $user, string $message): array
     {
         if (!$this->bot->isAvailable($user)) {
-            return $this->fallback($message);
+            return $this->degradedFallback($message);
         }
 
         // Re-use the upstream session id across messages for context continuity.
@@ -228,7 +237,7 @@ class ChatController extends Controller
         }
 
         if (!$sessionId) {
-            return $this->fallback($message);
+            return $this->degradedFallback($message);
         }
 
         $resp  = $this->bot->send($user, $sessionId, $message);
@@ -255,10 +264,24 @@ class ChatController extends Controller
             Log::warning('Thaiprompt bot still empty after retry — falling back to AiOracle', [
                 'user_id' => $user->id,
             ]);
-            return $this->fallback($message);
+            return $this->degradedFallback($message);
         }
 
-        return $reply;
+        return ['reply' => $reply, 'degraded' => false];
+    }
+
+    /**
+     * Local AiOracle fallback. Marked "degraded" only when there's no Gemini
+     * key either — i.e. the reply is a placeholder, not a real answer — so the
+     * caller can skip the charge. When a key IS set the local model gives a
+     * genuine reply and we charge normally.
+     */
+    private function degradedFallback(string $message): array
+    {
+        return [
+            'reply'    => $this->fallback($message),
+            'degraded' => !$this->oracle->isConfigured(),
+        ];
     }
 
     private function fallback(string $message): string

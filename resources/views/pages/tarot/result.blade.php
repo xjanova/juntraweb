@@ -1,16 +1,28 @@
 @extends('layouts.app')
 @section('title', 'ผลการเปิดไพ่')
 
+@php
+  use App\Support\TarotSpreads;
+  $spreadKey   = TarotSpreads::keyFromType($reading->type);
+  $spreadMeta  = $spreadKey ? TarotSpreads::get($spreadKey) : null;
+  $spreadName  = $spreadMeta['name_th'] ?? 'ไพ่ยิปซี';
+  $spreadEn    = $spreadMeta['name_en'] ?? '';
+  $layout      = $spreadMeta['layout'] ?? 'grid';
+  $count       = $reading->tarotCards->count();
+  // position number → asks text, for the subtitle under each card.
+  $asks        = $spreadKey ? array_column(TarotSpreads::positions($spreadKey), 'asks') : [];
+@endphp
+
 @section('content')
 <section class="canvas" style="padding-top:160px">
   <div class="reading-result">
-    <div class="eyebrow">{{ $reading->type === 'tarot_celtic' ? 'CELTIC CROSS · 10 ใบ' : 'THREE-CARD SPREAD · 3 ใบ' }}</div>
+    <div class="eyebrow">{{ $spreadName }}@if($spreadEn) · {{ $spreadEn }}@endif · {{ $count }} ใบ</div>
     <h2 style="margin-bottom:8px">คำพยากรณ์ <em>จากไพ่ของคุณ</em></h2>
     @if ($reading->question)
       <p class="lede" style="margin-top:16px">"{{ $reading->question }}"</p>
     @endif
 
-    @if ($reading->type === 'tarot_celtic')
+    @if ($layout === 'celtic')
       @php
         // Map position number → reading-card row, so the layout grid can pluck cards out by index
         $byPos = $reading->tarotCards->keyBy('position');
@@ -46,11 +58,17 @@
       </div>
 
     @else
-      {{-- 3-card spread (existing layout) --}}
-      <div class="reading-card-row" style="grid-template-columns: repeat(3, 1fr)">
+      {{-- Generic spread: 1 / 3 / 5 / 12 cards in a responsive row.
+           1 card → centered; 2-3 → equal columns; more → wrap. --}}
+      @php $rowClass = $count === 1 ? 'is-single' : ($count > 3 ? 'is-wrap' : ''); @endphp
+      <div class="reading-card-row {{ $rowClass }}"
+           @if($count > 1 && $count <= 3) style="grid-template-columns: repeat({{ $count }}, 1fr)" @endif>
         @foreach ($reading->tarotCards as $rc)
           <div class="position">
             <div class="pos-label">{{ $rc->position_label }}</div>
+            @if (!empty($asks[$rc->position - 1]))
+              <div class="pos-asks">{{ $asks[$rc->position - 1] }}</div>
+            @endif
             <div class="card-img" style="{{ $rc->reversed ? 'transform:rotate(180deg)' : '' }}">
               <img src="{{ $rc->card->imageUrl() }}" alt="{{ $rc->card->name_th }}">
             </div>
@@ -63,7 +81,7 @@
 
     <div class="panel" style="margin-top:48px">
       <div class="eyebrow" style="display:inline-flex">บทวิเคราะห์รวม</div>
-      <div class="summary">{!! nl2br(e($reading->result)) !!}</div>
+      <x-reading-prose :text="$reading->result" />
     </div>
 
     <div style="text-align:center;margin-top:48px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap">

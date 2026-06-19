@@ -11,6 +11,7 @@ use App\Http\Controllers\MlmController;
 use App\Http\Controllers\NumerologyController;
 use App\Http\Controllers\PalmistryController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ReferralController;
 use App\Http\Controllers\TarotController;
 use App\Http\Controllers\WalletController;
 use Illuminate\Support\Facades\Route;
@@ -41,6 +42,13 @@ Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
+// Affiliate invite landing — the Juntra app shares จันทรา.online/r/<code>.
+// Captures the referral code in a cookie + lands on home (was a 404 before).
+// Full commission attribution still requires Thaiprompt upstream support.
+Route::get('/r/{code}', [ReferralController::class, 'show'])
+    ->where('code', '[A-Za-z0-9_-]+')
+    ->name('referral');
+
 // Static legal pages — theme-agnostic Blade (the ThemeServiceProvider view
 // composer injects $activeTheme/$themeConfig into every view, so Route::view works).
 Route::view('/privacy', 'pages.legal.privacy')->name('legal.privacy');
@@ -52,8 +60,7 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/', 'index')->name('index');
     Route::post('/begin', 'begin')->name('begin');                  // step 1 → save spread+question, redirect to pick
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
-    Route::post('/three-card', 'threeCardSpread')->middleware('throttle:reading')->name('three-card');
-    Route::post('/celtic-cross', 'celticCross')->middleware('throttle:reading')->name('celtic-cross');
+    Route::post('/cast', 'cast')->middleware('throttle:reading')->name('cast'); // step 3 → any spread
     Route::get('/result/{reading}', 'show')->name('show');
 });
 

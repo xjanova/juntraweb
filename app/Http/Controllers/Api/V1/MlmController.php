@@ -30,7 +30,7 @@ class MlmController extends Controller
     public function stats(Request $request): JsonResponse
     {
         $user = $request->user();
-        if (!$user->isThaipromptLinked()) {
+        if (!$user->isThaipromptUsable()) {
             return $this->notLinked();
         }
         $stats = $this->api->stats($user);
@@ -46,7 +46,7 @@ class MlmController extends Controller
             'depth' => 'sometimes|integer|min:1|max:10',
         ]);
         $user = $request->user();
-        if (!$user->isThaipromptLinked()) {
+        if (!$user->isThaipromptUsable()) {
             return $this->notLinked();
         }
         $tree = $this->api->tree($user, null, (int) $request->input('depth', 5));
@@ -67,7 +67,7 @@ class MlmController extends Controller
         ]);
 
         $user = $request->user();
-        if (!$user->isThaipromptLinked()) {
+        if (!$user->isThaipromptUsable()) {
             return $this->notLinked();
         }
 

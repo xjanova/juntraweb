@@ -180,6 +180,32 @@
 /* Mobile hides the desktop staff column 7-10 too — they stack in mobile fallback */
 
 /* ============================================================
+   GENERIC SPREAD GRID — single / love / career / decision / year
+   Reuses the theme's `.reading-card-row .position` card styling; only
+   the column behaviour + the position-role subtitle live here so they
+   apply across every theme. Two-class selectors out-rank the theme's
+   single-class `.reading-card-row` regardless of stylesheet order.
+   ============================================================ */
+.reading-card-row.is-wrap {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.reading-card-row.is-single {
+  grid-template-columns: minmax(0, 260px);
+  justify-content: center;
+}
+.reading-card-row .position .pos-asks {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-dim, rgba(246, 239, 224, .55));
+  margin: -6px 0 14px;
+  padding: 0 6px;
+  opacity: .85;
+}
+@media (max-width: 640px) {
+  .reading-card-row.is-wrap { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ============================================================
    CARD-PICK FAN — 78 face-down cards, responsive auto-fill grid
    Shown at /tarot/pick after user chooses spread + question.
    ============================================================ */

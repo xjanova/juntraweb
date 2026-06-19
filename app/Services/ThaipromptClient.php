@@ -27,7 +27,7 @@ class ThaipromptClient
 
     public function baseUrl(): string
     {
-        return rtrim(Setting::get('thaiprompt_base_url', 'https://thaiprompt.com'), '/');
+        return rtrim(Setting::get('thaiprompt_base_url', 'https://main.thaiprompt.online'), '/');
     }
 
     public function clientId(): string
@@ -74,6 +74,31 @@ class ThaipromptClient
             return $resp->json();
         } catch (\Throwable $e) {
             Log::error('Thaiprompt token exchange threw', ['msg' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Exchange a refresh token for a fresh access token. Returns the token
+     * response (access_token / refresh_token / expires_in) or null if the
+     * upstream doesn't support the grant or the refresh token is dead.
+     */
+    public function refreshToken(string $refreshToken): ?array
+    {
+        try {
+            $resp = Http::asForm()->timeout(15)->post($this->baseUrl() . '/oauth/token', [
+                'grant_type'    => 'refresh_token',
+                'client_id'     => $this->clientId(),
+                'client_secret' => $this->clientSecret(),
+                'refresh_token' => $refreshToken,
+            ]);
+            if (!$resp->successful()) {
+                Log::warning('Thaiprompt token refresh failed', ['status' => $resp->status()]);
+                return null;
+            }
+            return $resp->json();
+        } catch (\Throwable $e) {
+            Log::warning('Thaiprompt token refresh threw', ['msg' => $e->getMessage()]);
             return null;
         }
     }

@@ -139,11 +139,15 @@ class ChatController extends Controller
             'content' => $data['message'],
         ]);
 
-        $reply = $this->dispatchToUpstream($user, $conversation, $data['message']);
+        $dispatch = $this->dispatchToUpstream($user, $conversation, $data['message']);
+        $reply    = $dispatch['reply'];
+        $degraded = $dispatch['degraded'] ?? false;
 
-        // Debit only AFTER a successful reply — fairer when upstream blips.
+        // Debit only AFTER a successful reply — fairer when upstream blips. And
+        // NEVER for a degraded placeholder (no AI key + upstream unreachable):
+        // the user gets the "not ready" note for free (parity with web).
         $debitTx = null;
-        if ($cost > 0) {
+        if ($cost > 0 && !$degraded) {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'AI chat message', [
                     'reference_type' => 'chat_message',
@@ -198,10 +202,10 @@ class ChatController extends Controller
        INTERNAL
        ============================================================ */
 
-    private function dispatchToUpstream($user, ChatConversation $conversation, string $message): string
+    private function dispatchToUpstream($user, ChatConversation $conversation, string $message): array
     {
         if (!$this->bot->isAvailable($user)) {
-            return $this->oracle->chat([(object) ['role' => 'user', 'content' => $message]]);
+            return $this->degradedFallback($message);
         }
 
         $sessionId = $this->loadUpstreamSession($conversation->id);
@@ -213,7 +217,7 @@ class ChatController extends Controller
             }
         }
         if (!$sessionId) {
-            return $this->oracle->chat([(object) ['role' => 'user', 'content' => $message]]);
+            return $this->degradedFallback($message);
         }
 
         $resp  = $this->bot->send($user, $sessionId, $message);
@@ -232,10 +236,23 @@ class ChatController extends Controller
         }
 
         if (!$reply || trim($reply) === '') {
-            return $this->oracle->chat([(object) ['role' => 'user', 'content' => $message]]);
+            return $this->degradedFallback($message);
         }
 
-        return $reply;
+        return ['reply' => $reply, 'degraded' => false];
+    }
+
+    /**
+     * Local AiOracle fallback. Marked "degraded" only when there's no Gemini
+     * key either — i.e. the reply is a placeholder, not a real answer — so the
+     * caller can skip the charge (parity with the web ChatController).
+     */
+    private function degradedFallback(string $message): array
+    {
+        return [
+            'reply'    => $this->oracle->chat([(object) ['role' => 'user', 'content' => $message]]),
+            'degraded' => !$this->oracle->isConfigured(),
+        ];
     }
 
     private function authorizeOwner(Request $request, ChatConversation $conversation): void

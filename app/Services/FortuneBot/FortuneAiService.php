@@ -5,6 +5,7 @@ namespace App\Services\FortuneBot;
 use App\Models\Reading;
 use App\Models\User;
 use App\Services\AiOracle;
+use App\Support\TarotSpreads;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -33,24 +34,19 @@ class FortuneAiService
      */
     public function interpretTarot(Reading $reading, ?User $user): array
     {
-        $cards = $reading->tarotCards()->with('card')->orderBy('position')->get();
+        $key = TarotSpreads::keyFromType($reading->type);
 
         // Build the structured payload the upstream tarot endpoint expects.
+        // `cards` carry each position's `asks` (TarotPromptBuilder::payloadCards)
+        // and `prompt` is the full Card-First Mandate text so the chat-pipe
+        // fallback reads card × position exactly like the local path.
         $payload = [
-            'spread'   => $reading->type, // tarot_three | tarot_celtic
-            'question' => $reading->question,
-            'cards'    => $cards->map(fn ($pc) => [
-                'position'       => $pc->position,
-                'position_label' => $pc->position_label,
-                'reversed'       => (bool) $pc->reversed,
-                'name_th'        => $pc->card->name_th,
-                'name_en'        => $pc->card->name_en ?? null,
-                'slug'           => $pc->card->slug,
-                'arcana'         => $pc->card->arcana ?? null,
-                'meaning'        => $pc->reversed
-                    ? $pc->card->reversed_meaning_th
-                    : $pc->card->upright_meaning_th,
-            ])->toArray(),
+            'spread'      => $reading->type,
+            'spread_key'  => $key,
+            'spread_name' => $key ? (TarotSpreads::get($key)['name_th'] ?? null) : null,
+            'question'    => $reading->question,
+            'cards'       => TarotPromptBuilder::payloadCards($reading),
+            'prompt'      => TarotPromptBuilder::userPrompt($reading),
         ];
 
         if ($this->bot->isAvailable($user)) {

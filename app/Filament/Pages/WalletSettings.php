@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\Setting;
+use App\Support\TarotSpreads;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Concerns\InteractsWithForms;
@@ -27,26 +28,41 @@ class WalletSettings extends Page implements HasForms
     public function mount(): void
     {
         $cfg = config('pricing');
-        $this->form->fill([
-            'pricing_tarot_three'  => Setting::get('pricing_tarot_three',  $cfg['tarot_three']),
-            'pricing_tarot_celtic' => Setting::get('pricing_tarot_celtic', $cfg['tarot_celtic']),
+        $fill = [
             'pricing_numerology'   => Setting::get('pricing_numerology',   $cfg['numerology']),
             'pricing_palmistry'    => Setting::get('pricing_palmistry',    $cfg['palmistry']),
             'pricing_auspicious'   => Setting::get('pricing_auspicious',   $cfg['auspicious']),
             'pricing_chat_message' => Setting::get('pricing_chat_message', $cfg['chat_message']),
             'promptpay_id'         => Setting::get('promptpay_id',         $cfg['promptpay_id']),
             'promptpay_name'       => Setting::get('promptpay_name',       $cfg['promptpay_name']),
-        ]);
+        ];
+        // One price field per registered tarot spread (config/tarot_spreads.php).
+        foreach (TarotSpreads::keys() as $k) {
+            $key = "pricing_tarot_{$k}";
+            $fill[$key] = Setting::get($key, $cfg["tarot_{$k}"] ?? 0);
+        }
+        $this->form->fill($fill);
     }
 
     public function form(Form $form): Form
     {
+        // Build a price input for every spread so adding a spread to the
+        // registry automatically makes it priceable here.
+        $tarotInputs = collect(TarotSpreads::all())->map(fn ($meta, $k) =>
+            TextInput::make("pricing_tarot_{$k}")
+                ->label($meta['name_th'] . ' (' . count($meta['positions']) . ' ใบ)')
+                ->prefix('฿')->numeric()->minValue(0)->maxValue(100000)
+                ->default((float) config("pricing.tarot_{$k}", 0))
+        )->values()->all();
+
         return $form->schema([
-            Section::make('ราคาต่อบริการ (THB)')
+            Section::make('ราคาไพ่ยิปซี (THB)')
+                ->description('ตั้งราคาต่อการเปิดไพ่แต่ละรูปแบบ — ตั้ง 0 เพื่อให้ฟรี')
+                ->schema($tarotInputs)->columns(3),
+
+            Section::make('ราคาบริการอื่น (THB)')
                 ->description('แอดมินตั้งราคาที่นี่ — มีผลทันทีกับผู้ใช้ทุกคน. ตั้ง 0 เพื่อปิดการคิดเงิน (ใช้ฟรี)')
                 ->schema([
-                    TextInput::make('pricing_tarot_three')->label('ไพ่ 3 ใบ')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(19),
-                    TextInput::make('pricing_tarot_celtic')->label('Celtic Cross 10 ใบ')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(99),
                     TextInput::make('pricing_numerology')->label('เลขศาสตร์')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(9),
                     TextInput::make('pricing_palmistry')->label('ลายมือ')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(29),
                     TextInput::make('pricing_auspicious')->label('ฤกษ์ยาม')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(19),

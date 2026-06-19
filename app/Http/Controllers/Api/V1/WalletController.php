@@ -42,14 +42,14 @@ class WalletController extends Controller
             'data' => [
                 'balance'             => (float) $balance,
                 'currency'            => config('pricing.currency', 'THB'),
-                'pricing'             => [
-                    'tarot_three'   => Pricing::for('tarot_three'),
-                    'tarot_celtic'  => Pricing::for('tarot_celtic'),
-                    'numerology'    => Pricing::for('numerology'),
-                    'palmistry'     => Pricing::for('palmistry'),
-                    'auspicious'    => Pricing::for('auspicious'),
-                    'chat_message'  => Pricing::for('chat_message'),
-                ],
+                'pricing'             => collect(\App\Support\TarotSpreads::keys())
+                    ->mapWithKeys(fn ($k) => ["tarot_{$k}" => Pricing::for("tarot_{$k}")])
+                    ->merge([
+                        'numerology'   => Pricing::for('numerology'),
+                        'palmistry'    => Pricing::for('palmistry'),
+                        'auspicious'   => Pricing::for('auspicious'),
+                        'chat_message' => Pricing::for('chat_message'),
+                    ])->all(),
                 'recent_transactions' => $recent,
             ],
         ]);
@@ -187,8 +187,21 @@ class WalletController extends Controller
             ->where('user_id', $request->user()->id)
             ->firstOrFail();
 
+        // Include the SAME promptpay block as topupPromptPay so the app's
+        // slip RE-upload sheet can render the QR + exact payable amount
+        // (previously it opened blank because this block was missing).
+        $payable     = abs((float) $row->amount);
+        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id'));
+
         return response()->json([
             'data' => array_merge($this->txPayload($row), [
+                'payable_amount'  => $payable,
+                'promptpay'       => [
+                    'id'         => $promptpayId,
+                    'name'       => Setting::get('promptpay_name', config('pricing.promptpay_name')),
+                    'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, $payable) : null,
+                    'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, $payable) : null,
+                ],
                 'slip_upload_url' => url('/wallet/topup/' . $row->id),
                 'slip_uploaded'   => !empty($row->slip_path),
             ]),

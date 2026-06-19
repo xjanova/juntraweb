@@ -26,6 +26,8 @@ class User extends Authenticatable implements FilamentUser
         'role',
         'thaiprompt_user_id',
         'thaiprompt_token',
+        'thaiprompt_refresh_token',
+        'thaiprompt_token_expires_at',
         'thaiprompt_synced_at',
         'facebook_user_id',
         'line_user_id',
@@ -36,6 +38,7 @@ class User extends Authenticatable implements FilamentUser
         'password',
         'remember_token',
         'thaiprompt_token',
+        'thaiprompt_refresh_token',
     ];
 
     protected function casts(): array
@@ -48,12 +51,27 @@ class User extends Authenticatable implements FilamentUser
             // Thaiprompt account. Custom cast tolerates legacy plaintext rows
             // (the next save() rewrites them encrypted).
             'thaiprompt_token' => EncryptedString::class,
+            'thaiprompt_refresh_token' => EncryptedString::class,
+            'thaiprompt_token_expires_at' => 'datetime',
         ];
     }
 
     public function isThaipromptLinked(): bool
     {
         return !empty($this->thaiprompt_user_id);
+    }
+
+    /**
+     * True only when we hold a usable Thaiprompt token — i.e. upstream calls
+     * (MLM, AI pool) will actually authenticate. Distinct from
+     * isThaipromptLinked() (which is true once the account was EVER linked,
+     * even after the token expired/was cleared). Gate upstream-dependent
+     * features on THIS so a dead token surfaces as "re-link" instead of an
+     * empty dashboard.
+     */
+    public function isThaipromptUsable(): bool
+    {
+        return !empty($this->thaiprompt_token);
     }
 
     /**

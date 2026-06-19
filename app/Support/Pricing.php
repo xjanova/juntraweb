@@ -33,9 +33,14 @@ class Pricing
     public static function labels(): array
     {
         return [
-            'tarot_three'  => 'เปิดไพ่ 3 ใบ',
-            'tarot_celtic' => 'เปิดไพ่ Celtic Cross',
-            'numerology'   => 'ดวงเลขศาสตร์',
+            'tarot_single'   => 'เปิดไพ่ 1 ใบ',
+            'tarot_three'    => 'เปิดไพ่ 3 ใบ',
+            'tarot_love'     => 'เปิดไพ่ความรัก 5 ใบ',
+            'tarot_career'   => 'เปิดไพ่การงาน-การเงิน 5 ใบ',
+            'tarot_decision' => 'เปิดไพ่ทางแยก 5 ใบ',
+            'tarot_celtic'   => 'เปิดไพ่ Celtic Cross 10 ใบ',
+            'tarot_year'     => 'เปิดไพ่พยากรณ์ 12 เดือน',
+            'numerology'     => 'ดวงเลขศาสตร์',
             'palmistry'    => 'ดูลายมือ',
             'auspicious'   => 'หาฤกษ์ยาม',
             'chat_message' => 'สนทนากับแม่หมอ (ต่อข้อความ)',

@@ -11,9 +11,15 @@
 return [
     'currency' => env('PRICING_CURRENCY', 'THB'),
 
-    // Tarot
-    'tarot_three'  => env('PRICING_TAROT_THREE', 19),
-    'tarot_celtic' => env('PRICING_TAROT_CELTIC', 99),
+    // Tarot — one key per spread in config/tarot_spreads.php.
+    // Admin can override any of these live via Setting('pricing_<key>').
+    'tarot_single'   => env('PRICING_TAROT_SINGLE', 9),
+    'tarot_three'    => env('PRICING_TAROT_THREE', 19),
+    'tarot_love'     => env('PRICING_TAROT_LOVE', 39),
+    'tarot_career'   => env('PRICING_TAROT_CAREER', 39),
+    'tarot_decision' => env('PRICING_TAROT_DECISION', 39),
+    'tarot_celtic'   => env('PRICING_TAROT_CELTIC', 99),
+    'tarot_year'     => env('PRICING_TAROT_YEAR', 129),
 
     // Other readings
     'numerology' => env('PRICING_NUMEROLOGY', 9),

@@ -106,7 +106,7 @@ class MlmApiClient
 
     private function url(string $path): string
     {
-        $base = rtrim((string) Setting::get('thaiprompt_base_url', 'https://thaiprompt.com'), '/');
+        $base = rtrim((string) Setting::get('thaiprompt_base_url', 'https://main.thaiprompt.online'), '/');
         return $base . '/api/v1/juntra/mlm' . $path;
     }
 
