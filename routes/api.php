@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\HistoryController;
 use App\Http\Controllers\Api\V1\HoroscopeController;
 use App\Http\Controllers\Api\V1\MlmController;
 use App\Http\Controllers\Api\V1\SmsPaymentController;
+use App\Http\Controllers\Api\V1\TarotController;
 use App\Http\Controllers\Api\V1\WalletController;
 use App\Http\Middleware\VerifySmsCheckerDevice;
 use Illuminate\Http\Request;
@@ -46,6 +47,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     // Daily horoscope — free + read-only (no auth, no debit).
     Route::get('horoscope',           [HoroscopeController::class, 'index'])->name('horoscope.index');
     Route::get('horoscope/{zodiac}',  [HoroscopeController::class, 'show'])->name('horoscope.show');
+
+    // Tarot card catalog — public face-image URLs so the mobile app can pull
+    // the real จันทรา.online art (and fall back to its own drawing per card).
+    Route::get('tarot/cards', [TarotController::class, 'cards'])->name('tarot.cards');
 
     // ─── Authenticated (Sanctum bearer) ───────────────────────
     Route::middleware('auth:sanctum')->group(function () {

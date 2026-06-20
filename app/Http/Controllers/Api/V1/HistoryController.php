@@ -286,6 +286,10 @@ class HistoryController extends Controller
                         ? ($card?->reversed_meaning_th ?? '')
                         : ($card?->upright_meaning_th ?? ''),
                     'image_path'     => $card?->image_path,
+                    // Resolved real face-image URL (or null → app draws its own
+                    // built-in face). Mirrors GET /v1/tarot/cards so the reading
+                    // detail shows the same real art the cinematic showed.
+                    'image_url'      => $card?->faceImageUrl(),
                 ];
             })->values();
         }
