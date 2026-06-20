@@ -45,9 +45,12 @@ return [
     */
     'thaiprompt_catalog_path' => env('TAROT_THAIPROMPT_CATALOG_PATH', '/api/v1/juntra/tarot/cards'),
 
-    // Base URL whose host is the ONLY one the HTTP fallback will download images
-    // from (SSRF guard — a tampered image_url pointing elsewhere is refused).
-    'thaiprompt_base_url'   => env('TAROT_THAIPROMPT_BASE_URL', 'https://main.thaiprompt.online'),
+    // Optional override for the host the HTTP image-download fallback is allowed
+    // to fetch from (SSRF guard — a tampered image_url elsewhere is refused).
+    // Leave unset to reuse the SAME host as the catalog API (the thaiprompt_base_url
+    // Setting) so the allowlist and the catalog source can never silently diverge;
+    // set this only when card art is served from a different host (e.g. a CDN).
+    'thaiprompt_base_url'   => env('TAROT_THAIPROMPT_BASE_URL'),
 
     // Allow downloading image_url over HTTPS when the shared file is missing.
     'allow_http_fallback'   => env('TAROT_IMPORT_HTTP_FALLBACK', true),

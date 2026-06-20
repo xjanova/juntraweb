@@ -448,10 +448,18 @@ class TarotImporter
         return collect($rows)->map(fn ($r) => (object) (array) $r);
     }
 
-    /** Host that the HTTP fallback is allowed to fetch from (from config base URL). */
+    /**
+     * Host that the HTTP image fallback is allowed to download from.
+     * Prefers the explicit image-host override (config), else falls back to the
+     * SAME base the catalog was fetched from (the thaiprompt_base_url Setting) so
+     * the download allowlist and the catalog source can never silently diverge.
+     */
     private function thaipromptHost(): ?string
     {
         $base = (string) config('tarot.thaiprompt_base_url', '');
+        if ($base === '') {
+            $base = (string) Setting::get('thaiprompt_base_url', '');
+        }
         $host = $base !== '' ? parse_url($base, PHP_URL_HOST) : null;
 
         return $host ? strtolower($host) : null;
