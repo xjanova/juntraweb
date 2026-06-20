@@ -7,9 +7,9 @@ use Illuminate\Console\Command;
 
 class TarotImport extends Command
 {
-    protected $signature = 'tarot:import {--source= : Override source directory (defaults to Thaiprompt on same server)}';
+    protected $signature = 'tarot:import {--source= : Override the shared-disk source directory (defaults to Thaiprompt on same server)}';
 
-    protected $description = 'Import Major Arcana card images from Thaiprompt-Affiliate (or another path) and link them to local tarot_cards rows';
+    protected $description = 'Import all 78 card images from Thaiprompt-Affiliate — resolves current filenames live from the Thaiprompt juntra API (rotation-proof) and links them to local tarot_cards rows';
 
     public function handle(TarotImporter $importer): int
     {

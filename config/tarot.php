@@ -25,10 +25,32 @@ return [
     'local_import_path' => env('TAROT_LOCAL_IMPORT_PATH', ''),
 
     /*
-    | Legacy Thaiprompt-Affiliate sibling layout (flat directory of webp
-    | files with random storage filenames). Used by importFromPath().
+    | Thaiprompt-Affiliate sibling layout (flat directory of webp files with
+    | random storage filenames). importFromPath() reads each card's CURRENT
+    | filename live from the Thaiprompt DB (below), then copies from this dir.
+    | Default is the Thaiprompt storage path on the shared DirectAdmin server.
     */
     'import_source' => env('TAROT_IMPORT_SOURCE'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Thaiprompt live import (API-driven, rotation-proof)
+    |--------------------------------------------------------------------------
+    | importFromPath() GETs the {name_en, image_url} catalog from Thaiprompt's
+    | juntra API (path below, on the configured `thaiprompt_base_url` Setting —
+    | the same base FortuneBotClient/MlmApiClient use), then copies each file
+    | from the shared filesystem (import_source) — falling back to an HTTPS
+    | download of image_url when the local file isn't reachable (different host
+    | / local dev). No DB credentials for the sibling site are needed.
+    */
+    'thaiprompt_catalog_path' => env('TAROT_THAIPROMPT_CATALOG_PATH', '/api/v1/juntra/tarot/cards'),
+
+    // Base URL whose host is the ONLY one the HTTP fallback will download images
+    // from (SSRF guard — a tampered image_url pointing elsewhere is refused).
+    'thaiprompt_base_url'   => env('TAROT_THAIPROMPT_BASE_URL', 'https://main.thaiprompt.online'),
+
+    // Allow downloading image_url over HTTPS when the shared file is missing.
+    'allow_http_fallback'   => env('TAROT_IMPORT_HTTP_FALLBACK', true),
 
     /*
     | Card-back source dir (also typically on the Thaiprompt sibling server).

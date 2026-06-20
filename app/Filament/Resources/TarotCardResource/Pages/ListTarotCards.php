@@ -57,25 +57,40 @@ class ListTarotCards extends ListRecords
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('warning')
                 ->requiresConfirmation()
-                ->modalHeading('Import Major Arcana จาก Thaiprompt-Affiliate')
-                ->modalDescription('คัดลอกรูป 22 ใบ (Major Arcana) จาก main.thaiprompt.online บนเซิร์ฟเวอร์เดียวกัน เข้ามาเป็นรูปไพ่ของแม่หมอจันทรา. รูปที่อัปโหลดเองจะถูกเขียนทับเฉพาะการ์ด 22 ใบนั้น — Minor Arcana ไม่กระทบ.')
+                ->modalHeading('Import ไพ่ทั้ง 78 ใบ จาก Thaiprompt-Affiliate')
+                ->modalDescription('ดึงรายชื่อรูปปัจจุบันสด ๆ ผ่าน API ของ main.thaiprompt.online (จับคู่ด้วยชื่อไพ่) แล้วคัดลอกรูปทั้ง 78 ใบเข้ามาเป็นรูปไพ่ของแม่หมอจันทรา — ทนต่อการที่ Thaiprompt เปลี่ยนชื่อไฟล์. รูปที่อัปโหลดเองจะถูกเขียนทับเฉพาะใบที่ดึงสำเร็จ.')
                 ->modalSubmitActionLabel('Import เลย')
                 ->action(function () {
-                    $report = app(TarotImporter::class)->importFromPath();
+                    $report   = app(TarotImporter::class)->importFromPath();
+                    $imported = $report['imported'];
+                    $expected = $report['remote_total'] ?: $imported;
+                    $errCount = count($report['errors']);
 
-                    if ($report['imported'] > 0) {
-                        Notification::make()
-                            ->title('Import สำเร็จ')
-                            ->body("นำเข้า {$report['imported']} ใบ — อัปเดต DB {$report['updated']} แถว"
-                                . ($report['skipped_missing'] ? " · ข้าม {$report['skipped_missing']} ใบ (ไฟล์ไม่พบ)" : ''))
-                            ->success()
-                            ->send();
-                    } else {
+                    // First few error lines so the admin sees WHICH cards failed and why
+                    // (parity with `php artisan tarot:import`) — no SSH to laravel.log needed.
+                    $detail = collect($report['errors'])->take(5)->implode("\n");
+                    if ($errCount > 5) {
+                        $detail .= "\n… และอีก " . ($errCount - 5) . " รายการ";
+                    }
+
+                    if ($imported === 0) {
                         Notification::make()
                             ->title('Import ไม่สำเร็จ')
-                            ->body($report['errors'][0] ?? 'ไม่มีไฟล์ใดถูกนำเข้า — ตรวจ source path ใน .env (TAROT_IMPORT_SOURCE)')
-                            ->danger()
-                            ->send();
+                            ->body($detail ?: 'ไม่มีไฟล์ใดถูกนำเข้า — ตรวจ URL ของ Thaiprompt (ตั้งค่า) และ endpoint /api/v1/juntra/tarot/cards')
+                            ->danger()->persistent()->send();
+                    } elseif ($errCount > 0 || $imported < $expected) {
+                        // Imported some, but not a clean full run → warn, don't show green.
+                        Notification::make()
+                            ->title("Import บางส่วน: {$imported}/{$expected} ใบ")
+                            ->body("อัปเดต DB {$report['updated']} แถว"
+                                . ($report['skipped_missing'] ? " · ข้าม {$report['skipped_missing']} ใบ" : '')
+                                . ($detail ? "\n" . $detail : ''))
+                            ->warning()->persistent()->send();
+                    } else {
+                        Notification::make()
+                            ->title("Import สำเร็จ {$imported}/{$expected} ใบ")
+                            ->body("อัปเดต DB {$report['updated']} แถว")
+                            ->success()->send();
                     }
                 }),
 
