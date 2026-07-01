@@ -3,7 +3,7 @@
 
 @section('content')
 <section class="canvas" style="padding-top: 160px">
-  <div class="chat-shell" x-data="chatBot()">
+  <div class="chat-shell" x-data="chatBot(@js($autosend ?? null))">
     <div style="text-align:center;margin-bottom:36px">
       <div class="eyebrow" style="display:inline-flex">CHANTRA AI ORACLE</div>
       <h1 class="display" style="font-size:clamp(40px,5vw,72px);margin-bottom:16px">
@@ -136,11 +136,20 @@
 @push('scripts')
 <script>
 document.addEventListener('alpine:init', () => {
-  Alpine.data('chatBot', () => ({
+  Alpine.data('chatBot', (autosend = null) => ({
     message: '',
     thinking: false,
 
-    init() { this.scrollToBottom(); },
+    init() {
+      this.scrollToBottom();
+      // A question carried in from a tarot result page — fire it once so the
+      // grounded answer appears without the user retyping. Server already
+      // pull()-ed it from the session, so a refresh won't repeat it.
+      if (autosend && String(autosend).trim()) {
+        this.message = String(autosend);
+        this.$nextTick(() => this.send());
+      }
+    },
     scrollToBottom() {
       this.$nextTick(() => {
         const list = this.$refs.list;

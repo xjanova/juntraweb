@@ -94,6 +94,11 @@ Route::prefix('auspicious')->name('auspicious.')->controller(AuspiciousControlle
 Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::post('/send', 'send')->middleware('throttle:chat-send')->name('send');
+    // Enter the live chat pre-grounded on a tarot reading — แม่หมอ is primed
+    // with the exact cards drawn so follow-up questions read those cards.
+    Route::post('/from-reading/{reading}', 'fromReading')
+        ->middleware(['auth', 'throttle:chat-send'])
+        ->name('from-reading');
     Route::get('/conversation/{conversation}', 'show')
         ->middleware('auth')
         ->name('show');

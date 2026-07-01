@@ -6,10 +6,12 @@ use App\Exceptions\InsufficientFundsException;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
+use App\Models\Reading;
 use App\Services\AiOracle;
 use App\Services\FortuneBot\FortuneBotClient;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\TarotSpreads;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -78,6 +80,10 @@ class ChatController extends Controller
             'cost'         => Pricing::for('chat_message'),
             'balance'      => $user ? $this->wallet->balance($user) : null,
             'readonly'     => false, // live chat room — input is active
+            // A question carried in from a tarot result page — the view
+            // auto-sends it once so the grounded answer appears immediately.
+            // pull() = one-shot: a refresh won't re-fire (and re-charge) it.
+            'autosend'     => $gate['allowed'] ? $request->session()->pull('chat_autosend') : null,
         ]);
     }
 
@@ -188,6 +194,74 @@ class ChatController extends Controller
         return redirect()->route('chat.index')->with('status', 'แม่หมอตอบกลับแล้ว');
     }
 
+    /**
+     * Enter the live chat pre-grounded on a finished tarot reading.
+     *
+     * The user has already paid for + opened this spread; now they can ask
+     * แม่หมอ specific follow-ups and she answers reading the *exact* cards
+     * they drew (not a blank-slate chat). We do this by priming a fresh
+     * upstream session with a hidden context primer (card × position ×
+     * meaning + the interpretation) — that priming reply becomes a grounded
+     * greeting. Every follow-up question then rides the normal /chat/send
+     * path, so billing + the FB/LINE gate are exactly the existing ones.
+     */
+    public function fromReading(Request $request, Reading $reading)
+    {
+        $user = $request->user();
+
+        // Only real tarot readings, and only their owner, can be consulted.
+        if (! TarotSpreads::isTarotType($reading->type)) {
+            abort(404);
+        }
+        if (! $user || $reading->user_id !== $user->id) {
+            abort(403);
+        }
+
+        // Same eligibility as any chat message (login + FB/LINE link + token).
+        $gate = $this->gate($user);
+        if (! $gate['allowed']) {
+            // /chat renders the connect CTA — send them there to link up first.
+            return redirect()->route('chat.index')->with('status', $gate['reason']);
+        }
+
+        $question = trim((string) $request->input('question', ''));
+        if (mb_strlen($question) > 2000) {
+            $question = mb_substr($question, 0, 2000);
+        }
+
+        // Live chat conversation — same session-token model as index().
+        $token = $request->session()->get('chat_token');
+        if (! $token) {
+            $token = (string) Str::uuid();
+            $request->session()->put('chat_token', $token);
+        }
+        $conversation = ChatConversation::firstOrCreate(
+            ['session_token' => $token, 'user_id' => $user->id],
+            ['title' => 'สนทนากับแม่หมอ']
+        );
+
+        // Prime แม่หมอ with this reading's cards — but only ONCE per reading, so
+        // a refresh / double-tap can't re-prime (a wasted upstream call) or
+        // stack duplicate greetings in the thread.
+        if ($request->session()->get('chat_primed_reading') !== $reading->id) {
+            $reading->load('tarotCards.card');
+            $greeting = $this->primeReadingContext($request, $user, $reading);
+            $conversation->messages()->create([
+                'role'    => 'assistant',
+                'content' => $greeting,
+            ]);
+            $request->session()->put('chat_primed_reading', $reading->id);
+        }
+
+        // Carry the first question into /chat so it auto-sends there (charged
+        // by the normal send path). One-shot via session — see index()'s pull().
+        if ($question !== '') {
+            $request->session()->put('chat_autosend', $question);
+        }
+
+        return redirect()->route('chat.index');
+    }
+
     public function show(ChatConversation $conversation)
     {
         $user = auth()->user();
@@ -268,6 +342,77 @@ class ChatController extends Controller
         }
 
         return ['reply' => $reply, 'degraded' => false];
+    }
+
+    /**
+     * Open a fresh upstream session and prime it with the drawn cards so every
+     * follow-up question in this session is read against them. Returns the
+     * greeting to show (the AI's priming reply, or a local one if upstream is
+     * unreachable). The priming exchange is NOT charged and NOT shown as a user
+     * bubble — only the greeting surfaces.
+     */
+    private function primeReadingContext(Request $request, $user, Reading $reading): string
+    {
+        if ($this->bot->isAvailable($user)) {
+            $start     = $this->bot->start($user);
+            $sessionId = $start['session_id'] ?? null;
+            if ($sessionId) {
+                $request->session()->put('thaiprompt_chat_session', $sessionId);
+                $resp  = $this->bot->send($user, $sessionId, $this->buildReadingPrimer($reading));
+                $reply = $resp['reply'] ?? null;
+                if ($reply && trim($reply) !== '') {
+                    return $reply;
+                }
+            }
+        }
+
+        return $this->localReadingGreeting($reading);
+    }
+
+    /** Hidden context message that teaches แม่หมอ the exact cards drawn. */
+    private function buildReadingPrimer(Reading $reading): string
+    {
+        $spreadName = TarotSpreads::nameForType($reading->type) ?? 'ไพ่ยิปซี';
+
+        $lines   = [];
+        $lines[] = '[บริบทสำหรับแม่หมอ — ลูกคนนี้เพิ่งเปิดไพ่ยิปซีเสร็จ ขอให้จำไพ่ชุดนี้ไว้ตอบคำถามต่อ ๆ ไป]';
+        $lines[] = 'รูปแบบการวางไพ่: ' . $spreadName;
+        if (! empty($reading->question)) {
+            $lines[] = 'คำถามตั้งต้น: ' . $reading->question;
+        }
+        $lines[] = 'ไพ่ที่เปิดได้ตามตำแหน่ง:';
+        foreach ($reading->tarotCards as $rc) {
+            $dir     = $rc->reversed ? 'กลับหัว' : 'ตั้งตรง';
+            $meaning = $rc->reversed
+                ? ($rc->card->reversed_meaning_th ?? '')
+                : ($rc->card->upright_meaning_th ?? '');
+            $lines[] = sprintf(
+                ' %d. %s: %s (%s)%s',
+                $rc->position,
+                $rc->position_label,
+                $rc->card->name_th ?? '',
+                $dir,
+                $meaning !== '' ? ' — ' . $meaning : '',
+            );
+        }
+        if (! empty($reading->result)) {
+            $lines[] = '';
+            $lines[] = 'คำพยากรณ์ที่แม่หมอให้ไปแล้ว (ย่อ): ' . mb_substr(strip_tags($reading->result), 0, 700);
+        }
+        $lines[] = '';
+        $lines[] = 'โปรดทักทายลูกสั้น ๆ อย่างอบอุ่น บอกว่าแม่หมอเห็นไพ่ชุดนี้แล้ว และชวนให้ลูกถามเจาะจงว่าอยากรู้เรื่องใดเพิ่มเติมจากไพ่ชุดนี้ — ตอบเป็นภาษาไทยล้วน ไม่ต้องอ่านไพ่ซ้ำทั้งหมด';
+
+        return implode("\n", $lines);
+    }
+
+    /** Grounded greeting used when upstream can't be primed (no AI, no charge). */
+    private function localReadingGreeting(Reading $reading): string
+    {
+        $n          = $reading->tarotCards->count();
+        $spreadName = TarotSpreads::nameForType($reading->type) ?? 'ไพ่ยิปซี';
+
+        return "แม่หมอเห็นไพ่ทั้ง {$n} ใบจากการเปิด \"{$spreadName}\" ของลูกแล้วนะคะ ✨ "
+            . 'อยากให้แม่หมอเจาะลึกเรื่องไหนเป็นพิเศษจากไพ่ชุดนี้คะ? พิมพ์คำถามด้านล่างได้เลยค่ะ';
     }
 
     /**
