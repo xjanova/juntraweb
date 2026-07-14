@@ -30,7 +30,23 @@ class MlmController extends Controller
             'stats'       => $stats,
             'tree'        => $tree,
             'commissions' => $commissions,
+            'targetId'    => $targetId,
+            'fetchedAt'   => $this->api->lastFetchedAt()?->toIso8601String(),
         ]);
+    }
+
+    /**
+     * "รีเฟรชยอดสด" — bust the per-user MLM cache so the next dashboard load
+     * pulls live numbers from Thaiprompt. Throttled per user in routes.
+     */
+    public function refresh(Request $request)
+    {
+        $auth = $request->user();
+        $this->api->bustCache($auth);
+
+        return redirect()
+            ->route('mlm.dashboard', array_filter(['user_id' => $this->resolveTarget($request, $auth)]))
+            ->with('status', 'ดึงยอดล่าสุดจาก Thaiprompt เรียบร้อย — ตัวเลขชุดนี้คือยอดสด ✓');
     }
 
     /** Page through commissions (XHR target for the table). */

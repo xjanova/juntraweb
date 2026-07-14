@@ -97,6 +97,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('stats',       [MlmController::class, 'stats'])->name('stats');
             Route::get('tree',        [MlmController::class, 'tree'])->name('tree');
             Route::get('commissions', [MlmController::class, 'commissions'])->name('commissions');
+            // Pull-to-refresh: bust the per-user MLM cache so the next GETs
+            // return live Thaiprompt numbers (same totals as the web).
+            Route::post('refresh',    [MlmController::class, 'refresh'])->middleware('throttle:6,1')->name('refresh');
         });
 
         // Paid non-tarot readings — same `reading` rate-limit + debit/refund.

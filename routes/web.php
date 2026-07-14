@@ -142,6 +142,9 @@ Route::middleware('auth')->prefix('mlm')->name('mlm.')->group(function () {
     Route::get('/',             [MlmController::class, 'dashboard'])->name('dashboard');
     Route::get('/commissions',  [MlmController::class, 'commissions'])->name('commissions');
     Route::get('/users',        [MlmController::class, 'users'])->name('users');
+    // Live-sync: bust the per-user MLM cache → next load = fresh Thaiprompt
+    // numbers. Throttled — each refresh triggers real upstream calls.
+    Route::post('/refresh',     [MlmController::class, 'refresh'])->middleware('throttle:6,1')->name('refresh');
 });
 
 // Breeze-compatible dashboard route (alias of account.dashboard)

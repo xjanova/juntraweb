@@ -4,13 +4,16 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Mlm\MlmApiClient;
 use App\Services\ThaipromptClient;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -185,6 +188,14 @@ class ThaipromptController extends Controller
         Auth::login($user, true);
         $request->session()->regenerate();
 
+        // Referral attribution — the จันทรา.online/r/{code} landing stored the
+        // inviter's member_code in a 30-day cookie. Now that this user has a
+        // live thaiprompt_token, claim it upstream so they join the inviter's
+        // downline. Best-effort: a definitive upstream answer (success OR
+        // rejection) clears the cookie; a network failure keeps it so the
+        // next login retries.
+        $referralStatus = $this->claimPendingReferral($request, $user);
+
         // Mobile-initiated flow → render a "back to app" success page
         // instead of dropping the user into the web dashboard. The page
         // has no app deep link (mobile detects the link via the next
@@ -196,6 +207,51 @@ class ThaipromptController extends Controller
             ]);
         }
 
-        return redirect()->intended(route('dashboard'));
+        $redirect = redirect()->intended(route('dashboard'));
+        if ($referralStatus !== null) {
+            $redirect->with('status', $referralStatus);
+        }
+        return $redirect;
+    }
+
+    /**
+     * Claim the pending juntra_ref cookie (if any) against Thaiprompt.
+     * Returns a flash message on success, null otherwise.
+     */
+    private function claimPendingReferral(Request $request, User $user): ?string
+    {
+        $code = (string) $request->cookie('juntra_ref', '');
+        $code = substr(preg_replace('/[^A-Za-z0-9_-]/', '', $code), 0, 64);
+        if ($code === '') {
+            return null;
+        }
+
+        $result = app(MlmApiClient::class)->claimReferral($user, $code);
+
+        // Network failure → keep the cookie; a later login retries the claim.
+        if ($result['status'] === 0) {
+            return null;
+        }
+
+        // Any definitive upstream answer consumes the cookie — success,
+        // invalid code, self-referral, or already enrolled in a network.
+        Cookie::queue(Cookie::forget('juntra_ref'));
+
+        if ($result['claimed']) {
+            $sponsorName = $result['sponsor']['name'] ?? null;
+            Log::info('Referral claimed on Thaiprompt', [
+                'user_id' => $user->id,
+                'code'    => $code,
+            ]);
+            return $sponsorName
+                ? "🎉 เข้าร่วมสายงานของ {$sponsorName} เรียบร้อย — เริ่มสร้างทีมของคุณได้เลย"
+                : '🎉 เข้าร่วมสายงานเรียบร้อย — เริ่มสร้างทีมของคุณได้เลย';
+        }
+
+        Log::info('Referral claim declined upstream', [
+            'user_id'     => $user->id,
+            'reason_code' => $result['reason_code'],
+        ]);
+        return null;
     }
 }

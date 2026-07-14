@@ -35,8 +35,9 @@ class MlmController extends Controller
         }
         $stats = $this->api->stats($user);
         return response()->json([
-            'linked' => true,
-            'data'   => $stats,
+            'linked'     => true,
+            'data'       => $stats,
+            'fetched_at' => $this->api->lastFetchedAt()?->toIso8601String(),
         ]);
     }
 
@@ -51,9 +52,25 @@ class MlmController extends Controller
         }
         $tree = $this->api->tree($user, null, (int) $request->input('depth', 5));
         return response()->json([
-            'linked' => true,
-            'data'   => $tree,
+            'linked'     => true,
+            'data'       => $tree,
+            'fetched_at' => $this->api->lastFetchedAt()?->toIso8601String(),
         ]);
+    }
+
+    /**
+     * Pull-to-refresh hook — busts the per-user MLM cache so the GETs that
+     * follow return live Thaiprompt numbers (same totals the web sees).
+     * Throttled in routes; refreshing triggers real upstream calls.
+     */
+    public function refresh(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user->isThaipromptUsable()) {
+            return $this->notLinked();
+        }
+        $this->api->bustCache($user);
+        return response()->json(['refreshed' => true]);
     }
 
     public function commissions(Request $request): JsonResponse

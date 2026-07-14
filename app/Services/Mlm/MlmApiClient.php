@@ -28,9 +28,16 @@ class MlmApiClient
     /** Default cache TTL — short enough that admin actions feel live. */
     private const CACHE_TTL = 300; // 5 min
 
+    /**
+     * Oldest fetch time among the calls served during this request —
+     * i.e. "ข้อมูล ณ เวลา X". Commissions are always fresh; stats/tree
+     * may come from cache, so the oldest timestamp is the honest one.
+     */
+    private ?\Illuminate\Support\Carbon $lastFetchedAt = null;
+
     public function tree(User $actor, ?int $userId = null, int $depth = 5): array
     {
-        $cacheKey = "mlm.tree.{$actor->id}.target." . ($userId ?? 'self') . ".d{$depth}";
+        $cacheKey = $this->key($actor, 'tree.target.' . ($userId ?? 'self') . ".d{$depth}");
         return $this->cachedGet($cacheKey, fn () => $this->client($actor)->get($this->url('/tree'), array_filter([
             'user_id' => $userId,
             'depth'   => $depth,
@@ -42,6 +49,7 @@ class MlmApiClient
         $empty = ['data' => [], 'meta' => ['total' => 0, 'last_page' => 1, 'current_page' => 1]];
 
         // Pages aren't cached — operators want fresh data when paginating.
+        $this->noteFetchedAt(now());
         try {
             $resp = $this->client($actor)->get($this->url('/commissions'), array_filter([
                 'user_id' => $userId,
@@ -65,7 +73,7 @@ class MlmApiClient
 
     public function stats(User $actor, ?int $userId = null): array
     {
-        $cacheKey = "mlm.stats.{$actor->id}.target." . ($userId ?? 'self');
+        $cacheKey = $this->key($actor, 'stats.target.' . ($userId ?? 'self'));
         return $this->cachedGet($cacheKey, fn () => $this->client($actor)->get($this->url('/stats'), array_filter([
             'user_id' => $userId,
         ]))->json() ?? []);
@@ -89,15 +97,52 @@ class MlmApiClient
     }
 
     /**
-     * Bust every cached page for $actor — call after admin actions that
-     * could change downstream state (rare, but useful in testing).
+     * Bust every cached page for $actor — bumping the per-user epoch makes
+     * every previously cached key unreachable at once (any depth, any admin
+     * target). Backs the "รีเฟรชยอดสด" button so the next dashboard load
+     * hits Thaiprompt live and the totals are guaranteed to match upstream.
      */
     public function bustCache(User $actor): void
     {
-        // We don't keep an index of keys; rely on Cache::forget by pattern.
-        // Cheap fallback: store a per-user epoch and prefix keys with it.
-        Cache::forget("mlm.tree.{$actor->id}.target.self.d5");
-        Cache::forget("mlm.stats.{$actor->id}.target.self");
+        Cache::forever("mlm.epoch.{$actor->id}", $this->epoch($actor) + 1);
+    }
+
+    /** When the data shown in this request was actually fetched from Thaiprompt. */
+    public function lastFetchedAt(): ?\Illuminate\Support\Carbon
+    {
+        return $this->lastFetchedAt;
+    }
+
+    /**
+     * Claim a referral upstream — enrolls $actor under the inviter whose
+     * member_code is $code (captured from the จันทรา.online/r/{code} cookie).
+     *
+     * Returns ['claimed' => bool, 'reason_code' => ?string, 'status' => int,
+     * 'sponsor' => ?array]. `status` 0 = network failure (caller should keep
+     * the cookie and retry on a later login); any HTTP status = a definitive
+     * upstream answer (caller can clear the cookie).
+     */
+    public function claimReferral(User $actor, string $code): array
+    {
+        try {
+            $resp = $this->client($actor)->post($this->url('/claim-referral'), ['code' => $code]);
+        } catch (\Throwable $e) {
+            Log::warning('MlmApiClient /claim-referral threw', ['err' => $e->getMessage()]);
+            return ['claimed' => false, 'reason_code' => 'network', 'status' => 0, 'sponsor' => null];
+        }
+
+        $json = $resp->json() ?: [];
+        if ($resp->successful() && ($json['claimed'] ?? false) === true) {
+            // Downline changed — make the next dashboard read live.
+            $this->bustCache($actor);
+        }
+
+        return [
+            'claimed'     => (bool) ($json['claimed'] ?? false),
+            'reason_code' => $json['reason_code'] ?? null,
+            'status'      => $resp->status(),
+            'sponsor'     => is_array($json['sponsor'] ?? null) ? $json['sponsor'] : null,
+        ];
     }
 
     /* ============================================================
@@ -108,6 +153,25 @@ class MlmApiClient
     {
         $base = rtrim((string) Setting::get('thaiprompt_base_url', 'https://main.thaiprompt.online'), '/');
         return $base . '/api/v1/juntra/mlm' . $path;
+    }
+
+    /** Cache-key namespace versioned by the actor's epoch (see bustCache). */
+    private function key(User $actor, string $suffix): string
+    {
+        return "mlm.v{$this->epoch($actor)}.{$actor->id}.{$suffix}";
+    }
+
+    private function epoch(User $actor): int
+    {
+        return (int) Cache::rememberForever("mlm.epoch.{$actor->id}", fn () => 1);
+    }
+
+    /** Keep the OLDEST fetch time of the request — the honest "ข้อมูล ณ เวลา" stamp. */
+    private function noteFetchedAt(\Illuminate\Support\Carbon $ts): void
+    {
+        if ($this->lastFetchedAt === null || $ts->lt($this->lastFetchedAt)) {
+            $this->lastFetchedAt = $ts;
+        }
     }
 
     private function client(User $actor): PendingRequest
@@ -130,19 +194,38 @@ class MlmApiClient
 
     private function cachedGet(string $key, callable $fetch, int $ttl = self::CACHE_TTL): array
     {
-        return Cache::remember($key, $ttl, function () use ($fetch, $key) {
+        $wrapped = Cache::get($key);
+
+        if (!is_array($wrapped) || !array_key_exists('payload', $wrapped)) {
+            $failed = false;
             try {
                 $data = $fetch();
                 if (!is_array($data)) {
                     Log::warning("MlmApiClient: non-array response for $key");
-                    return [];
+                    $data   = [];
+                    $failed = true;
                 }
-                return $data;
             } catch (\Throwable $e) {
                 Log::warning("MlmApiClient call failed for $key", ['err' => $e->getMessage()]);
-                return [];
+                $data   = [];
+                $failed = true;
             }
-        });
+            // An empty payload is a failure in disguise (upstream 5xx bodies
+            // json-decode to null → []). Real stats/tree payloads always have
+            // keys; worst case a truly-empty payload just refetches sooner.
+            $failed  = $failed || $data === [];
+            $wrapped = ['payload' => $data, 'fetched_at' => now()->toIso8601String()];
+            // A failed upstream call only lingers seconds — a Thaiprompt blip
+            // must not pin zeroed-out totals on the dashboard for 5 minutes.
+            Cache::put($key, $wrapped, $failed ? 20 : $ttl);
+        }
+
+        // Record when this payload was actually pulled from upstream.
+        $ts = \Illuminate\Support\Carbon::make($wrapped['fetched_at'] ?? null);
+        if ($ts !== null) {
+            $this->noteFetchedAt($ts);
+        }
+        return is_array($wrapped['payload']) ? $wrapped['payload'] : [];
     }
 
     private function logFail($resp, string $endpoint): void
