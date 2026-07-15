@@ -77,6 +77,44 @@
   </div>
 </section>
 
+{{-- 🎬 คลิปบรรยายแผนสร้างรายได้ — บอทแม่หมอส่งลิงก์มาลงที่ #plan --}}
+<section class="section" id="plan">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">Affiliate Plan · แผนสร้างรายได้</div>
+    <h2 class="section-title" style="padding:30px 0 7px">ชวนเพื่อนดูดวง — ได้ <em>ค่าแนะนำ</em></h2>
+    <p class="section-sub">คลิปเดียว เข้าใจครบทุกขั้นตอน ตั้งแต่เริ่มจนถอนเงินเข้าบัญชี</p>
+  </div>
+
+  <div class="plan-video-wrap reveal">
+    {{-- preload="none" + poster: หน้าแรกโหลดรูปหนักอยู่แล้ว ห้ามให้คลิปดูดเน็ตซ้ำ --}}
+    <video
+      controls
+      playsinline
+      preload="none"
+      poster="{{ asset('images/plan-video-poster.jpg') }}"
+      controlsList="nodownload">
+      <source src="{{ asset('videos/juntra-affiliate-plan.mp4') }}" type="video/mp4">
+      เบราว์เซอร์ของคุณไม่รองรับการเล่นวิดีโอ — <a href="{{ asset('videos/juntra-affiliate-plan.mp4') }}">กดที่นี่เพื่อดาวน์โหลดคลิป</a>
+    </video>
+  </div>
+
+  {{-- ⚠️ ห้ามฝังตัวเลขค่าแนะนำตรงนี้เด็ดขาด
+       เว็บนี้อ่าน fortune_telling_settings ของ Thaiprompt ไม่ได้ (คนละระบบ ไม่มี model)
+       ถ้าฝังเลขไว้ แล้วแอดมินปรับเรตในหน้าแอดมินวันหลัง → หน้านี้จะโฆษณาเลขผิดถาวร
+       โดยไม่มีอะไรเตือน. ให้คลิป (ซึ่งอัดใหม่ได้เมื่อเรตเปลี่ยน) เป็นคนบอกตัวเลขแทน --}}
+  <div class="plan-video-meta reveal">
+    <span class="plan-chip">⏱ <b>5 นาที</b> จบครบ</span>
+    <span class="plan-chip">ค่าแนะนำ<b>ตามแพคเกจ</b>ที่เพื่อนเลือก</span>
+    <span class="plan-chip">ค่าแนะนำ <b>2 ชั้น</b> · ไม่มีเพดาน</span>
+    <span class="plan-chip">โอนเข้าบัญชีรอบ <b>วันที่ 2 และ 17</b></span>
+  </div>
+
+  <p class="plan-note">
+    ตัวเลขในคลิปเป็นตัวอย่างการคำนวณ ไม่ใช่การรับประกันรายได้ —
+    รายได้จริงขึ้นกับจำนวนเพื่อนที่ใช้บริการจริง · ถอนเงินต้องยืนยันตัวตน (KYC) ด้วยบัตรประชาชนและบัญชีธนาคารชื่อเดียวกัน
+  </p>
+</section>
+
 <section class="section" id="featured">
   <div class="featured">
     <div class="featured-art reveal">

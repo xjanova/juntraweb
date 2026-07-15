@@ -564,9 +564,48 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
 .reveal { opacity: 0; transform: translateY(30px); transition: opacity .9s ease, transform .9s ease; }
 .reveal.in { opacity: 1; transform: none; }
 
+/* ============ PLAN VIDEO (คลิปบรรยายแผนสร้างรายได้) ============ */
+/* ⚠️ หน้าแรกโหลดรูปหนักอยู่แล้ว (~28MB) — คลิปต้อง preload="none" + มี poster
+   ห้าม autoplay เด็ดขาด ไม่งั้นเน็ตมือถือไทยพัง */
+.plan-video-wrap {
+  max-width: 1000px; margin: 0 auto;
+  border-radius: 22px; overflow: hidden;
+  border: 1px solid rgba(231,201,122,.28);
+  background: linear-gradient(160deg, rgba(36,16,56,.9), rgba(10,6,18,.95));
+  box-shadow: 0 40px 90px -30px rgba(0,0,0,.7), inset 0 1px 0 rgba(246,227,168,.12);
+  position: relative;
+}
+.plan-video-wrap::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background: radial-gradient(700px 200px at 50% 0%, rgba(176,124,255,.16), transparent 70%);
+}
+.plan-video-wrap video {
+  display: block; width: 100%; height: auto; aspect-ratio: 16 / 9;
+  background: var(--bg-0); position: relative; z-index: 1;
+}
+.plan-video-meta {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 10px 22px; margin-top: 26px;
+}
+.plan-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-radius: 999px;
+  border: 1px solid rgba(231,201,122,.26);
+  background: rgba(231,201,122,.06);
+  color: var(--ink-dim); font-size: 14px;
+}
+.plan-chip b { color: var(--gold-2); font-weight: 500; }
+.plan-note {
+  text-align: center; margin: 22px auto 0; max-width: 620px;
+  color: var(--ink-mute); font-size: 13px; line-height: 1.7;
+}
+
 /* ============ RESPONSIVE BASIC ============ */
 @media (max-width: 560px) {
   .panel { padding: 24px; }
   .reading-card-row { grid-template-columns: 1fr; max-width: 280px; margin: 40px auto; }
   .tarot { width: 160px; }
+  .plan-video-wrap { border-radius: 14px; }
+  .plan-video-meta { gap: 8px 12px; }
+  .plan-chip { font-size: 12px; padding: 6px 12px; }
 }
