@@ -25,6 +25,15 @@ class ThaipromptController extends Controller
             return redirect()->route('login')->withErrors(['email' => 'ระบบเข้าสู่ระบบ Thaiprompt ยังไม่ได้เปิดใช้งาน']);
         }
 
+        // Deep-link ปลายทางหลัง SSO สำเร็จ — ให้ลิงก์จากแดชบอร์ด Thaiprompt
+        // (เช่น "คอมมิชชั่นดูดวง") วิ่งมาที่ /auth/thaiprompt/redirect?to=/mlm/commissions
+        // แล้ว auto-login เสร็จ callback จะ redirect()->intended() ไปหน้านั้นเลย
+        // กัน open-redirect: รับเฉพาะ path ภายในเว็บนี้ (ขึ้นต้น "/" เดี่ยว ไม่ใช่ "//" หรือมี scheme)
+        $to = (string) $request->query('to', '');
+        if ($to !== '' && str_starts_with($to, '/') && !str_starts_with($to, '//') && !str_contains($to, "\\")) {
+            $request->session()->put('url.intended', url($to));
+        }
+
         $state = Str::random(40);
         $request->session()->put('thaiprompt_oauth_state', $state);
 
