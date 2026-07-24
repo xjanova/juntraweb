@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Auth\ThaipromptController;
 use App\Http\Controllers\AuspiciousController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\HoroscopeController;
 use App\Http\Controllers\Install\InstallerController;
@@ -48,6 +49,12 @@ Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::get('/r/{code}', [ReferralController::class, 'show'])
     ->where('code', '[A-Za-z0-9_-]+')
     ->name('referral');
+
+// หน้าแนะนำดาวน์โหลดแอพมือถือ — /download/go นับคลิกก่อนเด้งไป Play Store
+// (ลิงก์สโตร์ตั้งได้ใน /admin → ตั้งค่าเว็บไซต์ → แอปพลิเคชันมือถือ).
+Route::get('/download',    [DownloadController::class, 'show'])->name('download');
+Route::get('/download/go', [DownloadController::class, 'go'])->middleware('throttle:60,1')->name('download.go');
+Route::redirect('/app', '/download');
 
 // Static legal pages — theme-agnostic Blade (the ThemeServiceProvider view
 // composer injects $activeTheme/$themeConfig into every view, so Route::view works).

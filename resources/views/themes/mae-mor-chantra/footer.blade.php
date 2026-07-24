@@ -17,6 +17,7 @@
         <li><a href="{{ route('tarot.index') }}">ไพ่ยิปซี AI</a></li>
         <li><a href="{{ route('numerology.index') }}">เลขศาสตร์</a></li>
         <li><a href="{{ route('chat.index') }}">AI Chat ทำนาย</a></li>
+        <li><a href="{{ route('download') }}">📱 ดาวน์โหลดแอพมือถือ</a></li>
       </ul>
     </div>
     <div class="foot-col">

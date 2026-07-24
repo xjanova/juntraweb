@@ -13,6 +13,7 @@
     <a href="{{ route('palmistry.index') }}">ลายมือ</a>
     <a href="{{ route('auspicious.index') }}">ฤกษ์ยาม</a>
     <a href="{{ route('chat.index') }}">AI ทำนาย</a>
+    <a href="{{ route('download') }}">แอพมือถือ</a>
     @auth
       <a href="{{ route('wallet.index') }}">วอลเลต</a>
       <a href="{{ route('account.dashboard') }}">บัญชี</a>

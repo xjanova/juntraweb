@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\Setting;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -43,6 +44,9 @@ class SiteSettings extends Page implements HasForms
             'ai_api_key' => Setting::get('ai_api_key'),
             'ai_system_prompt' => Setting::get('ai_system_prompt'),
             'tarot_card_back_path' => Setting::get('tarot_card_back_path'),
+            'play_store_url' => Setting::get('play_store_url'),
+            'app_store_url' => Setting::get('app_store_url'),
+            'app_version' => Setting::get('app_version'),
         ]);
     }
 
@@ -67,6 +71,19 @@ class SiteSettings extends Page implements HasForms
                     TextInput::make('contact_facebook')->label('Facebook URL'),
                     TextInput::make('contact_email')->label('Email')->email(),
                 ])->columns(3),
+
+                Section::make('แอปพลิเคชันมือถือ')
+                    ->description('หน้า /download บนเว็บ — ลิงก์สโตร์ ปุ่มโหลด และ QR ใช้ค่าจากตรงนี้')
+                    ->schema([
+                        TextInput::make('play_store_url')->label('Google Play URL')->url()
+                            ->placeholder('https://play.google.com/store/apps/details?id=com.xjanova.juntra')
+                            ->helperText('เว้นว่าง = ใช้ลิงก์ default ของแอพ Juntra (com.xjanova.juntra)'),
+                        TextInput::make('app_store_url')->label('App Store URL (iOS)')->url()
+                            ->helperText('เว้นว่าง = ปุ่ม App Store ขึ้น "เร็ว ๆ นี้"'),
+                        TextInput::make('app_version')->label('เวอร์ชันแอพที่โชว์บนหน้า')->placeholder('0.3.2'),
+                        Placeholder::make('app_download_clicks')->label('ยอดคลิกปุ่มดาวน์โหลดสะสม')
+                            ->content(fn () => number_format((int) Setting::get('app_download_clicks', 0)) . ' ครั้ง'),
+                    ])->columns(2),
 
                 Section::make('AI Configuration')->description('ตั้งค่า Gemini/OpenAI สำหรับระบบ AI ทำนายดวง')->schema([
                     TextInput::make('ai_provider')->label('Provider')->default('gemini'),
@@ -106,6 +123,7 @@ class SiteSettings extends Page implements HasForms
             'contact_line' => 'contact', 'contact_facebook' => 'contact', 'contact_email' => 'contact',
             'ai_provider' => 'ai', 'ai_model' => 'ai', 'ai_api_key' => 'ai', 'ai_system_prompt' => 'ai',
             'tarot_card_back_path' => 'tarot',
+            'play_store_url' => 'app', 'app_store_url' => 'app', 'app_version' => 'app',
         ];
 
         foreach ($data as $key => $value) {

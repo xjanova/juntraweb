@@ -16,6 +16,7 @@
       <a href="{{ route('horoscope.index') }}">ดวงรายวัน 12 ราศี</a>
       <a href="{{ route('horoscope.thai') }}">ปีนักษัตรไทย</a>
       <a href="{{ route('auspicious.index') }}">หาฤกษ์มงคล</a>
+      <a href="{{ route('download') }}">📱 ดาวน์โหลดแอพมือถือ</a>
     </div>
     <div class="footer-col">
       <h4>เกี่ยวกับ</h4>
