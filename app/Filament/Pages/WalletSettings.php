@@ -4,8 +4,10 @@ namespace App\Filament\Pages;
 
 use App\Models\Setting;
 use App\Support\TarotSpreads;
+use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Forms\Form;
@@ -25,49 +27,71 @@ class WalletSettings extends Page implements HasForms
 
     public ?array $data = [];
 
+    /** Non-tarot billable services: feature key → [label, config default]. */
+    private const OTHER_SERVICES = [
+        'numerology'   => ['เลขศาสตร์', 9],
+        'palmistry'    => ['ลายมือ', 29],
+        'auspicious'   => ['ฤกษ์ยาม', 19],
+        'chat_message' => ['แชทกับแม่หมอ (ต่อข้อความ)', 2],
+    ];
+
     public function mount(): void
     {
         $cfg = config('pricing');
+
         $fill = [
-            'pricing_numerology'   => Setting::get('pricing_numerology',   $cfg['numerology']),
-            'pricing_palmistry'    => Setting::get('pricing_palmistry',    $cfg['palmistry']),
-            'pricing_auspicious'   => Setting::get('pricing_auspicious',   $cfg['auspicious']),
-            'pricing_chat_message' => Setting::get('pricing_chat_message', $cfg['chat_message']),
-            'promptpay_id'         => Setting::get('promptpay_id',         $cfg['promptpay_id']),
-            'promptpay_name'       => Setting::get('promptpay_name',       $cfg['promptpay_name']),
+            // Master switch — off = every service free site-wide.
+            'billing_enabled' => Setting::get('billing_enabled', '1') === '1',
+
+            'promptpay_id'   => Setting::get('promptpay_id',   $cfg['promptpay_id']),
+            'promptpay_name' => Setting::get('promptpay_name', $cfg['promptpay_name']),
         ];
-        // One price field per registered tarot spread (config/tarot_spreads.php).
+
+        // Tarot: one price + one charge-toggle per registered spread.
         foreach (TarotSpreads::keys() as $k) {
-            $key = "pricing_tarot_{$k}";
-            $fill[$key] = Setting::get($key, $cfg["tarot_{$k}"] ?? 0);
+            $feature = "tarot_{$k}";
+            $fill["pricing_{$feature}"] = Setting::get("pricing_{$feature}", $cfg[$feature] ?? 0);
+            $fill["charge_{$feature}"]  = Setting::get("pricing_{$feature}_enabled", '1') === '1';
         }
+
+        // Other services.
+        foreach (self::OTHER_SERVICES as $feature => [$label, $default]) {
+            $fill["pricing_{$feature}"] = Setting::get("pricing_{$feature}", $cfg[$feature] ?? $default);
+            $fill["charge_{$feature}"]  = Setting::get("pricing_{$feature}_enabled", '1') === '1';
+        }
+
         $this->form->fill($fill);
     }
 
     public function form(Form $form): Form
     {
-        // Build a price input for every spread so adding a spread to the
-        // registry automatically makes it priceable here.
-        $tarotInputs = collect(TarotSpreads::all())->map(fn ($meta, $k) =>
-            TextInput::make("pricing_tarot_{$k}")
-                ->label($meta['name_th'] . ' (' . count($meta['positions']) . ' ใบ)')
-                ->prefix('฿')->numeric()->minValue(0)->maxValue(100000)
-                ->default((float) config("pricing.tarot_{$k}", 0))
+        // Tarot rows: toggle + price for every spread in the registry.
+        $tarotRows = collect(TarotSpreads::all())->map(fn ($meta, $k) =>
+            $this->chargeRow("tarot_{$k}", $meta['name_th'] . ' (' . count($meta['positions']) . ' ใบ)', (float) config("pricing.tarot_{$k}", 0))
+        )->values()->all();
+
+        $otherRows = collect(self::OTHER_SERVICES)->map(fn ($def, $feature) =>
+            $this->chargeRow($feature, $def[0], (float) config("pricing.$feature", $def[1]))
         )->values()->all();
 
         return $form->schema([
-            Section::make('ราคาไพ่ยิปซี (THB)')
-                ->description('ตั้งราคาต่อการเปิดไพ่แต่ละรูปแบบ — ตั้ง 0 เพื่อให้ฟรี')
-                ->schema($tarotInputs)->columns(3),
-
-            Section::make('ราคาบริการอื่น (THB)')
-                ->description('แอดมินตั้งราคาที่นี่ — มีผลทันทีกับผู้ใช้ทุกคน. ตั้ง 0 เพื่อปิดการคิดเงิน (ใช้ฟรี)')
+            Section::make('การเก็บค่าบริการ (สวิตช์หลัก)')
+                ->description('ปิดสวิตช์นี้ = ทุกบริการฟรีทั้งเว็บทันที (ราคาที่ตั้งไว้ยังถูกเก็บ กลับมาเปิดได้ทุกเมื่อ) — เหมาะกับช่วงโปรโมชันหรือเปิดตัว')
                 ->schema([
-                    TextInput::make('pricing_numerology')->label('เลขศาสตร์')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(9),
-                    TextInput::make('pricing_palmistry')->label('ลายมือ')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(29),
-                    TextInput::make('pricing_auspicious')->label('ฤกษ์ยาม')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(19),
-                    TextInput::make('pricing_chat_message')->label('แชท (ต่อข้อความ)')->prefix('฿')->numeric()->minValue(0)->maxValue(100000)->default(2),
-                ])->columns(3),
+                    Toggle::make('billing_enabled')
+                        ->label('เก็บค่าบริการจากผู้ใช้')
+                        ->helperText('เปิด = คิดเงินตามราคาด้านล่าง · ปิด = ทุกบริการฟรี')
+                        ->inline(false)
+                        ->onColor('success')->offColor('danger'),
+                ]),
+
+            Section::make('ไพ่ยิปซี')
+                ->description('เปิด/ปิดการเก็บเงินและตั้งราคาต่อการเปิดไพ่แต่ละรูปแบบ')
+                ->schema($tarotRows),
+
+            Section::make('บริการอื่น')
+                ->description('เลขศาสตร์ · ลายมือ · ฤกษ์ยาม · แชท — สวิตช์แยกแต่ละบริการ')
+                ->schema($otherRows),
 
             Section::make('PromptPay (สำหรับเติมเงิน)')
                 ->description('ข้อมูลที่จะแสดงในหน้าเติมเงินของผู้ใช้ — ใส่เบอร์ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก (ตัวเลขล้วน)')
@@ -82,22 +106,41 @@ class WalletSettings extends Page implements HasForms
         ])->statePath('data');
     }
 
+    /** One "[toggle: charge?] [price]" row for a billable feature. */
+    private function chargeRow(string $feature, string $label, float $default): Grid
+    {
+        return Grid::make(12)->schema([
+            Toggle::make("charge_{$feature}")
+                ->label($label)
+                ->helperText('เปิด = เก็บเงิน · ปิด = ฟรี')
+                ->inline(false)
+                ->onColor('success')
+                ->columnSpan(['default' => 12, 'md' => 8]),
+            TextInput::make("pricing_{$feature}")
+                ->label('ราคา (฿)')
+                ->prefix('฿')->numeric()->minValue(0)->maxValue(100000)
+                ->default($default)
+                ->columnSpan(['default' => 12, 'md' => 4]),
+        ]);
+    }
+
     public function save(): void
     {
         $data = $this->form->getState();
-        $groups = [
-            'pricing_tarot_three'  => 'pricing',
-            'pricing_tarot_celtic' => 'pricing',
-            'pricing_numerology'   => 'pricing',
-            'pricing_palmistry'    => 'pricing',
-            'pricing_auspicious'   => 'pricing',
-            'pricing_chat_message' => 'pricing',
-            'promptpay_id'         => 'pricing',
-            'promptpay_name'       => 'pricing',
-        ];
+
         foreach ($data as $key => $value) {
-            Setting::put($key, (string) $value, $groups[$key] ?? 'pricing');
+            if ($key === 'billing_enabled') {
+                Setting::put('billing_enabled', $value ? '1' : '0', 'pricing');
+            } elseif (str_starts_with($key, 'charge_')) {
+                // charge_<feature> → pricing_<feature>_enabled
+                $feature = substr($key, strlen('charge_'));
+                Setting::put("pricing_{$feature}_enabled", $value ? '1' : '0', 'pricing');
+            } else {
+                // pricing_* and promptpay_* stored as-is.
+                Setting::put($key, (string) $value, 'pricing');
+            }
         }
+
         Notification::make()->title('บันทึกการตั้งค่าวอลเลตเรียบร้อย')->success()->send();
     }
 }

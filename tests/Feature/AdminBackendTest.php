@@ -79,6 +79,12 @@ class AdminBackendTest extends TestCase
         $this->actingAs($admin)->get('/admin/readings/' . $reading->id)->assertOk();
     }
 
+    public function test_wallet_settings_page_renders_for_admin(): void
+    {
+        // Exercises mount() (spread registry + config) and the toggle/price form.
+        $this->actingAs($this->admin())->get('/admin/wallet-settings')->assertOk();
+    }
+
     public function test_member_role_cannot_access_admin_panel(): void
     {
         $member = User::factory()->create(['role' => 'member']);
