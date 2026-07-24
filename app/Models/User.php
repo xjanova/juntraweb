@@ -6,6 +6,7 @@ use App\Casts\EncryptedString;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -94,6 +95,32 @@ class User extends Authenticatable implements FilamentUser
     public function profile(): HasOne
     {
         return $this->hasOne(Profile::class);
+    }
+
+    public function wallet(): HasOne
+    {
+        return $this->hasOne(Wallet::class);
+    }
+
+    public function walletTransactions(): HasMany
+    {
+        return $this->hasMany(WalletTransaction::class)->latest('id');
+    }
+
+    public function readings(): HasMany
+    {
+        return $this->hasMany(Reading::class)->latest('id');
+    }
+
+    public function chatConversations(): HasMany
+    {
+        return $this->hasMany(ChatConversation::class)->latest('id');
+    }
+
+    /** Current wallet balance without forcing a Wallet row to exist. */
+    public function walletBalance(): float
+    {
+        return (float) ($this->wallet?->balance ?? 0);
     }
 
     public function isAdmin(): bool
