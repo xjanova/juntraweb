@@ -73,12 +73,19 @@ class ChatController extends Controller
             ]);
         }
 
+        // 🆓 ข้อมูลเพดานข้อความฟรีต่อวัน — โชว์ยอดคงเหลือในหน้าแชท
+        $cost = Pricing::for('chat_message');
+        $dailyLimit = $cost <= 0 ? $this->dailyLimit() : 0;
+        $dailyUsed = ($dailyLimit > 0 && $user) ? $this->dailyUsed($user) : 0;
+
         return view('pages.chat.index', [
             'conversation' => $conversation->load('messages'),
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
-            'cost'         => Pricing::for('chat_message'),
+            'cost'         => $cost,
             'balance'      => $user ? $this->wallet->balance($user) : null,
+            'dailyLimit'   => $dailyLimit,
+            'dailyLeft'    => max(0, $dailyLimit - $dailyUsed),
             'readonly'     => false, // live chat room — input is active
             // A question carried in from a tarot result page — the view
             // auto-sends it once so the grounded answer appears immediately.
@@ -113,6 +120,19 @@ class ChatController extends Controller
         }
 
         $cost = Pricing::for('chat_message');
+
+        // 🆓 (2026-07-24) โหมดคุยฟรี — เพดานข้อความต่อวัน กันต้นทุน AI บานปลาย
+        //   ครบเพดานแล้วแม่หมอชวนไปเปิดไพ่แบบเจาะลึกแทน (เตะเบาๆ ไม่ใช่ error แข็งๆ)
+        $dailyLimit = $this->dailyLimit();
+        if ($cost <= 0 && $dailyLimit > 0 && $this->dailyUsed($user) >= $dailyLimit) {
+            $limitMsg = "วันนี้ลูกคุยกับแม่หมอครบ {$dailyLimit} ข้อความแล้วค่ะ ✨ พรุ่งนี้แม่หมอรอฟังเรื่องราวต่อนะคะ — "
+                .'หรือถ้าอยากรู้ลึกถึงดวงชะตา ให้แม่หมอเปิดไพ่ดูแบบเจาะจงได้ที่เมนู "เปิดไพ่" เลยค่ะ 🔮';
+
+            return $request->wantsJson()
+                ? response()->json(['error' => $limitMsg, 'reason_code' => 'daily_limit'], 429)
+                : redirect()->route('chat.index')->with('status', $limitMsg);
+        }
+
         $balance = $this->wallet->balance($user);
         if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
             $msg = sprintf(
@@ -447,7 +467,13 @@ class ChatController extends Controller
                     'reason' => 'กรุณาเข้าสู่ระบบด้วย Thaiprompt (Facebook หรือ LINE) เพื่อคุยกับแม่หมอ'];
         }
 
-        if (!$user->isLinkedViaFbOrLine()) {
+        // 🆓 (2026-07-24) โหมดคุยฟรี (pricing_chat_message = 0) — เปิดให้สมาชิก SSO ทุกคน
+        //   ไม่ต้องเช็คการเชื่อม FB/LINE (เงื่อนไขนั้นเป็นของยุคคิดเงินต่อข้อความ)
+        //   จำเป็นสำหรับลูกค้าจาก Magic Link ของบอท: บัญชีบอทมี facebook_psid
+        //   แต่ไม่มี facebook_user_id (OAuth asid) → isLinkedViaFbOrLine() = false
+        $isFree = Pricing::for('chat_message') <= 0;
+
+        if (!$isFree && !$user->isLinkedViaFbOrLine()) {
             return ['allowed' => false, 'code' => 'no_link',
                     'reason' => 'บัญชีของคุณยังไม่ได้เชื่อมกับ Facebook หรือ LINE — เข้าสู่ระบบใหม่ผ่าน Thaiprompt เพื่อยืนยันตัวตน'];
         }
@@ -458,5 +484,29 @@ class ChatController extends Controller
         }
 
         return ['allowed' => true, 'code' => null, 'reason' => null];
+    }
+
+    /* ============================================================
+       🆓 FREE-CHAT DAILY LIMIT (2026-07-24)
+       ============================================================ */
+
+    /**
+     * เพดานข้อความฟรีต่อคนต่อวัน — Setting 'chat_daily_limit' (default 30, 0 = ไม่จำกัด)
+     * ใช้เฉพาะโหมดคุยฟรี (ยุคคิดเงินมีวอลเลตเป็นเบรกอยู่แล้ว)
+     */
+    private function dailyLimit(): int
+    {
+        $val = \App\Models\Setting::get('chat_daily_limit');
+
+        return is_numeric($val) ? max(0, (int) $val) : 30;
+    }
+
+    /** จำนวนข้อความที่ user ส่งไปแล้ววันนี้ (นับเฉพาะ role=user ทุกบทสนทนาของเขา) */
+    private function dailyUsed($user): int
+    {
+        return ChatMessage::where('role', 'user')
+            ->where('created_at', '>=', now()->startOfDay())
+            ->whereHas('conversation', fn ($q) => $q->where('user_id', $user->id))
+            ->count();
     }
 }
