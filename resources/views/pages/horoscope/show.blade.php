@@ -2,6 +2,13 @@
 @section('title', "ดวงราศี{$zodiac->name_th}")
 
 @section('content')
+@php
+    // Inline map (not a declared function): the old __thaiElement() was declared
+    // at the bottom of this file under if(!function_exists()). A CONDITIONAL
+    // declaration is NOT hoisted, so the call up here ran before it existed →
+    // "Call to undefined function" → every zodiac page 500'd.
+    $thaiElement = ['Fire' => 'ไฟ', 'Earth' => 'ดิน', 'Air' => 'ลม', 'Water' => 'น้ำ'][$zodiac->element] ?? $zodiac->element;
+@endphp
 <section class="canvas" style="padding-top:160px">
   <div style="max-width:880px;margin:0 auto">
     <div class="eyebrow">ดวงประจำวันที่ {{ now()->format('d/m/Y') }}</div>
@@ -9,7 +16,7 @@
       <span style="font-family:var(--display);color:var(--gold);font-size:.9em">{{ $zodiac->glyph }}</span>
       <span><em>{{ $zodiac->name_th }}</em></span>
     </h1>
-    <p style="color:var(--ink-dim);font-size:15px;letter-spacing:.04em">{{ $zodiac->name_en }} · {{ $zodiac->date_range }} · ธาตุ{{ __thaiElement($zodiac->element) }}</p>
+    <p style="color:var(--ink-dim);font-size:15px;letter-spacing:.04em">{{ $zodiac->name_en }} · {{ $zodiac->date_range }} · ธาตุ{{ $thaiElement }}</p>
 
     <div class="panel" style="margin-top:40px">
       <div class="summary" style="font-family:var(--serif);font-style:italic;font-size:22px;line-height:1.5;color:var(--moon)">
@@ -64,15 +71,4 @@
     </div>
   </div>
 </section>
-
-@php
-// function_exists guard: Blade compiles this declaration into a file that can
-// be included more than once per worker (persistent workers / Octane), which
-// would fatal with "Cannot redeclare".
-if (!function_exists('__thaiElement')) {
-    function __thaiElement($e) {
-        return ['Fire'=>'ไฟ','Earth'=>'ดิน','Air'=>'ลม','Water'=>'น้ำ'][$e] ?? $e;
-    }
-}
-@endphp
 @endsection
