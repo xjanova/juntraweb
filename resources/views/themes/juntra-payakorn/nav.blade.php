@@ -1,4 +1,4 @@
-<header class="nav">
+<header class="nav" x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape.window="open = false">
   <a class="brand" href="{{ route('home') }}">
     <div class="brand-logo"><img src="{{ asset('images/juntra/logo.png') }}" alt="จันทราพยากรณ์"></div>
     <div class="brand-text">
@@ -6,7 +6,9 @@
       <span class="en">JUNTRA PAYAKORN</span>
     </div>
   </a>
-  <nav class="nav-links" id="navLinks" x-data x-on:click.outside="$el.classList.remove('open')">
+  {{-- :class binds the .open state; x-on:click closes the menu after tapping a
+       link so navigation on mobile doesn't leave the panel hanging open. --}}
+  <nav class="nav-links" id="navLinks" :class="{ open: open }" x-on:click="open = false">
     <a href="{{ route('tarot.index') }}">ไพ่ยิปซี</a>
     <a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>
     <a href="{{ route('numerology.index') }}">เลขศาสตร์</a>
@@ -23,5 +25,10 @@
       <a href="{{ route('register') }}" class="nav-cta">สมัครสมาชิก ✦</a>
     @endauth
   </nav>
-  <button class="menu-toggle" id="menuToggle" aria-label="menu" onclick="document.getElementById('navLinks').classList.toggle('open')"><span></span></button>
+  {{-- Button lives inside the x-data root (<header>), so tapping it is NOT an
+       "outside" click — it toggles instead of being cancelled by click.outside.
+       (The old markup put click.outside on #navLinks with the button as a
+       sibling, so every tap opened then instantly closed the menu.) --}}
+  <button class="menu-toggle" id="menuToggle" type="button" aria-label="เมนู"
+          :aria-expanded="open" x-on:click="open = !open"><span></span></button>
 </header>
