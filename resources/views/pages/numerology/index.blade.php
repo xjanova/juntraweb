@@ -27,7 +27,7 @@
         <label for="birth_date">วัน-เดือน-ปีเกิด</label>
         <input type="date" id="birth_date" name="birth_date" value="{{ old('birth_date') }}" required>
       </div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center" :disabled="submitting" :style="submitting ? 'opacity:.6;cursor:wait' : ''">
+      <button class="btn btn-primary" style="width:100%;justify-content:center" :disabled="submitting">
         <span x-show="!submitting">คำนวณดวงเลข</span>
         <span x-show="submitting">กำลังคำนวณ ⋯</span>
         <svg x-show="!submitting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>

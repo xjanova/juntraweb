@@ -22,16 +22,21 @@
 @include('themes.' . $activeTheme . '.nav')
 
 <main>
-  @if (session('status'))
-    <div style="max-width:880px;margin:120px auto -60px;padding:0 24px"><div class="flash">{{ session('status') }}</div></div>
-  @endif
-  @if ($errors->any())
-    <div style="max-width:880px;margin:120px auto -60px;padding:0 24px">
-      <div class="flash flash-error">
-        <ul style="margin:0;padding-left:18px">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul>
+  {{-- หน้าที่วางแถบแจ้งเตือนเองแล้ว (ในตำแหน่งที่เข้ากับเลย์เอาต์ของหน้านั้น)
+       จะประกาศ section 'page-handles-flash' ไว้ — ไม่งั้นข้อความเดียวกันจะขึ้น
+       ซ้ำสองรอบ ทั้งจากเลย์เอาต์และจากตัวหน้าเอง (เกิดกับ 9 หน้า) --}}
+  @unless (View::hasSection('page-handles-flash'))
+    @if (session('status'))
+      <div style="max-width:880px;margin:120px auto -60px;padding:0 24px"><div class="flash">{{ session('status') }}</div></div>
+    @endif
+    @if ($errors->any())
+      <div style="max-width:880px;margin:120px auto -60px;padding:0 24px">
+        <div class="flash flash-error">
+          <ul style="margin:0;padding-left:18px">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul>
+        </div>
       </div>
-    </div>
-  @endif
+    @endif
+  @endunless
   @yield('content')
 </main>
 

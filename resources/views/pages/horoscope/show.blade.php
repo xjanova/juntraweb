@@ -58,9 +58,20 @@
       </div>
     </div>
 
+    {{-- หน้านี้เคยเป็นทางตัน — อ่านดวงจบแล้วไม่มีปุ่มไปไหนต่อเลยแม้แต่ปุ่มเดียว
+         ทั้งที่เป็นหน้าที่คนเข้ามากที่สุดจาก Google --}}
+    <div style="text-align:center;margin-top:48px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
+      <a href="{{ route('tarot.index') }}" class="btn btn-ghost">เปิดไพ่เจาะลึก</a>
+      <a href="{{ route('chat.index') }}" class="btn btn-primary">ถามแม่หมอต่อ
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+      </a>
+    </div>
+
     <div style="margin-top:48px">
       <div class="eyebrow" style="display:inline-flex;margin-bottom:24px">ราศีอื่น</div>
-      <div class="zodiac-list" style="grid-template-columns:repeat(6,1fr)">
+      {{-- เดิม inline repeat(6,1fr) ชนะ media query ของธีมเสมอ บนมือถือ 12 ราศี
+           จึงถูกบีบเหลือช่องละ ~50px --}}
+      <div class="zodiac-list auto-grid" style="--col-min:96px;gap:10px">
         @foreach ($allZodiacs as $z)
           <a href="{{ route('horoscope.show', $z) }}" class="z" style="padding:10px;text-decoration:none;{{ $z->id === $zodiac->id ? 'border-color:var(--gold);background:rgba(244,207,106,.1)' : '' }}">
             <span class="glyph" style="font-size:18px">{{ $z->glyph }}</span>

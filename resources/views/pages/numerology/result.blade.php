@@ -7,7 +7,7 @@
     <div class="eyebrow">เลขศาสตร์ · NUMEROLOGY RESULT</div>
     <h2 style="font-family:var(--serif);font-size:clamp(40px,5vw,68px);font-weight:400">ดวงเลขของ <em style="color:var(--gold)">{{ $reading->question }}</em></h2>
 
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px">
+    <div class="auto-grid" style="--col-min:200px;gap:20px;margin-top:48px">
       <div class="panel" style="text-align:center">
         <div class="eyebrow" style="display:inline-flex;margin-bottom:8px">LIFE PATH</div>
         <div style="font-family:var(--display);font-size:96px;color:var(--gold);font-weight:600;line-height:1">{{ $result['life_path'] }}</div>

@@ -33,7 +33,7 @@
           <input type="date" id="to_date" name="to_date" value="{{ old('to_date', now()->addDays(60)->toDateString()) }}">
         </div>
       </div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center" :disabled="submitting" :style="submitting ? 'opacity:.6;cursor:wait' : ''">
+      <button class="btn btn-primary" style="width:100%;justify-content:center" :disabled="submitting">
         <span x-show="!submitting">ค้นหาวันมงคล</span>
         <span x-show="submitting">กำลังค้นหา ⋯</span>
         <svg x-show="!submitting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>

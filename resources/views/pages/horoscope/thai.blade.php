@@ -9,7 +9,7 @@
     <p class="lede" style="margin:0 auto">นักษัตรไทยจาก 12 ปีในรอบ — แต่ละปีมีพลังเฉพาะตัวที่ส่งผลต่อบุคลิกและโชคชะตาของผู้เกิดในปีนั้น</p>
   </div>
 
-  <div class="services-grid" style="max-width:1080px;margin:0 auto;grid-template-columns:repeat(3,1fr)">
+  <div class="services-grid" style="max-width:1080px;margin:0 auto">
     @foreach ($chineseZodiacs as $cz)
       <div class="service" style="text-align:center">
         <div class="icon" style="margin:0 auto 24px;font-size:32px;line-height:1">{{ $cz->glyph }}</div>

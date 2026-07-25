@@ -7,7 +7,7 @@
     <div class="eyebrow">AUSPICIOUS DATES</div>
     <h2 style="font-family:var(--serif);font-size:clamp(40px,5vw,68px);font-weight:400">วันมงคลสำหรับ <em style="color:var(--gold)">"{{ $occasion }}"</em></h2>
 
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:48px">
+    <div class="auto-grid" style="--col-min:220px;gap:14px;margin-top:48px">
       @foreach ($candidates as $c)
         <div class="panel" style="padding:24px;display:flex;justify-content:space-between;align-items:center;gap:16px">
           <div>
@@ -27,8 +27,11 @@
       <x-reading-prose :text="$advice" />
     </div>
 
-    <div style="text-align:center;margin-top:48px">
+    <div style="text-align:center;margin-top:48px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
       <a href="{{ route('auspicious.index') }}" class="btn btn-ghost">ค้นหาใหม่</a>
+      <a href="{{ route('chat.index') }}" class="btn btn-primary">ถามแม่หมอต่อ
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+      </a>
     </div>
   </div>
 </section>

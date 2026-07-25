@@ -1,4 +1,5 @@
 @extends('layouts.app')
+@section('page-handles-flash', '1')
 @section('title', 'ยืนยันอีเมล')
 
 @section('content')

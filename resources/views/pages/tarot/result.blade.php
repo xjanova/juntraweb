@@ -133,7 +133,7 @@
            1 card → centered; 2-3 → equal columns; more → wrap. --}}
       @php $rowClass = $count === 1 ? 'is-single' : ($count > 3 ? 'is-wrap' : ''); @endphp
       <div class="reading-card-row {{ $rowClass }}"
-           @if($count > 1 && $count <= 3) style="grid-template-columns: repeat({{ $count }}, 1fr)" @endif>
+           @if($count > 1 && $count <= 3) style="--card-cols: {{ $count }}" @endif>
         @foreach ($reading->tarotCards as $rc)
           <div class="position">
             <div class="pos-label">{{ $rc->position_label }}</div>
@@ -170,7 +170,7 @@
           @csrf
           <input type="text" name="question" maxlength="2000" autocomplete="off"
                  placeholder="อยากถามแม่หมอเจาะจงเรื่องอะไรจากไพ่ชุดนี้?">
-          <button type="submit" class="btn btn-primary" :disabled="sending" :style="sending ? 'opacity:.6;cursor:wait' : ''">
+          <button type="submit" class="btn btn-primary" :disabled="sending">
             <span x-show="!sending">ถามแม่หมอ</span>
             <span x-show="sending">กำลังพา ⋯</span>
             <svg x-show="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M13 5l7 7-7 7"/></svg>

@@ -1,4 +1,5 @@
 @extends('layouts.app')
+@section('page-handles-flash', '1')
 @section('title', 'Affiliate · ผังสายงานดูดวง')
 
 @push('head')
@@ -542,13 +543,18 @@ document.addEventListener('alpine:init', () => {
     },
     statusLabel(s) { return { paid: 'จ่ายแล้ว', approved: 'อนุมัติ', pending: 'รอ', rejected: 'ปฏิเสธ' }[s] || s; },
     badgeStyle(s) {
+      // Alpine ผูก :style ด้วยสตริงจะเขียนทับ attribute style ทั้งก้อน
+      // สไตล์พื้นฐานของ badge จึงต้องรวมมาในนี้ ไม่ใช่เขียนแยกไว้ที่ style=""
+      // (ไม่งั้น padding/มุมมน/ฟอนต์หายหมดตั้งแต่ Alpine บูต)
+      const base = 'display:inline-block;padding:3px 12px;border-radius:99px;'
+        + 'font-family:var(--display);font-size:10px;letter-spacing:.1em;text-transform:uppercase;';
       const map = {
         paid:     'background:rgba(120,200,120,.18);color:#9eddae;border:1px solid rgba(120,200,120,.35)',
         approved: 'background:rgba(120,180,255,.18);color:#9ec6f5;border:1px solid rgba(120,180,255,.35)',
         pending:  'background:linear-gradient(135deg,rgba(244,207,106,.2),rgba(244,207,106,.04));color:var(--gold);border:1px solid var(--line)',
         rejected: 'background:rgba(255,143,212,.18);color:#f59999;border:1px solid rgba(255,143,212,.35)',
       };
-      return map[s] || map.pending;
+      return base + (map[s] || map.pending);
     },
 
     /* ── referral ── */

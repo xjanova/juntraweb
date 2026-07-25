@@ -105,8 +105,7 @@
           <input type="hidden" name="picked[]" :value="id">
         </template>
         <button type="submit" class="btn btn-primary" style="font-size:14px;padding:20px 44px"
-                :disabled="submitting"
-                :style="submitting ? 'opacity:.6;cursor:wait' : ''">
+                :disabled="submitting">
           <span x-show="!submitting">เปิดไพ่ทั้ง {{ $needed }} ใบ</span>
           <span x-show="submitting">กำลังเปิดไพ่ ⋯</span>
           <svg x-show="!submitting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M13 5l7 7-7 7"/></svg>

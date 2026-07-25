@@ -30,12 +30,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }, { threshold: 0.1 });
 
-    document.querySelectorAll('.feature, .service, .test, .zodiac-list .z').forEach((el, i) => {
-        el.style.opacity = '0';
-        el.style.transform = 'translateY(20px)';
-        el.style.transition = `all .8s cubic-bezier(.2,.7,.2,1) ${i * 0.05}s`;
-        io.observe(el);
-    });
+    // เอฟเฟกต์ค่อย ๆ ปรากฏตอนเลื่อนถึง — ข้ามไปเลยถ้าผู้ใช้ตั้งค่าลดการเคลื่อนไหว
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const revealTargets = document.querySelectorAll('.feature, .service, .test, .zodiac-list .z');
+
+    if (!reduceMotion) {
+        revealTargets.forEach((el, i) => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(20px)';
+            el.style.transition = `all .8s cubic-bezier(.2,.7,.2,1) ${i * 0.05}s`;
+            io.observe(el);
+        });
+
+        // ตาข่ายกันเนื้อหาหาย: การ์ดถูกตั้ง opacity:0 รอ IntersectionObserver
+        // ถ้ามันไม่ยิง (เบราว์เซอร์เก่า / element ถูกซ่อนตอนวัด / บั๊กแปลก ๆ)
+        // ผู้ใช้จะเจอหน้าเปล่าถาวร — บังคับเปิดทั้งหมดหลัง 3 วินาที
+        setTimeout(() => {
+            revealTargets.forEach(el => {
+                if (el.style.opacity === '0') {
+                    el.style.opacity = '1';
+                    el.style.transform = 'translateY(0)';
+                }
+            });
+        }, 3000);
+    }
 
     window.addEventListener('mousemove', (e) => {
         const x = (e.clientX / window.innerWidth - 0.5);

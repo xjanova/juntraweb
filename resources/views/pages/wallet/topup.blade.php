@@ -58,11 +58,15 @@
           <label for="amount">จำนวนเงิน (฿)</label>
           <input type="number" id="amount" name="amount" min="{{ $min }}" max="{{ $max }}" step="1"
                  x-model="amount" required>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          {{-- ชิปจำนวนเงิน — ใช้ .chip + :class แทน :style
+               Alpine ผูก :style ด้วย "สตริง" จะเขียนทับ attribute style ทั้งก้อน
+               ของเดิมจึงลบสไตล์คงที่ (padding/ขอบ/มุมมน/ฟอนต์) ทิ้งหมดตั้งแต่
+               Alpine บูต ปุ่มกลายเป็นข้อความเปล่า ๆ ไม่เหมือนปุ่ม --}}
+          <div class="chip-wrap" style="margin-top:10px">
             @foreach ($bundles as $b)
-              <button type="button" @click="amount = '{{ $b }}'"
-                      style="padding:6px 14px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink);font-family:var(--display);font-size:11px;letter-spacing:.18em;cursor:pointer"
-                      :style="amount === '{{ $b }}' ? 'border-color:var(--gold);background:rgba(244,207,106,.10);color:var(--gold)' : ''">
+              <button type="button" class="chip" @click="amount = '{{ $b }}'"
+                      :class="amount === '{{ $b }}' && 'chip-strong'"
+                      :aria-pressed="(amount === '{{ $b }}').toString()">
                 ฿{{ number_format($b) }}
               </button>
             @endforeach

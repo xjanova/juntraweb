@@ -27,7 +27,7 @@
         <label for="question">คำถาม (ไม่ใส่ก็ได้)</label>
         <textarea id="question" name="question" rows="2" placeholder="เช่น ดวงเรื่องการเงินจะเป็นอย่างไร, มีโอกาสแต่งงานไหม"></textarea>
       </div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center" :disabled="submitting" :style="submitting ? 'opacity:.6;cursor:wait' : ''">
+      <button class="btn btn-primary" style="width:100%;justify-content:center" :disabled="submitting">
         <span x-show="!submitting">วิเคราะห์ลายมือ</span>
         <span x-show="submitting">กำลังวิเคราะห์ ⋯</span>
         <svg x-show="!submitting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>

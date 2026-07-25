@@ -163,6 +163,36 @@
 }
 
 /* ============================================================
+   GRID HELPERS — แทน grid-template-columns ตายตัวใน inline style
+
+   ของเดิมหน้าผลลัพธ์ล็อกจำนวนคอลัมน์ไว้ (3 คอลัมน์ / 2 คอลัมน์ / 1fr 1.5fr)
+   บนมือถือ 360px แต่ละช่องจึงเหลือกว้างไม่ถึง 100px หลังหัก padding ของ
+   .panel — ตัวเลข 96px และรูปฝ่ามือถูกบีบจนอ่านไม่ออก
+   ============================================================ */
+
+.auto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--col-min, 200px), 100%), 1fr));
+}
+
+/* สองคอลัมน์ที่ยุบเป็นคอลัมน์เดียวเมื่อแคบ (รูป + คำอธิบาย) */
+.split-grid { display: grid; grid-template-columns: 1fr 1.5fr; }
+@media (max-width: 760px) { .split-grid { grid-template-columns: 1fr; } }
+
+/* แถวไพ่: จำนวนคอลัมน์มาจาก --card-cols แต่ยุบลงได้เมื่อจอแคบ
+   (เดิม inline `repeat(3,1fr)` ชนะ media query ของธีมเสมอ ไพ่ 3 ใบบนมือถือ
+   จึงเหลือกว้างราว 80px) */
+.reading-card-row[style*="--card-cols"] {
+  grid-template-columns: repeat(var(--card-cols, 3), minmax(0, 1fr));
+}
+@media (max-width: 640px) {
+  .reading-card-row[style*="--card-cols"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 380px) {
+  .reading-card-row[style*="--card-cols"] { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ============================================================
    CHAT — ห้องคุยกับแม่หมอ (theme-agnostic)
 
    ย้ายออกจาก inline style ในหน้า chat/index.blade.php ทั้งหมด
@@ -360,14 +390,17 @@
   line-height: 1.6;
   font-family: var(--thai, inherit);
 }
-.chat-send {
+/* ต้องมี .chat-composer นำหน้าเพื่อชนะ `.btn { padding: 18px 36px }` ของธีม
+   (ไฟล์ธีมโหลดหลัง app.css จึงชนะเมื่อ specificity เท่ากัน) ไม่งั้นปุ่มส่ง
+   จะกลายเป็นแคปซูลกว้าง 72px แทนวงกลม แล้วเบียดช่องพิมพ์บนมือถือ */
+.chat-composer .chat-send {
   flex: none;
   width: 48px; height: 48px; padding: 0;
   border-radius: 50%;
   display: grid; place-items: center;
   gap: 0;
 }
-.chat-send svg { width: 18px; height: 18px }
+.chat-composer .chat-send svg { width: 18px; height: 18px }
 .chat-counter {
   font-size: 11px;
   color: var(--ink-faint, rgba(246, 239, 224, .45));
@@ -408,7 +441,7 @@
 }
 @media (max-width: 480px) {
   .msg-body { font-size: 14.5px; padding: 12px 15px }
-  .chat-send { width: 44px; height: 44px }
+  .chat-composer .chat-send { width: 44px; height: 44px }
 }
 
 /* ============================================================

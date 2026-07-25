@@ -1,4 +1,5 @@
 @extends('layouts.app')
+@section('page-handles-flash', '1')
 @section('title', 'แจ้งเติมเงิน')
 
 @section('content')
@@ -37,7 +38,11 @@
             <a href="{{ route('wallet.topup') }}" class="btn btn-primary">เติมเงินครั้งแรก</a>
           </div>
         @else
-          <table style="width:100%;border-collapse:collapse">
+          {{-- ตารางกว้างกว่าจอมือถือ ถูก overflow:hidden ของ .panel ตัดทิ้ง
+               คอลัมน์ขวาสุด (ปุ่ม "รายละเอียด →") จึงหายไปเลย ไม่ใช่แค่ล้น
+               ครอบด้วยกล่องที่เลื่อนแนวนอนได้ เพื่อให้เข้าถึงทุกคอลัมน์ --}}
+          <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+          <table style="width:100%;min-width:560px;border-collapse:collapse">
             <thead>
               <tr style="background:rgba(0,0,0,.02);border-bottom:1px solid var(--line-soft)">
                 <th style="padding:14px;text-align:left;font-family:var(--display);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);font-weight:500">วันที่</th>
@@ -80,6 +85,7 @@
               @endforeach
             </tbody>
           </table>
+          </div>
         @endif
       </div>
 
