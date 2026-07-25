@@ -61,6 +61,16 @@ class ChatController extends Controller
         ]);
     }
 
+    /**
+     * หมวดคำถามแบบเต็ม — ชุดเดียวกับแผงที่เว็บกางออกในแชท
+     * แยก endpoint เพราะเป็นข้อมูลคงที่ แอพดึงครั้งเดียวแล้ว cache เองได้
+     * ไม่ต้องแบกมากับทุก response ของการส่งข้อความ
+     */
+    public function topics(): JsonResponse
+    {
+        return response()->json(['data' => ChatSuggestions::topics()]);
+    }
+
     public function startConversation(Request $request): JsonResponse
     {
         $user = $request->user();

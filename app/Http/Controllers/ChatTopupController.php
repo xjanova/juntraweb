@@ -7,6 +7,7 @@ use App\Models\Setting;
 use App\Models\WalletTransaction;
 use App\Services\FortuneBot\FortuneBotClient;
 use App\Services\SmsPayment\SmsCheckerService;
+use App\Services\Wallet\SlipAutoVerifier;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\PayoutAccount;
@@ -36,6 +37,7 @@ class ChatTopupController extends Controller
         private WalletService $wallet,
         private SmsCheckerService $sms,
         private FortuneBotClient $bot,
+        private SlipAutoVerifier $slips,
     ) {}
 
     /** สร้างรายการเติมเงิน + QR สำหรับสแกนจ่าย */
@@ -146,73 +148,27 @@ class ChatTopupController extends Controller
     /**
      * ตรวจสลิปแล้วเครดิตให้ทันทีถ้าผ่านทุกด่าน
      *
-     * ด่านที่ต้องผ่านครบ (ขาดข้อใดข้อหนึ่ง = ส่งต่อให้แอดมิน ไม่เครดิตเอง):
-     *   1. SlipOK อ่านสลิปออกและยืนยันว่าเป็นรายการจริง
-     *   2. ปลายทางเป็นบัญชีของร้านเรา — ไม่งั้นสลิปที่โอนให้คนอื่นก็ผ่านได้
-     *   3. ยอดในสลิป ≥ ยอดที่ต้องโอน (เผื่อคลาด 1 สตางค์จากการปัดเศษ)
-     *   4. เลขอ้างอิงธนาคารนี้ยังไม่เคยถูกใช้เครดิตรายการไหน — กันเอาสลิปใบเดิม
-     *      (ถ่ายใหม่/ครอปใหม่ ซึ่ง hash ไม่ซ้ำ) มาเคลมสองรอบ
+     * กติกาจริงอยู่ใน SlipAutoVerifier เพราะ API มือถือต้องใช้ชุดเดียวกันเป๊ะ
+     * (เส้นทางนี้แตะเงิน ถ้ามีสองชุดจะ drift แน่นอน)
      *
      * @return array<string,mixed>|null  null = ตรวจอัตโนมัติไม่ได้ ให้แอดมินดูต่อ
      */
     private function autoVerifySlip(WalletTransaction $tx, $user, string $path): ?array
     {
-        $abs = Storage::disk('local')->path($path);
-        $verify = $this->bot->verifySlip($user, $abs);
-        if (! is_array($verify)) {
+        $result = $this->slips->verify($tx, $user, $path);
+        if ($result === null) {
             return null;
         }
 
-        $reject = function (string $msg) use ($tx): array {
-            return ['ok' => true, 'status' => $tx->fresh()->status, 'paid' => false, 'message' => $msg];
-        };
-
-        if (empty($verify['ok'])) {
-            return $reject('ระบบอ่านสลิปนี้ไม่ออกค่ะ แม่หมอส่งให้แอดมินตรวจให้แล้วนะคะ');
-        }
-        if (empty($verify['receiver_matches'])) {
-            return $reject('สลิปนี้ไม่ได้โอนเข้าบัญชีของร้านค่ะ แอดมินจะตรวจสอบให้อีกครั้งนะคะ');
-        }
-
-        $slipAmount = (float) ($verify['amount'] ?? 0);
-        $payable    = (float) $tx->amount;
-        if ($slipAmount + 0.01 < $payable) {
-            return $reject(sprintf(
-                'ยอดในสลิป %s น้อยกว่ายอดที่ต้องโอน %s ค่ะ แอดมินจะตรวจสอบให้นะคะ',
-                Pricing::format($slipAmount),
-                Pricing::format($payable),
-            ));
-        }
-
-        $transRef = trim((string) ($verify['trans_ref'] ?? ''));
-        if ($transRef === '') {
-            return $reject('สลิปนี้ไม่มีเลขอ้างอิงธนาคารค่ะ แอดมินจะตรวจสอบให้นะคะ');
-        }
-        $used = WalletTransaction::where('bank_reference', $transRef)
-            ->where('id', '!=', $tx->id)
-            ->exists();
-        if ($used) {
-            return $reject('สลิปนี้ถูกใช้ยืนยันรายการอื่นไปแล้วค่ะ');
-        }
-
-        $tx->update(['bank_reference' => $transRef, 'slip_amount' => $slipAmount]);
-        $this->wallet->confirmTopupAuto($tx, [
-            'source'       => 'slipok',
-            'trans_ref'    => $transRef,
-            'slip_amount'  => $slipAmount,
-            'sender_name'  => $verify['sender_name'] ?? null,
-        ]);
-
         return [
             'ok'      => true,
-            'status'  => 'success',
-            'paid'    => true,
+            'status'  => $tx->fresh()->status,
+            'paid'    => $result['paid'],
             'balance' => (float) $this->wallet->balance($user),
-            'message' => 'ตรวจสลิปผ่านแล้วค่ะ เติมเครดิตให้เรียบร้อย ✨',
+            'message' => $result['message'],
         ];
     }
 
-    /** @return array<string,mixed> */
     /** @param array{promptpay_id:string,name:string,source:string} $account */
     private function payload(WalletTransaction $tx, array $account): array
     {

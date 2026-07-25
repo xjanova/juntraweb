@@ -89,6 +89,15 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('conversations/{conversation}',    [ChatController::class, 'show'])->name('conversations.show');
             Route::post('conversations/{conversation}/send', [ChatController::class, 'send'])
                 ->middleware('throttle:chat-send')->name('conversations.send');
+            // หมวดคำถามแบบเต็ม (5 หมวด 24 คำถาม) — ชุดเดียวกับที่เว็บกางในแชท
+            Route::get('topics', [ChatController::class, 'topics'])->name('topics');
+        });
+
+        // ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับเว็บและบอท FB/LINE
+        Route::prefix('deep')->name('deep.')->group(function () {
+            Route::get('/',  [\App\Http\Controllers\Api\V1\DeepReadingController::class, 'show'])->name('show');
+            Route::post('/', [\App\Http\Controllers\Api\V1\DeepReadingController::class, 'store'])
+                ->middleware('throttle:reading')->name('store');
         });
 
         // MLM dashboard — wraps the upstream Thaiprompt /juntra/mlm/*

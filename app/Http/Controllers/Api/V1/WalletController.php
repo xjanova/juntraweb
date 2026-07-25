@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
 use App\Services\SmsPayment\SmsCheckerService;
+use App\Services\Wallet\SlipAutoVerifier;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use App\Support\PromptPayQr;
@@ -25,7 +26,10 @@ use Illuminate\Support\Facades\Storage;
  */
 class WalletController extends Controller
 {
-    public function __construct(private WalletService $wallet) {}
+    public function __construct(
+        private WalletService $wallet,
+        private SlipAutoVerifier $slips,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -277,10 +281,20 @@ class WalletController extends Controller
             Storage::disk('local')->delete($oldPath);
         }
 
+        // ตรวจสลิปอัตโนมัติด้วย SlipOK ชุดเดียวกับเว็บ (SlipAutoVerifier)
+        // ก่อนหน้านี้ฝั่งแอพต้องรอแอดมินกดทุกใบ ทั้งที่เว็บตรวจเองได้แล้ว
+        // ตรวจไม่ได้ = ส่งต่อให้แอดมิน ไม่ปฏิเสธสลิปของลูกค้า
+        $auto = $this->slips->verify($row, $request->user(), $newPath);
+
         return response()->json([
             'data' => array_merge($this->txPayload($row->fresh()), [
                 'slip_uploaded'   => true,
                 'slip_upload_url' => url('/wallet/topup/' . $row->id),
+                'auto_verified'   => $auto !== null,
+                'paid'            => (bool) ($auto['paid'] ?? false),
+                'message'         => $auto['message']
+                    ?? 'ได้รับสลิปแล้วค่ะ ระบบกำลังตรวจสอบให้นะคะ',
+                'balance'         => (float) $this->wallet->balance($request->user()),
             ]),
         ]);
     }
