@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+{{-- ทั้งสองธีมเป็นธีมมืด — ประกาศไว้ตั้งแต่ก่อน CSS โหลด ไม่งั้น Chrome Android
+     ที่เปิด Auto Dark Theme จะกลับสีปุ่มทองเป็นดำและวาด native control ผิดโทน --}}
+<meta name="color-scheme" content="dark">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <title>@yield('title', config('app.name', 'แม่หมอจันทรา')) — ทำนายดวงด้วย AI ศักดิ์สิทธิ์</title>
 <meta name="description" content="@yield('description', 'แม่หมอจันทรา / จันทราพยากรณ์ ผสานศาสตร์ดวงดาวโบราณกับปัญญาประดิษฐ์ — ดวงรายวัน ไพ่ยิปซี เลขศาสตร์ AI Chat ดูดวง')">

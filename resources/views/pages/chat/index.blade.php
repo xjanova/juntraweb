@@ -1,27 +1,58 @@
 @extends('layouts.app')
-@section('title', 'คุยกับแม่หมอจันทรา · ฟรี')
 
 @php
-  // ค่า default กันหน้า history (show()) ที่ไม่ได้ส่งตัวแปรเพดานรายวันมา
-  $dailyLimit = $dailyLimit ?? 0;
-  $dailyLeft  = $dailyLeft ?? 0;
-  $isFree     = ($cost ?? 0) <= 0;
+  // ค่า default กันหน้า history (show()) ที่ไม่ได้ส่งตัวแปรมาครบ
+  $dailyLimit  = $dailyLimit ?? 0;
+  $dailyLeft   = $dailyLeft ?? 0;
+  $suggestions = $suggestions ?? [];
+  $topics      = $topics ?? [];
+  $awaiting    = $awaiting ?? false;
+  $readonly    = $readonly ?? false;
+  $isFree      = ($cost ?? 0) <= 0;
+  $exhausted   = $isFree && $dailyLimit > 0 && $dailyLeft <= 0;
+
+  // ข้อความเริ่มต้นถูก render markdown ฝั่งเซิร์ฟเวอร์แล้วส่งเป็น HTML ที่ผ่าน
+  // การ strip HTML ดิบทิ้ง (Markdown::safe) — ฝั่ง client จึงไม่ต้องมีตัวแปลง
+  // markdown ของตัวเอง และข้อความเดียวกันหน้าตาเหมือนกันทั้งก่อน/หลังรีเฟรช
+  $initialMessages = $conversation->messages->map(fn ($m) => [
+      'role'  => $m->role === 'assistant' ? 'assistant' : 'user',
+      'html'  => \App\Support\Markdown::safe($m->content),
+      'text'  => $m->content,
+      'time'  => optional($m->created_at)->format('H:i'),
+      'state' => 'ok',
+  ])->values();
 @endphp
 
-@section('content')
-<section class="canvas" style="padding-top: 140px">
-  <div class="chat-shell" x-data="chatBot(@js($autosend ?? null))" style="max-width:1120px;margin:0 auto">
+@section('title', $isFree ? 'คุยกับแม่หมอจันทรา · ฟรี' : 'คุยกับแม่หมอจันทรา')
 
-    <div style="text-align:center;margin-bottom:28px">
-      <div class="eyebrow" style="display:inline-flex">CHANTRA AI ORACLE</div>
-      <h1 class="display" style="font-size:clamp(36px,4.5vw,64px);margin-bottom:12px">
+@section('content')
+<section class="canvas">
+  <div class="chat-shell"
+       x-data="chatBot({
+         messages: @js($initialMessages),
+         suggestions: @js($suggestions),
+         topics: @js($topics),
+         awaiting: @js((bool) $awaiting),
+         dailyLimit: @js((int) $dailyLimit),
+         dailyLeft: @js((int) $dailyLeft),
+         blocked: @js((bool) $exhausted),
+         autosend: @js($autosend ?? null),
+         sendUrl: @js(route('chat.send')),
+         topupUrl: @js(route('wallet.topup')),
+       })">
+
+    <div style="text-align:center;margin-bottom:26px">
+      <div class="eyebrow">CHANTRA AI ORACLE</div>
+      <h1 class="display" style="font-size:clamp(34px,4.5vw,60px);margin-bottom:12px">
         คุยกับ <em>แม่หมอจันทรา</em>
         @if ($channel)
-          <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 14px;border-radius:999px;font-family:var(--display);font-size:11px;letter-spacing:.18em;text-transform:uppercase;border:1px solid var(--line);background:linear-gradient(135deg,rgba(244,207,106,.15),rgba(244,207,106,.04));color:var(--gold);vertical-align:middle;margin-left:14px">
+          <span class="chip" style="vertical-align:middle;margin-left:12px;font-family:var(--display);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);pointer-events:none">
             @if ($channel === 'facebook')
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M24 12.07C24 5.41 18.63 0 12 0S0 5.4 0 12.07c0 6.02 4.39 11 10.13 11.93v-8.44H7.08v-3.5h3.05V9.41c0-3.02 1.79-4.7 4.53-4.7 1.31 0 2.69.24 2.69.24v2.97h-1.52c-1.49 0-1.96.93-1.96 1.89v2.26h3.32l-.53 3.5h-2.79V24C19.61 23.07 24 18.1 24 12.07z"/></svg> Facebook
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M24 12.07C24 5.41 18.63 0 12 0S0 5.4 0 12.07c0 6.02 4.39 11 10.13 11.93v-8.44H7.08v-3.5h3.05V9.41c0-3.02 1.79-4.7 4.53-4.7 1.31 0 2.69.24 2.69.24v2.97h-1.52c-1.49 0-1.96.93-1.96 1.89v2.26h3.32l-.53 3.5h-2.79V24C19.61 23.07 24 18.1 24 12.07z"/></svg>
+              Facebook
             @else
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755z"/></svg> LINE
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+              LINE
             @endif
           </span>
         @endif
@@ -35,19 +66,19 @@
       </p>
     </div>
 
-    {{-- 🆓 โหมดฟรี: ป้ายจำนวนข้อความคงเหลือวันนี้ / โหมดคิดเงิน: ป้ายเครดิต (ของเดิม) --}}
-    @if ($gate['allowed'] && $isFree && $dailyLimit > 0)
-      <div style="display:flex;justify-content:center;align-items:center;gap:10px;padding:10px 20px;border:1px solid var(--line-soft);border-radius:14px;margin-bottom:18px;background:rgba(244,207,106,.05);font-size:13px">
-        <span style="font-family:var(--display);letter-spacing:.18em;text-transform:uppercase;font-size:11px;color:var(--gold)">คุยฟรีวันนี้</span>
-        <strong style="font-family:var(--display);color:var(--gold);font-size:15px" x-text="dailyLeft + ' / ' + @js($dailyLimit)">{{ $dailyLeft }} / {{ $dailyLimit }}</strong>
+    {{-- ป้ายโควตาคุยฟรี / เครดิต — ตัวเลขซิงก์กับเซิร์ฟเวอร์ทุกครั้งที่ส่ง --}}
+    @if (!$readonly && $gate['allowed'] && $isFree && $dailyLimit > 0)
+      <div class="quota-bar" :class="dailyLeft <= 3 && 'is-low'">
+        <span class="quota-label">คุยฟรีวันนี้</span>
+        <strong class="quota-value" x-text="dailyLeft + ' / ' + dailyLimit">{{ $dailyLeft }} / {{ $dailyLimit }}</strong>
         <span style="color:var(--ink-dim)">ข้อความ · รีเซ็ตทุกเที่ยงคืน</span>
       </div>
-    @elseif ($gate['allowed'] && $balance !== null && $cost > 0)
+    @elseif (!$readonly && $gate['allowed'] && $balance !== null && $cost > 0)
       @php $low = bccomp(number_format($balance, 2, '.', ''), number_format($cost * 5, 2, '.', ''), 2) < 0; @endphp
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 20px;border:1px solid {{ $low ? 'rgba(212,160,23,.6)' : 'var(--line-soft)' }};border-radius:14px;margin-bottom:18px;background:{{ $low ? 'rgba(212,160,23,.08)' : 'rgba(244,207,106,.04)' }};font-size:13px;flex-wrap:wrap">
+      <div class="quota-bar {{ $low ? 'is-low' : '' }}" style="justify-content:space-between">
         <div>
-          <span style="font-family:var(--display);letter-spacing:.18em;text-transform:uppercase;font-size:11px;color:var(--gold);margin-right:10px">เครดิต</span>
-          <strong style="font-family:var(--display);color:var(--gold);font-size:16px">฿{{ number_format($balance, 2) }}</strong>
+          <span class="quota-label" style="margin-right:10px">เครดิต</span>
+          <strong class="quota-value">฿{{ number_format($balance, 2) }}</strong>
           <span style="color:var(--ink-dim);margin-left:10px">หักครั้งละ ฿{{ number_format($cost, $cost == intval($cost) ? 0 : 2) }} ต่อข้อความ</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
@@ -59,7 +90,7 @@
 
     @unless ($gate['allowed'])
       <div class="flash" style="text-align:center;padding:28px 32px;margin-bottom:24px">
-        <div class="eyebrow" style="display:inline-flex;margin-bottom:14px">
+        <div class="eyebrow" style="margin-bottom:14px">
           @if ($gate['code'] === 'guest') ต้องเข้าสู่ระบบก่อน
           @elseif ($gate['code'] === 'no_link') เชื่อม FACEBOOK หรือ LINE ก่อน
           @else ต่อสายแม่หมอใหม่ @endif
@@ -75,173 +106,349 @@
           @if ($gate['code'] === 'guest') เข้าสู่ระบบ / เชื่อมบัญชี
           @else เข้าสู่ระบบใหม่ผ่าน Thaiprompt
           @endif
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </a>
       </div>
     @endunless
 
-    {{-- 🔮 เลย์เอาต์สองคอลัมน์: แม่หมอนั่งประจำฝั่งซ้าย · แชทฝั่งขวา --}}
     <div class="mor-layout">
 
-      {{-- ฝั่งซ้าย: ภาพแม่หมอ + ป้ายชื่อ (desktop เท่านั้น — mobile ใช้ header ในกล่องแชท) --}}
-      <aside class="mor-portrait" aria-hidden="true">
-        <div class="mor-glow"></div>
-        <img src="{{ asset('images/hero-chantra.png') }}" alt="แม่หมอจันทรา" loading="lazy">
+      {{-- ฝั่งซ้าย: ภาพแม่หมอ (เดสก์ท็อป) --}}
+      <aside class="mor-portrait">
+        <div class="mor-glow" aria-hidden="true"></div>
+        <img src="{{ asset('images/hero-chantra.png') }}" alt="แม่หมอจันทรา" loading="lazy" width="288" height="384">
         <div class="mor-plate">
           <div style="font-family:var(--display);letter-spacing:.22em;text-transform:uppercase;font-size:10px;color:var(--gold)">Oracle of the Moon</div>
           <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">แม่หมอจันทราพยากรณ์</div>
           <div style="display:flex;align-items:center;gap:6px;justify-content:center;margin-top:6px;font-size:12px;color:var(--ink-dim)">
-            <span class="mor-online"></span> พร้อมรับฟังลูกอยู่ค่ะ
+            <span class="mor-online"></span>
+            <span x-text="thinking ? 'กำลังเพ่งไพ่ให้ลูกอยู่...' : 'พร้อมรับฟังลูกอยู่ค่ะ'">พร้อมรับฟังลูกอยู่ค่ะ</span>
           </div>
         </div>
       </aside>
 
-      {{-- ฝั่งขวา: กล่องแชท --}}
-      <div class="panel" style="display:flex;flex-direction:column;min-width:0">
+      {{-- ฝั่งขวา: ห้องแชท --}}
+      <div class="panel chat-panel" style="position:relative">
 
-        {{-- header แม่หมอแบบย่อ — โชว์เฉพาะจอเล็กที่ซ่อน portrait --}}
         <div class="mor-mini">
-          <img src="{{ asset('images/hero-chantra.png') }}" alt="แม่หมอจันทรา">
-          <div>
+          <img src="{{ asset('images/hero-chantra.png') }}" alt="แม่หมอจันทรา" width="44" height="44">
+          <div style="min-width:0">
             <div style="font-family:var(--thai);font-weight:700;font-size:15px">แม่หมอจันทราพยากรณ์</div>
-            <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-dim)"><span class="mor-online"></span> ออนไลน์</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-dim)">
+              <span class="mor-online"></span>
+              <span x-text="thinking ? 'กำลังเพ่งไพ่...' : 'ออนไลน์'">ออนไลน์</span>
+            </div>
           </div>
         </div>
 
-        <div class="chat-list" id="chat-list" x-ref="list" style="flex:1">
-          @forelse ($conversation->messages as $msg)
-            <div class="bubble {{ $msg->role === 'assistant' ? 'ai' : 'user' }}">
-              @if ($msg->role === 'assistant')<b>แม่หมอจันทรา:</b> @endif
-              {!! nl2br(e($msg->content)) !!}
-            </div>
-          @empty
-            <div class="bubble ai">
-              <b>แม่หมอจันทรา:</b> สวัสดีค่ะ ลูก — แม่หมอจันทรารับฟังเรื่องราวของหนูเสมอ ไม่ต้องเขินเลย ลองพิมพ์คำถามด้านล่างได้เลยค่ะ
-            </div>
-          @endforelse
+        <div class="chat-log" x-ref="log" @scroll="onScroll"
+             role="log" aria-live="polite" aria-relevant="additions"
+             aria-label="บทสนทนากับแม่หมอจันทรา">
 
-          <template x-if="thinking">
-            <div class="bubble ai">
-              <b>แม่หมอจันทรา:</b>
-              <span style="color:var(--ink-dim);font-size:13px">กำลังเพ่งไพ่</span>
-              <span style="display:inline-flex;gap:5px;padding:4px 0;vertical-align:middle;margin-left:4px">
-                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-              </span>
+          <template x-for="m in messages" :key="m.id">
+            <div class="msg" :class="'is-' + (m.state === 'system' ? 'system' : (m.role === 'user' ? 'user' : 'ai'))">
+              <div class="msg-head" x-show="m.role === 'assistant' && m.state !== 'system'">แม่หมอจันทรา</div>
+              <div class="msg-body" x-html="m.html"></div>
+              <div class="msg-foot">
+                <span class="msg-time" x-text="m.time"></span>
+
+                {{-- คัดลอกคำตอบ — ของเดิมต้องลากเลือกเอง --}}
+                <button type="button" class="icon-btn" x-show="m.role === 'assistant' && m.state === 'ok'"
+                        @click="copy(m, $event)" :aria-label="'คัดลอกคำตอบ'" title="คัดลอก">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+                  </svg>
+                </button>
+
+                {{-- ส่งไม่สำเร็จ → ลองใหม่ด้วย idempotency key เดิม จึงไม่ถูกคิดเงินซ้ำ --}}
+                <button type="button" class="chip" style="padding:4px 12px;font-size:12px"
+                        x-show="m.state === 'failed'" @click="retry(m)">
+                  ลองส่งใหม่
+                </button>
+              </div>
             </div>
           </template>
+
+          <div class="msg is-ai" x-show="thinking" x-cloak>
+            <div class="msg-head">แม่หมอจันทรา</div>
+            <div class="msg-body" style="display:flex;align-items:center;gap:8px">
+              <span style="color:var(--ink-dim);font-size:13.5px">กำลังเพ่งไพ่</span>
+              <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+          </div>
         </div>
 
-        @if (($readonly ?? false))
-          {{-- History view — this conversation isn't the live session, so the
-               send form (which posts to the live thread) is hidden. --}}
+        <button type="button" class="chat-jump" x-show="!atBottom" x-cloak
+                @click="scrollToBottom(true)" aria-label="เลื่อนไปข้อความล่าสุด">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+        </button>
+
+        @if ($readonly)
           <div style="text-align:center;padding:20px 8px 4px">
             <p style="color:var(--ink-dim);font-size:14px;margin-bottom:14px">นี่คือประวัติการสนทนา — เปิดอ่านได้อย่างเดียว</p>
             <a href="{{ route('chat.index') }}" class="btn btn-primary">ไปคุยกับแม่หมอต่อ
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
             </a>
           </div>
+        @elseif ($gate['allowed'])
+
+          {{-- ═══ ปุ่มคำถามลัด ═══════════════════════════════════════════
+               แถบนี้อยู่ตรงนี้เสมอ ไม่หายไปไหน เปลี่ยนแค่ "เนื้อใน" ตามสถานะ:
+
+               1. คุยต่อไม่ได้ (ครบโควตา/เครดิตหมด) → เปลี่ยนเป็นปุ่มทางออก
+                  ที่เป็นลิงก์จริง กดได้เสมอ ไม่ใช่ปุ่มตายที่กดแล้วเงียบ
+               2. แม่หมอกำลังถามกลับ → ยุบเหลือปุ่มเดียว เพราะถ้าผู้ใช้กด
+                  คำถามทั่วไปตอนนี้ บอทจะตีความเป็นคำตอบของคำถามที่ถามค้างไว้
+                  แล้วโฟลว์ทำนายจะพัง — แต่ยังกดกางดูได้ ไม่ได้ล็อกทิ้ง
+               3. ปกติ → แถวชิปเลื่อนแนวนอน + ปุ่มกางหมวดคำถามแบบเต็ม
+               ระหว่างแม่หมอกำลังพิมพ์ ชิปถูก disable แต่ยัง "อยู่ที่เดิม"
+               เพื่อไม่ให้เลย์เอาต์กระโดดและผู้ใช้ไม่งงว่าปุ่มหายไปไหน --}}
+          <div class="chat-suggest">
+
+            {{-- 1. ทางออกเมื่อคุยต่อไม่ได้ --}}
+            <template x-if="blocked">
+              <div>
+                <div class="chat-suggest-label">
+                  <span x-text="blockedReason || 'วันนี้คุยครบแล้ว — ลองทางนี้ต่อได้เลยค่ะ'"></span>
+                </div>
+                <div class="chip-row">
+                  <a href="{{ route('tarot.index') }}" class="chip chip-strong"><span class="chip-icon">🔮</span> เปิดไพ่ยิปซี</a>
+                  <a href="{{ route('horoscope.index') }}" class="chip"><span class="chip-icon">🌙</span> ดวงรายวัน</a>
+                  <a href="{{ route('numerology.index') }}" class="chip"><span class="chip-icon">🔢</span> เลขศาสตร์</a>
+                  <a href="{{ route('auspicious.index') }}" class="chip"><span class="chip-icon">📿</span> ฤกษ์ยาม</a>
+                  @if (!$isFree)
+                    <a href="{{ route('wallet.topup') }}" class="chip chip-strong"><span class="chip-icon">💳</span> เติมเงิน</a>
+                  @endif
+                </div>
+              </div>
+            </template>
+
+            {{-- 2. แม่หมอกำลังรอคำตอบ → ยุบไว้ก่อน --}}
+            <template x-if="!blocked && awaiting && !suggestOpen">
+              <div class="chat-suggest-hint">
+                <span>💬 แม่หมอกำลังรอคำตอบของลูกอยู่ค่ะ</span>
+                <button type="button" class="chip" style="padding:5px 12px;font-size:12px" @click="suggestOpen = true">
+                  ดูคำถามแนะนำ
+                </button>
+              </div>
+            </template>
+
+            {{-- 3. ปกติ --}}
+            <template x-if="!blocked && (!awaiting || suggestOpen)">
+              <div>
+                <div class="chat-suggest-label">
+                  <span x-text="messages.some(m => m.role === 'user') ? 'ถามต่อได้เลย' : 'เริ่มจากคำถามเหล่านี้ก็ได้ค่ะ'"></span>
+                </div>
+                <div class="chip-row">
+                  <template x-for="(s, i) in suggestions" :key="i">
+                    <button type="button" class="chip"
+                            :disabled="thinking"
+                            :title="thinking ? 'แม่หมอกำลังตอบอยู่ — รอสักครู่นะคะ' : s.prompt"
+                            @click="useChip(s.prompt)">
+                      <span class="chip-icon" x-text="s.icon" aria-hidden="true"></span>
+                      <span x-text="s.label"></span>
+                    </button>
+                  </template>
+                  <button type="button" class="chip" x-show="topics.length" :disabled="thinking"
+                          @click="showTopics = !showTopics"
+                          :aria-expanded="showTopics.toString()">
+                    <span class="chip-icon" aria-hidden="true">⋯</span>
+                    <span x-text="showTopics ? 'ปิดหมวดคำถาม' : 'หมวดคำถาม'"></span>
+                  </button>
+                </div>
+
+                {{-- ตั้งใจไม่ใส่ x-transition: ถ้า transition ไม่จบ (แท็บพื้นหลัง /
+                     เบราว์เซอร์ไม่วาดเฟรม) อิลิเมนต์จะค้างที่ opacity:0 = ผู้ใช้กด
+                     ปุ่มแล้วเหมือนไม่มีอะไรเกิดขึ้น ซึ่งคือสิ่งที่ต้องเลี่ยงที่สุดในหน้านี้ --}}
+                <div class="chat-topics" x-show="showTopics" x-cloak>
+                  <template x-for="t in topics" :key="t.key">
+                    <div>
+                      <div class="chat-topic-name"><span x-text="t.icon"></span> <span x-text="t.label"></span></div>
+                      <div class="chip-wrap">
+                        <template x-for="(p, i) in t.prompts" :key="i">
+                          <button type="button" class="chip" :disabled="thinking"
+                                  @click="useChip(p); showTopics = false" x-text="p"></button>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          {{-- ═══ ช่องพิมพ์ ═══════════════════════════════════════════ --}}
+          <form @submit.prevent="send()" class="field" style="margin-bottom:0">
+            @csrf
+            <div class="chat-composer">
+              <textarea
+                x-ref="input"
+                x-model="draft"
+                @input="autoGrow"
+                @keydown.enter="onEnter($event)"
+                rows="1"
+                maxlength="2000"
+                :disabled="blocked"
+                :title="blocked ? (blockedReason || 'วันนี้คุยครบโควตาแล้วค่ะ') : ''"
+                :placeholder="blocked
+                    ? (blockedReason || 'วันนี้คุยครบแล้ว — พรุ่งนี้มาคุยกันใหม่นะคะ')
+                    : 'พิมพ์คุยกับแม่หมอได้เลย... (Shift+Enter ขึ้นบรรทัดใหม่)'"
+                autocomplete="off"
+                aria-label="ข้อความถึงแม่หมอ"></textarea>
+
+              <button type="submit" class="btn btn-primary chat-send"
+                      :disabled="thinking || blocked || !draft.trim()"
+                      :title="blocked ? (blockedReason || 'วันนี้คุยครบโควตาแล้ว')
+                              : (thinking ? 'แม่หมอกำลังตอบอยู่' : (!draft.trim() ? 'พิมพ์ข้อความก่อนส่ง' : 'ส่งข้อความ'))"
+                      aria-label="ส่งข้อความ">
+                <svg x-show="!thinking" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+                <svg x-show="thinking" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="animation:morPulse 1.2s infinite"><circle cx="12" cy="12" r="9"/></svg>
+              </button>
+            </div>
+            <div class="chat-counter" x-show="draft.length > 1700" x-cloak>
+              <span x-text="draft.length"></span> / 2000
+            </div>
+          </form>
         @else
-        <form @submit.prevent="send" class="chat-input-row field" style="margin-bottom:0">
-          @csrf
-          <input
-            type="text"
-            x-model="message"
-            x-ref="input"
-            placeholder="{{ $gate['allowed'] ? 'พิมพ์คุยกับแม่หมอได้เลย...' : 'เข้าสู่ระบบก่อนเพื่อพิมพ์คุยกับแม่หมอ' }}"
-            autocomplete="off"
-            maxlength="2000"
-            {{ $gate['allowed'] ? '' : 'disabled' }}
-            style="{{ $gate['allowed'] ? '' : 'opacity:.5;cursor:not-allowed' }}"
-          >
-          <button class="btn btn-primary" :disabled="thinking || !message.trim()" {{ $gate['allowed'] ? '' : 'disabled' }}>
-            <span x-show="!thinking">ส่ง</span>
-            <span x-show="thinking">กำลังส่ง</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-          </button>
-        </form>
+          {{-- gate ไม่ผ่าน: ไม่โชว์ช่องพิมพ์ที่กดไม่ได้ให้เก้อ — CTA อยู่ด้านบนแล้ว --}}
+          <div style="text-align:center;padding:18px 8px 4px;color:var(--ink-dim);font-size:14px">
+            เข้าสู่ระบบด้านบนเพื่อเริ่มคุยกับแม่หมอ
+          </div>
         @endif
       </div>
     </div>
 
     @if ($gate['allowed'])
-      <div style="text-align:center;margin-top:18px;font-family:var(--display);font-size:11px;color:var(--ink-faint);letter-spacing:.22em;text-transform:uppercase">
+      <div style="text-align:center;margin-top:18px;font-family:var(--display);font-size:11px;color:var(--ink-dim);letter-spacing:.22em;text-transform:uppercase">
         powered by Thaiprompt Fortune Bot · ระบบเดียวกับ FB MESSENGER / LINE OA
       </div>
     @endif
   </div>
 </section>
 
-@push('head')
-<style>
-  .dot { width:5px;height:5px;border-radius:50%;background:var(--gold);opacity:.35;animation:dotPulse 1.2s infinite; }
-  .dot:nth-child(2){ animation-delay:.18s }
-  .dot:nth-child(3){ animation-delay:.36s }
-  @keyframes dotPulse { 0%,60%,100%{opacity:.3;transform:translateY(0)} 30%{opacity:1;transform:translateY(-3px)} }
-
-  /* 🔮 เลย์เอาต์แม่หมอฝั่งซ้าย + แชทฝั่งขวา */
-  .mor-layout { display:grid; grid-template-columns: 300px minmax(0,1fr); gap:26px; align-items:start; }
-  .mor-portrait { position:sticky; top:110px; text-align:center; }
-  .mor-portrait img { width:100%; max-width:300px; border-radius:20px; border:1px solid var(--line); display:block; position:relative; z-index:1; }
-  .mor-glow { position:absolute; inset:-24px; background:radial-gradient(circle at 50% 30%, rgba(244,207,106,.22), transparent 65%); filter:blur(6px); animation:morGlow 4s ease-in-out infinite; z-index:0; }
-  @keyframes morGlow { 0%,100%{opacity:.7} 50%{opacity:1} }
-  .mor-plate { margin-top:14px; padding:14px 12px; border:1px solid var(--line-soft); border-radius:14px; background:rgba(244,207,106,.04); position:relative; z-index:1; }
-  .mor-online { width:8px; height:8px; border-radius:50%; background:#4ade80; box-shadow:0 0 8px rgba(74,222,128,.8); display:inline-block; animation:morPulse 2s infinite; }
-  @keyframes morPulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-  .mor-mini { display:none; align-items:center; gap:12px; padding:0 0 14px; border-bottom:1px solid var(--line-soft); margin-bottom:14px; }
-  .mor-mini img { width:46px; height:46px; border-radius:50%; object-fit:cover; object-position:top; border:2px solid var(--gold); }
-
-  @media (max-width: 860px) {
-    .mor-layout { grid-template-columns: 1fr; }
-    .mor-portrait { display:none; }
-    .mor-mini { display:flex; }
-  }
-</style>
-@endpush
-
 @push('scripts')
 <script>
 document.addEventListener('alpine:init', () => {
-  Alpine.data('chatBot', (autosend = null) => ({
-    message: '',
+  Alpine.data('chatBot', (cfg) => ({
+    messages: cfg.messages || [],
+    suggestions: cfg.suggestions || [],
+    topics: cfg.topics || [],
+    awaiting: !!cfg.awaiting,
+    dailyLimit: cfg.dailyLimit || 0,
+    dailyLeft: cfg.dailyLeft || 0,
+    blocked: !!cfg.blocked,
+    blockedReason: '',
+    draft: '',
     thinking: false,
-    dailyLeft: @js($dailyLeft),
+    showTopics: false,
+    suggestOpen: false,
+    atBottom: true,
+    seq: 0,
 
     init() {
+      // ให้ทุกข้อความมี id คงที่ เพื่อให้ x-for :key ไม่วาดใหม่ทั้งกองตอน
+      // ลบ/เพิ่มข้อความ (ปุ่มคัดลอกจะไม่กระพริบและ scroll ไม่กระตุก)
+      this.messages.forEach((m) => { m.id = ++this.seq; });
       this.scrollToBottom();
-      // A question carried in from a tarot result page — fire it once so the
-      // grounded answer appears without the user retyping. Server already
-      // pull()-ed it from the session, so a refresh won't repeat it.
-      if (autosend && String(autosend).trim()) {
-        this.message = String(autosend);
-        this.$nextTick(() => this.send());
+      // คำถามที่ติดมาจากหน้าผลไพ่ — ยิงครั้งเดียวให้คำตอบขึ้นเลยโดยไม่ต้องพิมพ์ซ้ำ
+      // (เซิร์ฟเวอร์ pull() ออกจาก session แล้ว รีเฟรชจึงไม่ยิงซ้ำ/ไม่คิดเงินซ้ำ)
+      if (cfg.autosend && String(cfg.autosend).trim()) {
+        this.$nextTick(() => this.send(String(cfg.autosend)));
       }
     },
-    scrollToBottom() {
+
+    /* ---------- การเลื่อน ---------- */
+    onScroll() {
+      const el = this.$refs.log;
+      if (!el) return;
+      this.atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    },
+    scrollToBottom(force = false) {
+      // เคารพผู้ใช้ที่กำลังเลื่อนอ่านย้อน — ไม่กระชากลงล่างสุดใส่หน้า
+      if (!force && !this.atBottom) return;
       this.$nextTick(() => {
-        const list = this.$refs.list;
-        if (list) list.scrollTop = list.scrollHeight;
+        const el = this.$refs.log;
+        if (el) el.scrollTop = el.scrollHeight;
+        this.atBottom = true;
       });
     },
-    appendBubble(role, text) {
-      const list = this.$refs.list;
-      if (!list) return;
-      const div = document.createElement('div');
-      div.className = 'bubble ' + (role === 'user' ? 'user' : 'ai');
-      const safe = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      div.innerHTML = role === 'assistant' ? `<b>แม่หมอจันทรา:</b> ${safe}` : safe;
-      list.appendChild(div);
-      this.scrollToBottom();
+
+    /* ---------- ช่องพิมพ์ ---------- */
+    autoGrow() {
+      const el = this.$refs.input;
+      if (!el) return;
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 148) + 'px';
     },
-    async send() {
-      const text = this.message.trim();
-      if (!text || this.thinking) return;
-      this.appendBubble('user', text);
-      this.message = '';
-      this.thinking = true;
-      this.scrollToBottom();
-      const idem = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (String(Date.now()) + Math.random());
+    onEnter(e) {
+      // Shift+Enter = ขึ้นบรรทัดใหม่ · isComposing = กำลังพิมพ์ผ่าน IME
+      // (ภาษาไทยบนบางคีย์บอร์ด) ห้ามส่งกลางคัน ไม่งั้นคำถูกตัดครึ่ง
+      if (e.shiftKey || e.isComposing) return;
+      e.preventDefault();
+      this.send();
+    },
+    useChip(prompt) {
+      if (this.thinking || this.blocked) return;
+      this.showTopics = false;
+      this.send(prompt);
+    },
+
+    /* ---------- ข้อความ ---------- */
+    now() {
+      return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    },
+    escape(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+    push(role, html, state = 'ok', text = '') {
+      const m = { id: ++this.seq, role, html, text, time: this.now(), state };
+      this.messages.push(m);
+      this.scrollToBottom(role === 'user');
+      return m;
+    },
+    say(text) {                 // ข้อความจาก "ระบบ" ไม่ใช่คำพูดของแม่หมอ
+      return this.push('assistant', this.escape(text).replace(/\n/g, '<br>'), 'system');
+    },
+
+    async copy(m, e) {
       try {
-        const r = await fetch(@js(route('chat.send')), {
+        await navigator.clipboard.writeText(m.text || m.html.replace(/<[^>]*>/g, ''));
+        const btn = e.currentTarget;
+        btn.setAttribute('title', 'คัดลอกแล้ว');
+        setTimeout(() => btn.setAttribute('title', 'คัดลอก'), 1500);
+      } catch (_) { /* เบราว์เซอร์ไม่อนุญาต — ผู้ใช้ยังลากเลือกเองได้ */ }
+    },
+
+    retry(m) {
+      if (this.thinking || this.blocked) return;
+      // เอาฟองเดิมออกก่อนแล้วส่งใหม่ด้วยคีย์เดิม — ไม่งั้นจะเห็นข้อความตัวเอง
+      // ซ้ำสองฟอง ทั้งที่เป็นการส่งครั้งเดียวกัน
+      const idx = this.messages.indexOf(m);
+      if (idx > -1) this.messages.splice(idx, 1);
+      this.send(m.text, m.idem);
+    },
+
+    async send(overrideText = null, reuseIdem = null) {
+      const text = (overrideText !== null ? overrideText : this.draft).trim();
+      if (!text || this.thinking || this.blocked) return;
+
+      // ใช้คีย์เดิมเมื่อ "ลองใหม่" ข้อความเดิม — เซิร์ฟเวอร์จึงกันการตัดเงินซ้ำ
+      // ได้จริง (ของเดิมสุ่มคีย์ใหม่ทุกครั้ง ตัวกันซ้ำจึงไม่เคยทำงานเลย)
+      const idem = reuseIdem || ((window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : String(Date.now()) + Math.random());
+
+      const mine = this.push('user', this.escape(text).replace(/\n/g, '<br>'), 'ok', text);
+      mine.idem = idem;
+      if (overrideText === null) {
+        this.draft = '';
+        this.$nextTick(() => this.autoGrow());
+      }
+      this.thinking = true;
+      this.scrollToBottom(true);
+
+      try {
+        const r = await fetch(cfg.sendUrl, {
           method: 'POST',
           credentials: 'same-origin',
           headers: {
@@ -253,42 +460,70 @@ document.addEventListener('alpine:init', () => {
           },
           body: JSON.stringify({ message: text }),
         });
-        const j = await r.json();
 
-        // 402 = insufficient funds. Show the explanation as a bubble and
-        // bounce the user to the top-up page so they don't have to hunt
-        // for the "เติมเงิน" button in the banner.
-        if (r.status === 402) {
-          const msg = j.error || 'เครดิตไม่พอ — กำลังพาไปหน้าเติมเงิน';
-          this.appendBubble('assistant', msg);
-          setTimeout(() => { window.location.href = @js(route('wallet.topup')); }, 1500);
+        // 419 = CSRF/session หมดอายุ — เดิมขึ้นว่า "ระบบขัดข้อง" ผู้ใช้เลยลองส่งซ้ำเรื่อย ๆ
+        if (r.status === 419) {
+          mine.state = 'failed';
+          this.say('เซสชันหมดอายุค่ะ — กรุณารีเฟรชหน้าแล้วเข้าสู่ระบบใหม่ ข้อความของลูกยังอยู่ ไม่ได้ถูกส่งและไม่ถูกคิดเงิน');
           return;
         }
 
-        // 429 + daily_limit = ครบเพดานคุยฟรีวันนี้ — แม่หมอบอกเองอย่างอบอุ่น
+        let j = {};
+        try { j = await r.json(); } catch (_) { /* ไม่ใช่ JSON */ }
+
+        if (r.status === 402) {                      // เครดิตไม่พอ
+          this.blocked = true;
+          this.blockedReason = 'เครดิตไม่พอ — เติมเงินแล้วคุยต่อได้เลยค่ะ';
+          this.say(j.error || 'เครดิตไม่พอ กรุณาเติมเงินก่อนนะคะ');
+          return;
+        }
+
         if (r.status === 429) {
-          if (j.reason_code === 'daily_limit') {
+          if (j.reason_code === 'daily_limit') {     // ครบโควตาคุยฟรีวันนี้
             this.dailyLeft = 0;
-            this.appendBubble('assistant', j.error || 'วันนี้คุยครบแล้วค่ะ พรุ่งนี้มาคุยกันใหม่นะคะ');
-          } else {
-            this.appendBubble('assistant', 'พิมพ์เร็วเกินไปนะคะ ลูก — รอสักครู่แล้วลองใหม่อีกครั้ง');
+            this.blocked = true;
+            this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้แม่หมอรอฟังต่อนะคะ';
+            this.say(j.error || 'วันนี้คุยครบแล้วค่ะ พรุ่งนี้มาคุยกันใหม่นะคะ');
+          } else {                                   // ส่งถี่เกินไป
+            mine.state = 'failed';
+            this.say('พิมพ์เร็วเกินไปนะคะลูก — รอสักครู่แล้วกด "ลองส่งใหม่" ได้เลย');
           }
           return;
         }
 
-        // 409 = the same message is already in flight (idempotency guard).
-        if (r.status === 409) {
-          this.appendBubble('assistant', 'ข้อความก่อนหน้ากำลังส่งอยู่ค่ะ รอสักครู่นะคะ');
+        if (r.status === 409) {                      // ข้อความเดิมกำลังส่งอยู่
+          this.say('ข้อความก่อนหน้ากำลังส่งอยู่ค่ะ รอสักครู่นะคะ');
           return;
         }
 
-        if (r.ok && this.dailyLeft > 0) this.dailyLeft--;
-        this.appendBubble('assistant', r.ok ? (j.reply || 'แม่หมอกำลังพักสายตา · ลองใหม่อีกครั้งนะคะ') : (j.error || 'ระบบขัดข้องชั่วคราว'));
+        if (!r.ok) {
+          mine.state = 'failed';
+          this.say(j.error || 'ระบบขัดข้องชั่วคราว — กด "ลองส่งใหม่" ได้เลยค่ะ');
+          return;
+        }
+
+        // สำเร็จ — ใช้ตัวเลขและสถานะจากเซิร์ฟเวอร์ ไม่เดาเอง
+        mine.state = 'ok';
+        if (typeof j.daily_left === 'number') this.dailyLeft = j.daily_left;
+        if (typeof j.daily_limit === 'number') this.dailyLimit = j.daily_limit;
+        this.awaiting = !!j.awaiting;
+        this.suggestOpen = false;
+        if (Array.isArray(j.suggestions) && j.suggestions.length) this.suggestions = j.suggestions;
+
+        this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '');
+
+        if (this.dailyLimit > 0 && this.dailyLeft <= 0) {
+          this.blocked = true;
+          this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้แม่หมอรอฟังต่อนะคะ';
+        }
       } catch (e) {
-        this.appendBubble('assistant', 'เครือข่ายมีปัญหา · ลองใหม่อีกครั้งนะคะ');
+        // แยกให้ชัดว่า "ส่งไม่ถึงเซิร์ฟเวอร์" — ลองใหม่ได้โดยไม่เสี่ยงโดนคิดเงินซ้ำ
+        // เพราะใช้ Idempotency-Key เดิม
+        mine.state = 'failed';
+        this.say('เครือข่ายมีปัญหาค่ะ — กด "ลองส่งใหม่" ได้เลย ข้อความจะไม่ถูกส่งซ้ำซ้อน');
       } finally {
         this.thinking = false;
-        this.$refs.input?.focus();
+        if (!this.blocked) this.$refs.input?.focus();
       }
     },
   }));

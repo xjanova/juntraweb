@@ -24,6 +24,27 @@ body.theme-juntra-payakorn {
 
   --shadow-soft: 0 30px 80px -30px rgba(0, 0, 0, .6);
 
+  /* ── ตัวแปรที่หน้า shared ใช้ร่วมกันทุกธีม ──────────────────────
+     หน้าใน resources/views (แชท/บัญชี/วอลเลต/MLM) เรียก --line,
+     --line-soft, --ink-faint, --display, --thai, --moon, --rose, --orchid
+     รวมกว่า 200 จุด ซึ่งเดิมมีนิยามเฉพาะในธีม mae-mor-chantra
+     ถ้าแอดมินสลับมาธีมนี้ ตัวแปรจะไม่มีค่า → `border: 1px solid var(--line-soft)`
+     กลายเป็น invalid-at-computed-value-time → shorthand ทั้งก้อนถูกตั้งเป็น
+     unset → border-style กลับไป none = ขอบหายทั้งระบบ
+     ประกาศ alias ไว้ให้ครบ ธีมนี้จึงใช้งานได้จริงเทียบเท่าธีมหลัก */
+  --line: rgba(231, 201, 122, .28);
+  --line-soft: rgba(231, 201, 122, .13);
+  --ink-faint: rgba(243, 233, 255, .45);
+  --moon: #fff7e0;
+  --rose: #ff8fd4;
+  --orchid: var(--violet-2);
+  --void: var(--bg-0);
+  --void-2: var(--bg-1);
+  --gold-deep: var(--gold-3);
+  --display: var(--font-display);
+  --serif: var(--font-display);
+  --thai: var(--font-thai);
+
   margin: 0; padding: 0;
   font-family: var(--font-thai);
   color: var(--ink);
