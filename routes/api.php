@@ -82,7 +82,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         // Mae Mor AI Chat — conversations + send
         Route::prefix('chat')->name('chat.')->group(function () {
             Route::get('conversations',                   [ChatController::class, 'conversations'])->name('conversations');
-            Route::post('conversations',                  [ChatController::class, 'startConversation'])->name('conversations.start');
+            // การเปิดห้องใหม่ยิง upstream AI ทุกครั้ง (ขอคำทักทาย) — ไม่ throttle
+            // เท่ากับให้ยิงต้นทุน AI และสร้างแถวได้ไม่จำกัด
+            Route::post('conversations',                  [ChatController::class, 'startConversation'])
+                ->middleware('throttle:chat-send')->name('conversations.start');
             Route::get('conversations/{conversation}',    [ChatController::class, 'show'])->name('conversations.show');
             Route::post('conversations/{conversation}/send', [ChatController::class, 'send'])
                 ->middleware('throttle:chat-send')->name('conversations.send');

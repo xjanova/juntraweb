@@ -45,3 +45,6 @@ database/database.sqlite
 /_theme_extracted/
 /_run.ps1
 *.zip
+
+# preview sandbox (sqlite) — ไม่ commit
+.env.preview

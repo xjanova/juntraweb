@@ -10,6 +10,9 @@ use App\Models\Reading;
 use App\Services\AiOracle;
 use App\Services\FortuneBot\FortuneBotClient;
 use App\Services\Wallet\WalletService;
+use App\Support\ChatPolicy;
+use App\Support\ChatSuggestions;
+use App\Support\Markdown;
 use App\Support\Pricing;
 use App\Support\TarotSpreads;
 use Illuminate\Http\Request;
@@ -48,16 +51,7 @@ class ChatController extends Controller
         // Even when the gate denies access, render the shell — the user
         // sees the bot UI with an inline CTA + greeting placeholder. Less
         // jarring than a dead "please log in" page.
-        $token = $request->session()->get('chat_token');
-        if (!$token) {
-            $token = (string) Str::uuid();
-            $request->session()->put('chat_token', $token);
-        }
-
-        $conversation = ChatConversation::firstOrCreate(
-            ['session_token' => $token, 'user_id' => $user?->id],
-            ['title' => 'สนทนากับแม่หมอ']
-        );
+        $conversation = $this->conversationFor($request, $user);
 
         // First-time greeting via upstream so persona matches FB/LINE bot exactly.
         if ($gate['allowed'] && $conversation->messages()->doesntExist()) {
@@ -74,24 +68,84 @@ class ChatController extends Controller
         }
 
         // 🆓 ข้อมูลเพดานข้อความฟรีต่อวัน — โชว์ยอดคงเหลือในหน้าแชท
-        $cost = Pricing::for('chat_message');
-        $dailyLimit = $cost <= 0 ? $this->dailyLimit() : 0;
-        $dailyUsed = ($dailyLimit > 0 && $user) ? $this->dailyUsed($user) : 0;
+        $cost       = ChatPolicy::cost();
+        $dailyLimit = ChatPolicy::dailyLimit();
+        $dailyLeft  = $user ? ChatPolicy::dailyLeft($user) : null;
+
+        $conversation->load('messages');
+
+        // เข้าแชทต่อจากการเปิดไพ่หรือเปล่า — ใช้เลือกชุดปุ่มคำถามลัด
+        $grounded = $request->session()->get('chat_primed_reading') !== null;
 
         return view('pages.chat.index', [
-            'conversation' => $conversation->load('messages'),
+            'conversation' => $conversation,
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => $cost,
             'balance'      => $user ? $this->wallet->balance($user) : null,
             'dailyLimit'   => $dailyLimit,
-            'dailyLeft'    => max(0, $dailyLimit - $dailyUsed),
+            'dailyLeft'    => $dailyLeft ?? 0,
             'readonly'     => false, // live chat room — input is active
+            'suggestions'  => $this->suggestionsFor($conversation, $grounded),
+            'topics'       => ChatSuggestions::topics(),
+            // แม่หมอกำลังถามกลับอยู่ไหม — ถ้าใช่ UI จะยุบแถบปุ่มคำถามลัด
+            // เพื่อไม่ให้ผู้ใช้กดแล้วบทสนทนาหลุดโฟลว์ที่แม่หมอกำลังเดินอยู่
+            'awaiting'     => ChatSuggestions::isAwaitingAnswer(
+                optional($conversation->messages->last(fn ($m) => $m->role === 'assistant'))->content
+            ),
             // A question carried in from a tarot result page — the view
             // auto-sends it once so the grounded answer appears immediately.
             // pull() = one-shot: a refresh won't re-fire (and re-charge) it.
             'autosend'     => $gate['allowed'] ? $request->session()->pull('chat_autosend') : null,
         ]);
+    }
+
+    /**
+     * ห้องสนทนาสดของ session นี้
+     *
+     * เดิม index() หาห้องด้วยคู่ (session_token, user_id) แต่ send() หาด้วย
+     * session_token อย่างเดียว → คนที่เปิด /chat ตอนยังไม่ล็อกอินแล้วล็อกอิน
+     * กลับมา (เส้นทางปกติของหน้านี้ เพราะปุ่ม CTA อยู่ในหน้านี้เอง) จะมีห้อง
+     * สองแถว: แถว guest (user_id NULL) กับแถวของตัวเอง ข้อความถูกเขียนลงแถว
+     * guest แต่หน้าจอ render อีกแถว → รีเฟรชแล้วแชทหายเกลี้ยง ประวัติไม่ขึ้น
+     * ใน /account/chats และตัวนับโควตารายวันนับไม่เจอ (ยิง AI ฟรีไม่จำกัด)
+     *
+     * แก้ที่ต้นทาง: ทุกเส้นทางเรียกเมธอดนี้เมธอดเดียว และตอนล็อกอินสำเร็จ
+     * ห้อง guest ที่ถือ token เดียวกันจะถูก "ยึด" มาเป็นของเจ้าของทันที
+     * ผู้ใช้จึงคุยต่อจากที่ค้างไว้ได้โดยไม่เสียบทสนทนาก่อนล็อกอิน
+     */
+    private function conversationFor(Request $request, $user): ChatConversation
+    {
+        $token = $request->session()->get('chat_token');
+        if (! $token) {
+            $token = (string) Str::uuid();
+            $request->session()->put('chat_token', $token);
+        }
+
+        if ($user) {
+            ChatConversation::where('session_token', $token)
+                ->whereNull('user_id')
+                ->update(['user_id' => $user->id]);
+        }
+
+        return ChatConversation::firstOrCreate(
+            ['session_token' => $token, 'user_id' => $user?->id],
+            ['title' => 'สนทนากับแม่หมอ']
+        );
+    }
+
+    /** ชุดปุ่มคำถามลัดที่เหมาะกับสถานะของบทสนทนาตอนนี้ */
+    private function suggestionsFor(ChatConversation $conversation, bool $grounded): array
+    {
+        if ($grounded) {
+            return ChatSuggestions::forReading();
+        }
+
+        $hasUserMessage = $conversation->relationLoaded('messages')
+            ? $conversation->messages->contains(fn ($m) => $m->role === 'user')
+            : $conversation->messages()->where('role', 'user')->exists();
+
+        return ChatSuggestions::forState($hasUserMessage ? 'flowing' : 'fresh');
     }
 
     public function send(Request $request)
@@ -109,9 +163,6 @@ class ChatController extends Controller
                 : redirect()->route('chat.index')->with('status', $gate['reason']);
         }
 
-        $token = $request->session()->get('chat_token');
-        abort_unless($token, 403);
-
         // Idempotency — block a double-submit of the same message.
         if ($this->guardCharge($request, 'chat') === false) {
             return $request->wantsJson()
@@ -119,17 +170,20 @@ class ChatController extends Controller
                 : redirect()->route('chat.index')->with('status', 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่');
         }
 
-        $cost = Pricing::for('chat_message');
+        $cost = ChatPolicy::cost();
 
         // 🆓 (2026-07-24) โหมดคุยฟรี — เพดานข้อความต่อวัน กันต้นทุน AI บานปลาย
         //   ครบเพดานแล้วแม่หมอชวนไปเปิดไพ่แบบเจาะลึกแทน (เตะเบาๆ ไม่ใช่ error แข็งๆ)
-        $dailyLimit = $this->dailyLimit();
-        if ($cost <= 0 && $dailyLimit > 0 && $this->dailyUsed($user) >= $dailyLimit) {
-            $limitMsg = "วันนี้ลูกคุยกับแม่หมอครบ {$dailyLimit} ข้อความแล้วค่ะ ✨ พรุ่งนี้แม่หมอรอฟังเรื่องราวต่อนะคะ — "
-                .'หรือถ้าอยากรู้ลึกถึงดวงชะตา ให้แม่หมอเปิดไพ่ดูแบบเจาะจงได้ที่เมนู "เปิดไพ่" เลยค่ะ 🔮';
+        if (ChatPolicy::exhausted($user)) {
+            $limitMsg = ChatPolicy::limitMessage();
 
             return $request->wantsJson()
-                ? response()->json(['error' => $limitMsg, 'reason_code' => 'daily_limit'], 429)
+                ? response()->json([
+                    'error'       => $limitMsg,
+                    'reason_code' => 'daily_limit',
+                    'daily_limit' => ChatPolicy::dailyLimit(),
+                    'daily_left'  => 0,
+                ], 429)
                 : redirect()->route('chat.index')->with('status', $limitMsg);
         }
 
@@ -145,7 +199,7 @@ class ChatController extends Controller
                 : redirect()->route('wallet.index')->with('status', $msg);
         }
 
-        $conversation = ChatConversation::where('session_token', $token)->firstOrFail();
+        $conversation = $this->conversationFor($request, $user);
 
         $userMessage = ChatMessage::create([
             'chat_conversation_id' => $conversation->id,
@@ -205,10 +259,21 @@ class ChatController extends Controller
         }
 
         if ($request->wantsJson()) {
+            // คืน "สถานะ" กลับไปด้วย ไม่ใช่แค่ข้อความ — หน้าแชทต้องใช้ตัดสินว่า
+            // จะโชว์ปุ่มคำถามลัดชุดไหน และต้องยุบแถบปุ่มไหมเมื่อแม่หมอถามกลับ
+            // (ก่อนหน้านี้ฝั่ง client เดาเอง ตัวเลขโควตาจึงเคลื่อนจากของจริง)
+            $awaiting = ChatSuggestions::isAwaitingAnswer($reply);
+
             return response()->json([
-                'reply'   => $reply,
-                'balance' => $this->wallet->balance($user),
-                'cost'    => $cost,
+                'reply'       => $reply,
+                'reply_html'  => Markdown::safe($reply),
+                'balance'     => $this->wallet->balance($user),
+                'cost'        => $cost,
+                'degraded'    => $degraded,
+                'daily_limit' => ChatPolicy::dailyLimit(),
+                'daily_left'  => ChatPolicy::dailyLeft($user),
+                'awaiting'    => $awaiting,
+                'suggestions' => $awaiting ? [] : ChatSuggestions::followUp(),
             ]);
         }
         return redirect()->route('chat.index')->with('status', 'แม่หมอตอบกลับแล้ว');
@@ -244,21 +309,19 @@ class ChatController extends Controller
             return redirect()->route('chat.index')->with('status', $gate['reason']);
         }
 
+        // ครบโควตาวันนี้แล้วอย่าเพิ่ง prime — การ prime ยิง upstream หนึ่งครั้งเต็ม ๆ
+        // ถ้าปล่อยผ่านผู้ใช้จะเสียคำถามแรกฟรี ๆ แล้วโดนเด้ง 429 ทันทีที่หน้าแชท
+        if (ChatPolicy::exhausted($user)) {
+            return redirect()->route('chat.index')->with('status', ChatPolicy::limitMessage());
+        }
+
         $question = trim((string) $request->input('question', ''));
         if (mb_strlen($question) > 2000) {
             $question = mb_substr($question, 0, 2000);
         }
 
         // Live chat conversation — same session-token model as index().
-        $token = $request->session()->get('chat_token');
-        if (! $token) {
-            $token = (string) Str::uuid();
-            $request->session()->put('chat_token', $token);
-        }
-        $conversation = ChatConversation::firstOrCreate(
-            ['session_token' => $token, 'user_id' => $user->id],
-            ['title' => 'สนทนากับแม่หมอ']
-        );
+        $conversation = $this->conversationFor($request, $user);
 
         // Prime แม่หมอ with this reading's cards — but only ONCE per reading, so
         // a refresh / double-tap can't re-prime (a wasted upstream call) or
@@ -295,12 +358,17 @@ class ChatController extends Controller
             'conversation' => $conversation->load('messages'),
             'gate'         => ['allowed' => true, 'reason' => null, 'code' => null],
             'channel'      => $user?->chatLinkChannel(),
-            'cost'         => Pricing::for('chat_message'),
+            'cost'         => ChatPolicy::cost(),
             'balance'      => $user ? $this->wallet->balance($user) : null,
             // Viewing past history: the send form posts to the LIVE session
             // conversation, so disable input here to avoid appending replies to
             // the wrong thread. The user goes to /chat to continue chatting.
             'readonly'     => true,
+            // อ่านย้อนอย่างเดียว — ไม่มีปุ่มคำถามลัดเพราะกดไปก็ส่งไม่ได้
+            // (ปุ่มที่กดแล้วไม่เกิดอะไรคือสิ่งที่ต้องเลี่ยงที่สุดในหน้านี้)
+            'suggestions'  => [],
+            'topics'       => [],
+            'awaiting'     => false,
         ]);
     }
 
@@ -323,11 +391,7 @@ class ChatController extends Controller
         // Re-use the upstream session id across messages for context continuity.
         $sessionId = $request->session()->get('thaiprompt_chat_session');
         if (!$sessionId) {
-            $start = $this->bot->start($user);
-            $sessionId = $start['session_id'] ?? null;
-            if ($sessionId) {
-                $request->session()->put('thaiprompt_chat_session', $sessionId);
-            }
+            $sessionId = $this->openUpstreamSession($request, $user);
         }
 
         if (!$sessionId) {
@@ -345,10 +409,8 @@ class ChatController extends Controller
                 'session' => $sessionId,
             ]);
             $request->session()->forget('thaiprompt_chat_session');
-            $start = $this->bot->start($user);
-            $newSession = $start['session_id'] ?? null;
+            $newSession = $this->openUpstreamSession($request, $user);
             if ($newSession) {
-                $request->session()->put('thaiprompt_chat_session', $newSession);
                 $resp2 = $this->bot->send($user, $newSession, $message);
                 $reply = $resp2['reply'] ?? null;
             }
@@ -365,6 +427,34 @@ class ChatController extends Controller
     }
 
     /**
+     * เปิด upstream session ใหม่ — และถ้าบทสนทนานี้ถูก prime ด้วยไพ่ไว้
+     * ให้ป้อนบริบทไพ่ซ้ำก่อนเสมอ
+     *
+     * upstream หมุน session เองทุก 6 ชม. (TTL) เดิมเมื่อ session หมุนแล้ว
+     * เราเปิดใหม่ "เปล่า ๆ" บริบทไพ่จึงหายเงียบ ๆ — ผู้ใช้ยังเห็นหน้าจอเดิม
+     * ที่ชวนถามต่อจากไพ่ แต่แม่หมอตอบเหมือนไม่เคยเห็นไพ่ชุดนั้นเลย
+     * (อาการนี้ยิ่งเด่นเมื่อผู้ใช้กดปุ่มคำถามลัดที่อ้างอิงไพ่โดยตรง)
+     */
+    private function openUpstreamSession(Request $request, $user): ?string
+    {
+        $start     = $this->bot->start($user);
+        $sessionId = $start['session_id'] ?? null;
+        if (! $sessionId) {
+            return null;
+        }
+
+        $request->session()->put('thaiprompt_chat_session', $sessionId);
+
+        $primer = $request->session()->get('chat_reading_primer');
+        if (is_string($primer) && $primer !== '') {
+            // ป้อนบริบทไพ่เงียบ ๆ — คำตอบของ primer ไม่ถูกแสดงและไม่คิดเงิน
+            $this->bot->send($user, $sessionId, $primer);
+        }
+
+        return $sessionId;
+    }
+
+    /**
      * Open a fresh upstream session and prime it with the drawn cards so every
      * follow-up question in this session is read against them. Returns the
      * greeting to show (the AI's priming reply, or a local one if upstream is
@@ -373,12 +463,16 @@ class ChatController extends Controller
      */
     private function primeReadingContext(Request $request, $user, Reading $reading): string
     {
+        $primer = $this->buildReadingPrimer($reading);
+        // เก็บไว้ให้ openUpstreamSession ป้อนซ้ำเมื่อ session หมุน
+        $request->session()->put('chat_reading_primer', $primer);
+
         if ($this->bot->isAvailable($user)) {
             $start     = $this->bot->start($user);
             $sessionId = $start['session_id'] ?? null;
             if ($sessionId) {
                 $request->session()->put('thaiprompt_chat_session', $sessionId);
-                $resp  = $this->bot->send($user, $sessionId, $this->buildReadingPrimer($reading));
+                $resp  = $this->bot->send($user, $sessionId, $primer);
                 $reply = $resp['reply'] ?? null;
                 if ($reply && trim($reply) !== '') {
                     return $reply;
@@ -459,54 +553,11 @@ class ChatController extends Controller
     /**
      * Decides whether the current user may chat. Returns:
      *   ['allowed' => bool, 'code' => 'guest'|'no_link'|'no_token'|null, 'reason' => str|null]
+     *
+     * กติกาจริงอยู่ใน ChatPolicy เพื่อให้เว็บกับ API มือถือใช้ชุดเดียวกัน
      */
     private function gate($user): array
     {
-        if (!$user) {
-            return ['allowed' => false, 'code' => 'guest',
-                    'reason' => 'กรุณาเข้าสู่ระบบด้วย Thaiprompt (Facebook หรือ LINE) เพื่อคุยกับแม่หมอ'];
-        }
-
-        // 🆓 (2026-07-24) โหมดคุยฟรี (pricing_chat_message = 0) — เปิดให้สมาชิก SSO ทุกคน
-        //   ไม่ต้องเช็คการเชื่อม FB/LINE (เงื่อนไขนั้นเป็นของยุคคิดเงินต่อข้อความ)
-        //   จำเป็นสำหรับลูกค้าจาก Magic Link ของบอท: บัญชีบอทมี facebook_psid
-        //   แต่ไม่มี facebook_user_id (OAuth asid) → isLinkedViaFbOrLine() = false
-        $isFree = Pricing::for('chat_message') <= 0;
-
-        if (!$isFree && !$user->isLinkedViaFbOrLine()) {
-            return ['allowed' => false, 'code' => 'no_link',
-                    'reason' => 'บัญชีของคุณยังไม่ได้เชื่อมกับ Facebook หรือ LINE — เข้าสู่ระบบใหม่ผ่าน Thaiprompt เพื่อยืนยันตัวตน'];
-        }
-
-        if (empty($user->thaiprompt_token)) {
-            return ['allowed' => false, 'code' => 'no_token',
-                    'reason' => 'session หมดอายุ — กรุณาเข้าสู่ระบบใหม่'];
-        }
-
-        return ['allowed' => true, 'code' => null, 'reason' => null];
-    }
-
-    /* ============================================================
-       🆓 FREE-CHAT DAILY LIMIT (2026-07-24)
-       ============================================================ */
-
-    /**
-     * เพดานข้อความฟรีต่อคนต่อวัน — Setting 'chat_daily_limit' (default 30, 0 = ไม่จำกัด)
-     * ใช้เฉพาะโหมดคุยฟรี (ยุคคิดเงินมีวอลเลตเป็นเบรกอยู่แล้ว)
-     */
-    private function dailyLimit(): int
-    {
-        $val = \App\Models\Setting::get('chat_daily_limit');
-
-        return is_numeric($val) ? max(0, (int) $val) : 30;
-    }
-
-    /** จำนวนข้อความที่ user ส่งไปแล้ววันนี้ (นับเฉพาะ role=user ทุกบทสนทนาของเขา) */
-    private function dailyUsed($user): int
-    {
-        return ChatMessage::where('role', 'user')
-            ->where('created_at', '>=', now()->startOfDay())
-            ->whereHas('conversation', fn ($q) => $q->where('user_id', $user->id))
-            ->count();
+        return ChatPolicy::gate($user);
     }
 }

@@ -10,6 +10,8 @@ use App\Models\ChatMessage;
 use App\Services\AiOracle;
 use App\Services\FortuneBot\FortuneBotClient;
 use App\Services\Wallet\WalletService;
+use App\Support\ChatPolicy;
+use App\Support\ChatSuggestions;
 use App\Support\Pricing;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -91,7 +93,11 @@ class ChatController extends Controller
             'data' => [
                 'conversation' => $this->convoPayload($convo->fresh('messages')),
                 'balance'      => (float) $this->wallet->balance($user),
-                'cost'         => Pricing::for('chat_message'),
+                'cost'         => ChatPolicy::cost(),
+                'daily_limit'  => ChatPolicy::dailyLimit(),
+                'daily_left'   => ChatPolicy::dailyLeft($user),
+                // ปุ่มคำถามลัดชุดเริ่มต้น — ชุดเดียวกับเว็บ (ChatSuggestions)
+                'suggestions'  => ChatSuggestions::starter(),
             ],
         ], 201);
     }
@@ -117,7 +123,20 @@ class ChatController extends Controller
         }
 
         $user = $request->user();
-        $cost = Pricing::for('chat_message');
+        $cost = ChatPolicy::cost();
+
+        // 🆓 เพดานคุยฟรีรายวัน — เดิมมีแต่ฝั่งเว็บ ผู้ใช้แอพจึงยิง AI ฟรีได้
+        //    ไม่จำกัด (ต้นทุนบานปลาย) กติกาอยู่ใน ChatPolicy ที่เดียวแล้ว
+        //    นับรวมทุกช่องทางเพราะเป็นคนเดียวกันและต้นทุนก้อนเดียวกัน
+        if (ChatPolicy::exhausted($user)) {
+            return response()->json([
+                'message'     => ChatPolicy::limitMessage(),
+                'reason_code' => 'daily_limit',
+                'daily_limit' => ChatPolicy::dailyLimit(),
+                'daily_left'  => 0,
+            ], 429);
+        }
+
         $balance = $this->wallet->balance($user);
 
         if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
@@ -188,12 +207,21 @@ class ChatController extends Controller
         }
         $conversation->touch();
 
+        // แม่หมอกำลังถามกลับอยู่ไหม — แอพใช้ตัดสินว่าจะยุบแถบปุ่มคำถามลัด
+        // เพื่อไม่ให้ผู้ใช้กดปุ่มแล้วบทสนทนาหลุดโฟลว์ที่แม่หมอกำลังเดินอยู่
+        $awaiting = ChatSuggestions::isAwaitingAnswer($reply);
+
         return response()->json([
             'data' => [
-                'message' => $this->msgPayload($assistant),
-                'reply'   => $reply,
-                'balance' => (float) $this->wallet->balance($user),
-                'cost'    => $cost,
+                'message'     => $this->msgPayload($assistant),
+                'reply'       => $reply,
+                'balance'     => (float) $this->wallet->balance($user),
+                'cost'        => $cost,
+                'degraded'    => $degraded,
+                'daily_limit' => ChatPolicy::dailyLimit(),
+                'daily_left'  => ChatPolicy::dailyLeft($user),
+                'awaiting'    => $awaiting,
+                'suggestions' => $awaiting ? [] : ChatSuggestions::followUp(),
             ],
         ]);
     }
