@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    // Cloudflare Turnstile — กันบอทสมัครสมาชิก
+    // ตั้งค่าทั้งสองตัวถึงจะเปิดใช้ (App\Support\Turnstile::enabled())
+    // ไม่ตั้ง = ไม่มีการป้องกัน ต้องตั้งก่อนเปิดรับลูกค้าจริง
+    'turnstile' => [
+        'site_key' => env('TURNSTILE_SITE_KEY', ''),
+        'secret'   => env('TURNSTILE_SECRET', ''),
+    ],
+
 ];
