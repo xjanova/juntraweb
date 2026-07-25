@@ -39,6 +39,16 @@
          autosend: @js($autosend ?? null),
          sendUrl: @js(route('chat.send')),
          topupUrl: @js(route('wallet.topup')),
+         canTopupInChat: @js((bool) ($gate['allowed'] ?? false) && !($readonly ?? false)),
+         topupCreateUrl: @js(route('chat.topup.store')),
+         topupStatusUrl: @js(route('chat.topup.status', ['tx' => '__ID__'])),
+         topupSlipUrl: @js(route('chat.topup.slip', ['tx' => '__ID__'])),
+         bundles: @js(array_slice((array) config('pricing.topup_bundles', [50, 100, 200, 500]), 0, 4)),
+         nextSteps: @js([
+           ['icon' => '🔮', 'label' => 'เปิดไพ่ยิปซี', 'url' => route('tarot.index')],
+           ['icon' => '🔢', 'label' => 'เลขศาสตร์',   'url' => route('numerology.index')],
+           ['icon' => '📿', 'label' => 'ฤกษ์ยาม',     'url' => route('auspicious.index')],
+         ]),
        })">
 
     <div style="text-align:center;margin-bottom:26px">
@@ -148,7 +158,97 @@
           <template x-for="m in messages" :key="m.id">
             <div class="msg" :class="'is-' + (m.state === 'system' ? 'system' : (m.role === 'user' ? 'user' : 'ai'))">
               <div class="msg-head" x-show="m.role === 'assistant' && m.state !== 'system'">แม่หมอจันทรา</div>
-              <div class="msg-body" x-html="m.html"></div>
+              <div class="msg-body" x-show="m.kind !== 'topup'" x-html="m.html"></div>
+
+              {{-- ═══ การ์ดเติมเงินในแชท ═══════════════════════════════
+                   จบในบทสนทนาเดียว ไม่พาลูกค้าออกไปหน้าอื่นแล้วหลงทาง
+                   (กลุ่มลูกค้าหลักคือผู้สูงอายุ ทุกการเปลี่ยนหน้าคือจุดที่หลุด) --}}
+              <template x-if="m.kind === 'topup'">
+                <div class="pay-card">
+
+                  {{-- ขั้น 1: เลือกจำนวนเงิน --}}
+                  <template x-if="m.pay.step === 'choose'">
+                    <div>
+                      <div class="pay-title">เติมเครดิตเข้ากระเป๋า</div>
+                      <div class="pay-sub">เลือกจำนวนเงินที่ต้องการ แล้วสแกน QR จ่ายได้เลยค่ะ</div>
+                      <div class="pay-amounts">
+                        <template x-for="b in bundles" :key="b">
+                          <button type="button" class="pay-amount" :disabled="m.pay.busy"
+                                  @click="chooseAmount(m, b)" x-text="'฿' + b.toLocaleString()"></button>
+                        </template>
+                      </div>
+                      <div class="pay-sub" style="margin-top:10px;color:#f59999" x-show="m.pay.error" x-text="m.pay.error"></div>
+                    </div>
+                  </template>
+
+                  {{-- ขั้น 2: สแกนจ่าย --}}
+                  <template x-if="m.pay.step === 'qr'">
+                    <div>
+                      <div class="pay-title">สแกนจ่ายได้เลยค่ะ</div>
+                      <div class="pay-sub">เปิดแอพธนาคาร → สแกน QR นี้ → โอนตามยอดด้านล่าง</div>
+
+                      <div class="pay-qr">
+                        <img :src="m.pay.qr" alt="QR พร้อมเพย์สำหรับเติมเงิน" x-show="m.pay.qr">
+                      </div>
+
+                      {{-- ยอดต้องเป๊ะถึงสตางค์ เพราะระบบใช้เศษสตางค์จับคู่กับ
+                           SMS ธนาคารเพื่อเครดิตให้อัตโนมัติ --}}
+                      <div class="pay-amount-due">
+                        <span class="n" x-text="'฿' + Number(m.pay.payable).toFixed(2)"></span>
+                        <span class="l" x-show="m.pay.auto_confirm">โอนยอดนี้ให้ตรงเป๊ะนะคะ ระบบจะเติมให้เองทันที</span>
+                        <span class="l" x-show="!m.pay.auto_confirm">โอนแล้วแนบสลิปด้านล่างได้เลยค่ะ</span>
+                      </div>
+
+                      <div class="pay-sub" style="text-align:center;margin-top:8px" x-show="m.pay.promptpay_name">
+                        เข้าบัญชี <strong x-text="m.pay.promptpay_name"></strong>
+                      </div>
+
+                      <div class="pay-wait">
+                        <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                        <span x-text="m.pay.waited < 600 ? 'แม่หมอกำลังรอเงินเข้าอยู่ค่ะ...' : 'ยังไม่พบเงินเข้า — แนบสลิปให้แม่หมอได้เลยค่ะ'"></span>
+                      </div>
+
+                      <div class="pay-actions">
+                        <button type="button" class="chip" @click="copyAmount(m, $event)">
+                          <span class="chip-icon">📋</span> คัดลอกยอด
+                        </button>
+                        {{-- หา input ที่อยู่ในกล่องเดียวกัน แทน x-ref เพราะ x-ref
+                             ผูกชื่อแบบคงที่ ใช้กับรายการที่วนซ้ำไม่ได้ --}}
+                        <button type="button" class="chip chip-strong" :disabled="m.pay.uploading"
+                                @click="$el.parentElement.querySelector('input[type=file]').click()">
+                          <span class="chip-icon">🧾</span>
+                          <span x-text="m.pay.uploading ? 'กำลังส่ง...' : 'แนบสลิป'"></span>
+                        </button>
+                        <input type="file" accept="image/*" @change="uploadSlip(m, $event)" style="display:none">
+                      </div>
+                      <div class="pay-sub" style="margin-top:8px;color:#f59999" x-show="m.pay.error" x-text="m.pay.error"></div>
+                      <div class="pay-sub" style="margin-top:8px;color:#9eddae" x-show="m.pay.notice" x-text="m.pay.notice"></div>
+                    </div>
+                  </template>
+
+                  {{-- ขั้น 3: สำเร็จ + บอกชัด ๆ ว่าไปต่อที่ไหนได้ --}}
+                  <template x-if="m.pay.step === 'done'">
+                    <div class="pay-done">
+                      <div class="tick" aria-hidden="true">✓</div>
+                      <div class="pay-title" style="margin-bottom:2px">เติมเครดิตสำเร็จแล้วค่ะ</div>
+                      <div class="amt" x-text="'฿' + Number(m.pay.payable).toFixed(2)"></div>
+                      <div class="pay-sub" style="margin-top:8px">
+                        ยอดคงเหลือ <strong x-text="'฿' + Number(balance).toFixed(2)"></strong> — อยากให้แม่หมอดูเรื่องไหนต่อดีคะ
+                      </div>
+                      <div class="pay-actions" style="justify-content:center">
+                        <template x-for="s in nextSteps" :key="s.url">
+                          <a :href="s.url" class="chip chip-strong">
+                            <span class="chip-icon" x-text="s.icon"></span><span x-text="s.label"></span>
+                          </a>
+                        </template>
+                        <button type="button" class="chip" @click="scrollToBottom(true); $refs.input?.focus()">
+                          <span class="chip-icon">💬</span> คุยกับแม่หมอต่อ
+                        </button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
               <div class="msg-foot">
                 <span class="msg-time" x-text="m.time"></span>
 
@@ -216,9 +316,12 @@
                   <a href="{{ route('horoscope.index') }}" class="chip"><span class="chip-icon">🌙</span> ดวงรายวัน</a>
                   <a href="{{ route('numerology.index') }}" class="chip"><span class="chip-icon">🔢</span> เลขศาสตร์</a>
                   <a href="{{ route('auspicious.index') }}" class="chip"><span class="chip-icon">📿</span> ฤกษ์ยาม</a>
-                  @if (!$isFree)
-                    <a href="{{ route('wallet.topup') }}" class="chip chip-strong"><span class="chip-icon">💳</span> เติมเงิน</a>
-                  @endif
+                  {{-- เติมเงินจบในแชท ไม่พาออกไปหน้าอื่น (ถ้าเปิดการ์ดไม่ได้
+                       ค่อยตกไปเป็นลิงก์หน้าเติมเงินตามเดิม) --}}
+                  <button type="button" class="chip chip-strong" x-show="canTopupInChat" @click="openTopup()">
+                    <span class="chip-icon">💳</span> เติมเครดิตที่นี่
+                  </button>
+                  <a href="{{ route('wallet.topup') }}" class="chip" x-show="!canTopupInChat"><span class="chip-icon">💳</span> เติมเงิน</a>
                 </div>
               </div>
             </template>
@@ -344,6 +447,15 @@ document.addEventListener('alpine:init', () => {
     suggestOpen: false,
     atBottom: true,
     seq: 0,
+    balance: @js((float) ($balance ?? 0)),
+    bundles: cfg.bundles || [50, 100, 200, 500],
+    nextSteps: cfg.nextSteps || [],
+    canTopupInChat: !!cfg.canTopupInChat,
+    payTimer: null,
+
+    destroy() {
+      clearInterval(this.payTimer);   // ออกจากหน้าแล้วต้องเลิก poll
+    },
 
     init() {
       // ให้ทุกข้อความมี id คงที่ เพื่อให้ x-for :key ไม่วาดใหม่ทั้งกองตอน
@@ -410,6 +522,124 @@ document.addEventListener('alpine:init', () => {
       return this.push('assistant', this.escape(text).replace(/\n/g, '<br>'), 'system');
     },
 
+    /* ---------- เติมเงินในแชท ---------- */
+    openTopup() {
+      // มีการ์ดที่ยังจ่ายไม่เสร็จอยู่แล้วก็เลื่อนไปหาใบเดิม ไม่สร้างซ้อน
+      const open = this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done');
+      if (open) { this.scrollToBottom(true); return; }
+
+      const m = this.push('assistant', '', 'ok');
+      m.kind = 'topup';
+      m.pay = { step: 'choose', busy: false, uploading: false, error: '', notice: '', waited: 0 };
+      this.scrollToBottom(true);
+    },
+
+    async chooseAmount(m, amount) {
+      if (m.pay.busy) return;
+      m.pay.busy = true;
+      m.pay.error = '';
+      try {
+        const r = await fetch(cfg.topupCreateUrl, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ amount }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          m.pay.error = j.error || 'สร้างรายการเติมเงินไม่สำเร็จ ลองใหม่อีกครั้งนะคะ';
+          return;
+        }
+        Object.assign(m.pay, j, { step: 'qr', waited: 0, error: '', notice: '' });
+        this.watchTopup(m);
+      } catch (e) {
+        m.pay.error = 'เครือข่ายมีปัญหาค่ะ ลองใหม่อีกครั้งนะคะ';
+      } finally {
+        m.pay.busy = false;
+        this.scrollToBottom(true);
+      }
+    },
+
+    /**
+     * ถามเซิร์ฟเวอร์เป็นระยะว่าเงินเข้าหรือยัง
+     * หยุดเองที่ 10 นาที — ไม่ปล่อยให้ยิงไม่จบถ้าลูกค้าเปิดค้างไว้
+     */
+    watchTopup(m) {
+      clearInterval(this.payTimer);
+      this.payTimer = setInterval(async () => {
+        m.pay.waited += 5;
+        if (m.pay.waited > 600) { clearInterval(this.payTimer); return; }
+        try {
+          const r = await fetch(cfg.topupStatusUrl.replace('__ID__', m.pay.id), {
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          });
+          if (!r.ok) return;
+          const j = await r.json();
+          if (j.paid) {
+            clearInterval(this.payTimer);
+            m.pay.step = 'done';
+            this.balance = j.balance;
+            // เติมเงินผ่านแล้วต้องพิมพ์ต่อได้ทันที ไม่ต้องรีเฟรชหน้า
+            if (this.blockedReason.includes('เครดิต')) {
+              this.blocked = false;
+              this.blockedReason = '';
+            }
+            this.scrollToBottom(true);
+          }
+        } catch (_) { /* เน็ตสะดุดชั่วคราว — รอบหน้าลองใหม่ */ }
+      }, 5000);
+    },
+
+    async copyAmount(m, e) {
+      try {
+        await navigator.clipboard.writeText(Number(m.pay.payable).toFixed(2));
+        m.pay.notice = 'คัดลอกยอดแล้วค่ะ';
+        setTimeout(() => { m.pay.notice = ''; }, 2000);
+      } catch (_) {
+        m.pay.notice = 'กดค้างที่ตัวเลขเพื่อคัดลอกได้นะคะ';
+      }
+    },
+
+    async uploadSlip(m, e) {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';           // เลือกไฟล์เดิมซ้ำได้
+      if (!file) return;
+
+      m.pay.uploading = true;
+      m.pay.error = '';
+      m.pay.notice = '';
+      try {
+        const fd = new FormData();
+        fd.append('slip', file);
+        const r = await fetch(cfg.topupSlipUrl.replace('__ID__', m.pay.id), {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: fd,
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          m.pay.error = j.error || 'ส่งสลิปไม่สำเร็จ ลองใหม่อีกครั้งนะคะ';
+          return;
+        }
+        m.pay.notice = j.message || 'ได้รับสลิปแล้วค่ะ';
+      } catch (_) {
+        m.pay.error = 'เครือข่ายมีปัญหาค่ะ ลองส่งสลิปใหม่อีกครั้งนะคะ';
+      } finally {
+        m.pay.uploading = false;
+      }
+    },
+
     async copy(m, e) {
       try {
         await navigator.clipboard.writeText(m.text || m.html.replace(/<[^>]*>/g, ''));
@@ -473,8 +703,10 @@ document.addEventListener('alpine:init', () => {
 
         if (r.status === 402) {                      // เครดิตไม่พอ
           this.blocked = true;
-          this.blockedReason = 'เครดิตไม่พอ — เติมเงินแล้วคุยต่อได้เลยค่ะ';
+          this.blockedReason = 'เครดิตไม่พอ — เติมเครดิตแล้วคุยต่อได้เลยค่ะ';
           this.say(j.error || 'เครดิตไม่พอ กรุณาเติมเงินก่อนนะคะ');
+          // กาง QR ให้เลยตรงนี้ ลูกค้าไม่ต้องหาว่าต้องกดตรงไหนต่อ
+          if (this.canTopupInChat) this.openTopup();
           return;
         }
 

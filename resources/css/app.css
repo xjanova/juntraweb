@@ -408,6 +408,106 @@
   margin-top: 4px;
 }
 
+/* ============================================================
+   การ์ดเติมเงินในแชท — ออกแบบให้ผู้สูงอายุใช้ได้เอง
+   ตัวอักษรใหญ่ ปุ่มใหญ่ ทีละขั้น ไม่มีอะไรให้ตีความ
+   ============================================================ */
+
+.pay-card {
+  border: 1px solid var(--gold, #f4cf6a);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(244, 207, 106, .10), rgba(244, 207, 106, .02));
+  padding: 18px;
+  max-width: 340px;
+}
+.pay-title {
+  font-family: var(--thai, inherit);
+  font-weight: 700; font-size: 16px;
+  color: var(--gold-2, var(--gold, #f4cf6a));
+  margin-bottom: 4px;
+}
+.pay-sub { font-size: 13px; color: var(--ink-dim, rgba(246, 239, 224, .7)); line-height: 1.6; }
+
+/* ปุ่มจำนวนเงิน — ใหญ่พอกดด้วยนิ้วโป้งโดยไม่ต้องเล็ง */
+.pay-amounts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 14px; }
+.pay-amount {
+  padding: 14px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--line, rgba(244, 207, 106, .25));
+  background: rgba(244, 207, 106, .06);
+  color: var(--ink, #f6efe0);
+  font-family: var(--display, serif);
+  font-size: 19px; font-weight: 600;
+  cursor: pointer;
+  transition: border-color .2s, background .2s, transform .15s;
+}
+.pay-amount:hover:not(:disabled) {
+  border-color: var(--gold, #f4cf6a);
+  background: rgba(244, 207, 106, .16);
+  color: var(--gold-2, var(--gold, #f4cf6a));
+}
+.pay-amount:active:not(:disabled) { transform: scale(.97); }
+
+/* QR ต้องใหญ่และอยู่บนพื้นขาว ไม่งั้นกล้องธนาคารจับยาก */
+.pay-qr {
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px;
+  width: 100%; max-width: 240px;
+  margin: 14px auto 0;
+  line-height: 0;
+}
+.pay-qr img { width: 100%; height: auto; display: block; }
+
+/* ยอดที่ต้องโอน — ต้องเด่นที่สุดในการ์ด เพราะโอนผิดยอด = จับคู่ไม่ได้ */
+.pay-amount-due {
+  text-align: center; margin-top: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(244, 207, 106, .12);
+  border: 1px dashed var(--gold, #f4cf6a);
+}
+.pay-amount-due .n {
+  font-family: var(--display, serif);
+  font-size: 30px; font-weight: 700; line-height: 1.1;
+  color: var(--gold-2, var(--gold, #f4cf6a));
+  display: block;
+}
+.pay-amount-due .l {
+  font-size: 12px; color: var(--ink-dim, rgba(246, 239, 224, .7));
+  display: block; margin-top: 4px;
+}
+
+.pay-wait {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 14px; font-size: 13px;
+  color: var(--ink-dim, rgba(246, 239, 224, .7));
+}
+.pay-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.pay-actions .chip { flex: 1 1 auto; justify-content: center; }
+
+/* สำเร็จ — ต้องอ่านออกในแวบเดียวว่า "จ่ายผ่านแล้ว" */
+.pay-done {
+  text-align: center; padding: 8px 0 2px;
+}
+.pay-done .tick {
+  width: 54px; height: 54px; margin: 0 auto 10px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(74, 222, 128, .16);
+  border: 2px solid #4ade80;
+  color: #4ade80; font-size: 26px;
+}
+.pay-done .amt {
+  font-family: var(--display, serif);
+  font-size: 24px; color: var(--gold-2, var(--gold, #f4cf6a));
+}
+
+@media (max-width: 480px) {
+  .pay-card { max-width: 100%; padding: 15px; }
+  .pay-amount { font-size: 17px; padding: 13px 6px; }
+}
+
 /* ป้ายโควตา / เครดิต */
 .quota-bar {
   display: flex; justify-content: center; align-items: center;

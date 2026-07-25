@@ -1,0 +1,147 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Exceptions\DuplicateSlipException;
+use App\Models\WalletTransaction;
+use App\Services\SmsPayment\SmsCheckerService;
+use App\Services\Wallet\WalletService;
+use App\Support\ChatPolicy;
+use App\Support\PromptPayQr;
+use App\Models\Setting;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+/**
+ * เติมเงินจบในห้องแชท — ไม่ต้องออกไปหน้าอื่น
+ *
+ * ทำไมต้องมี: บอทแม่หมอใน Facebook/LINE ให้ลูกค้า "สแกนจ่ายครั้งเดียวจบ"
+ * แต่บนเว็บเดิมต้องเดินออกจากแชท → หน้าเติมเงิน → เลือกยอด → จ่าย → รอ →
+ * เดินกลับมาเปิดไพ่ใหม่ ซึ่งลูกค้ากลุ่มหลักของเรา (ผู้สูงอายุ) หลุดกลางทาง
+ *
+ * โฟลว์ใหม่: กดยอดในแชท → QR โผล่ในบับเบิล → สแกนจ่าย → SMS ธนาคารเข้า →
+ * ระบบเครดิตให้เอง → บับเบิลเปลี่ยนเป็น "เติมเงินสำเร็จ" พร้อมปุ่มนำทางว่า
+ * ใช้บริการอะไรต่อได้บ้าง ทั้งหมดอยู่ในหน้าจอเดียว ไม่มีการพาออกไปไหน
+ *
+ * ตัวจับเงินเข้าใช้ของเดิมทั้งหมด (unique satang amount + SmsCheckerService)
+ * — controller นี้เป็นแค่ "หน้าร้าน" ของกลไกที่ผ่านการ audit มาแล้ว
+ */
+class ChatTopupController extends Controller
+{
+    public function __construct(
+        private WalletService $wallet,
+        private SmsCheckerService $sms,
+    ) {}
+
+    /** สร้างรายการเติมเงิน + QR สำหรับสแกนจ่าย */
+    public function store(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['error' => 'กรุณาเข้าสู่ระบบก่อนเติมเงิน', 'reason_code' => 'guest'], 401);
+        }
+
+        $min = (int) config('pricing.min_topup', 20);
+        $max = (int) config('pricing.max_topup', 50000);
+        $data = $request->validate([
+            'amount' => "required|numeric|min:$min|max:$max",
+        ]);
+
+        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id', ''));
+        if (! $promptpayId) {
+            // ยังไม่ได้ตั้งค่า PromptPay = สร้าง QR ไม่ได้ ต้องบอกตรง ๆ ไม่ใช่
+            // ปล่อยให้ลูกค้าเห็นกล่องว่างแล้วงงว่าต้องโอนไปไหน
+            return response()->json([
+                'error'       => 'ระบบเติมเงินยังไม่พร้อมชั่วคราว กรุณาติดต่อแอดมินค่ะ',
+                'reason_code' => 'promptpay_unset',
+            ], 503);
+        }
+
+        // ยอดที่ต้องโอนจริงมีเศษสตางค์ไม่ซ้ำใคร เพื่อให้ SMS ธนาคารจับคู่กับ
+        // รายการนี้ได้แม่นยำโดยไม่ต้องให้แอดมินมานั่งดูสลิป
+        $base    = (float) $data['amount'];
+        $payable = config('smschecker.enabled') ? $this->sms->uniqueAmountFor($base) : $base;
+
+        try {
+            $tx = $this->wallet->recordPendingTopup($user, $payable, null, 'promptpay');
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage(), 'reason_code' => 'pending_cap'], 422);
+        }
+
+        if (abs($payable - $base) > 0.0001) {
+            $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base, 'source' => 'chat'])]);
+        } else {
+            $tx->update(['meta' => array_merge((array) $tx->meta, ['source' => 'chat'])]);
+        }
+
+        return response()->json($this->payload($tx, $promptpayId));
+    }
+
+    /** เช็คว่าเงินเข้าหรือยัง — หน้าแชท poll ทุกไม่กี่วินาที */
+    public function status(Request $request, WalletTransaction $tx): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user && $tx->user_id === $user->id, 403);
+
+        return response()->json([
+            'id'      => $tx->id,
+            'status'  => $tx->status,
+            'paid'    => $tx->status === 'success',
+            'balance' => (float) $this->wallet->balance($user),
+            // ส่งสถานะโควตา/ราคากลับไปด้วย หน้าแชทจะได้ปลดล็อกช่องพิมพ์ทันที
+            // ถ้าที่บล็อกอยู่คือเรื่องเครดิตไม่พอ
+            'cost'    => ChatPolicy::cost(),
+        ]);
+    }
+
+    /** แนบสลิปให้ตรวจ — ทางสำรองเมื่อ SMS ไม่เข้า */
+    public function slip(Request $request, WalletTransaction $tx): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user && $tx->user_id === $user->id, 403);
+
+        if ($tx->status !== 'pending') {
+            return response()->json(['error' => 'รายการนี้ไม่ได้รอตรวจสอบแล้วค่ะ'], 422);
+        }
+
+        $request->validate(['slip' => 'required|image|max:4096']);
+        $file = $request->file('slip');
+
+        // สลิปใบเดียวใช้ได้ครั้งเดียว — เช็คก่อนเก็บไฟล์ จะได้ไม่ทิ้งขยะไว้
+        $hash = hash_file('sha256', $file->getRealPath());
+        try {
+            $this->wallet->assertSlipNotReused($hash, $tx->id);
+        } catch (DuplicateSlipException $e) {
+            return response()->json(['error' => $e->getMessage(), 'reason_code' => 'duplicate_slip'], 422);
+        }
+
+        // สลิปมีข้อมูลบัญชี — เก็บบน disk ส่วนตัวเสมอ ไม่ใช่ public
+        $path = $file->store('topup-slips', 'local');
+        $tx->update(['slip_path' => $path, 'slip_hash' => $hash]);
+
+        return response()->json([
+            'ok'     => true,
+            'status' => $tx->status,
+            'message' => 'ได้รับสลิปแล้วค่ะ แม่หมอกำลังให้ระบบตรวจสอบให้นะคะ',
+        ]);
+    }
+
+    /** @return array<string,mixed> */
+    private function payload(WalletTransaction $tx, string $promptpayId): array
+    {
+        $payable = (float) $tx->amount;
+        $base    = (float) (($tx->meta['base_amount'] ?? null) ?: $payable);
+
+        return [
+            'id'             => $tx->id,
+            'reference_code' => $tx->reference_code,
+            'base_amount'    => $base,
+            'payable'        => $payable,
+            'qr'             => PromptPayQr::svgDataUri($promptpayId, $payable),
+            'qr_payload'     => PromptPayQr::payload($promptpayId, $payable),
+            'promptpay_name' => Setting::get('promptpay_name', config('pricing.promptpay_name', '')),
+            'auto_confirm'   => (bool) config('smschecker.enabled'),
+            'expires_at'     => optional($tx->expires_at)->toIso8601String(),
+        ];
+    }
+}

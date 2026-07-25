@@ -112,6 +112,15 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
         ->name('show');
 });
 
+// เติมเงินจบในห้องแชท (สแกน QR แล้วเครดิตเข้าเอง) — ให้ลูกค้าไม่ต้องเดินออก
+// จากบทสนทนาเหมือนบอท FB/LINE. throttle:topup ใช้ตัวเดียวกับหน้าเติมเงินปกติ
+Route::middleware('auth')->prefix('chat/topup')->name('chat.topup.')
+    ->controller(\App\Http\Controllers\ChatTopupController::class)->group(function () {
+        Route::post('/',            'store')->middleware('throttle:topup')->name('store');
+        Route::get('/{tx}',         'status')->name('status');
+        Route::post('/{tx}/slip',   'slip')->middleware('throttle:topup')->name('slip');
+    });
+
 // Account / member area
 Route::middleware('auth')->prefix('account')->name('account.')->group(function () {
     Route::get('/dashboard', [AccountController::class, 'dashboard'])->name('dashboard');
