@@ -12,6 +12,7 @@
   <div class="nav-collapse" :class="{ open: open }" x-on:click="open = false">
     <div class="nav-links">
       <a href="{{ route('tarot.index') }}">ไพ่ยิปซี</a>
+      <a href="{{ route('deep.index') }}">ดูดวงเชิงลึก</a>
       <a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>
       <a href="{{ route('numerology.index') }}">เลขศาสตร์</a>
       <a href="{{ route('palmistry.index') }}">ลายมือ</a>

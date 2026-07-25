@@ -46,6 +46,7 @@
          bundles: @js(array_slice((array) config('pricing.topup_bundles', [50, 100, 200, 500]), 0, 4)),
          nextSteps: @js([
            ['icon' => '🔮', 'label' => 'เปิดไพ่ยิปซี', 'url' => route('tarot.index')],
+           ['icon' => '🌟', 'label' => 'ดูดวงเชิงลึก', 'url' => route('deep.index')],
            ['icon' => '🔢', 'label' => 'เลขศาสตร์',   'url' => route('numerology.index')],
            ['icon' => '📿', 'label' => 'ฤกษ์ยาม',     'url' => route('auspicious.index')],
          ]),
@@ -313,6 +314,7 @@
                 </div>
                 <div class="chip-row">
                   <a href="{{ route('tarot.index') }}" class="chip chip-strong"><span class="chip-icon">🔮</span> เปิดไพ่ยิปซี</a>
+                  <a href="{{ route('deep.index') }}" class="chip chip-strong"><span class="chip-icon">🌟</span> ดูดวงเชิงลึก</a>
                   <a href="{{ route('horoscope.index') }}" class="chip"><span class="chip-icon">🌙</span> ดวงรายวัน</a>
                   <a href="{{ route('numerology.index') }}" class="chip"><span class="chip-icon">🔢</span> เลขศาสตร์</a>
                   <a href="{{ route('auspicious.index') }}" class="chip"><span class="chip-icon">📿</span> ฤกษ์ยาม</a>

@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Auth\ThaipromptController;
 use App\Http\Controllers\AuspiciousController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\DeepReadingController;
 use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\HoroscopeController;
@@ -70,6 +71,14 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
     Route::post('/cast', 'cast')->middleware('throttle:reading')->name('cast'); // step 3 → any spread
     Route::get('/result/{reading}', 'show')->name('show');
+});
+
+// ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับที่บอท FB/LINE ขาย (คำทำนายมาจาก Thaiprompt)
+// submit เป็นรายการที่ตัดเงิน จึง throttle ต่อผู้ใช้เหมือนโมดูลทำนายอื่น
+Route::prefix('deep')->name('deep.')->controller(DeepReadingController::class)->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::post('/', 'store')->middleware(['auth', 'throttle:reading'])->name('store');
+    Route::get('/{reading}', 'show')->name('show');
 });
 
 // Horoscope

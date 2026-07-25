@@ -195,6 +195,50 @@ class FortuneBotClient
     }
 
     /**
+     * ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับที่บอท FB/LINE ขาย
+     *
+     * คืน null เมื่อยังไม่ได้เชื่อมบัญชี / upstream ล่ม / endpoint ยังไม่ deploy
+     * ผู้เรียกต้องคืนเครดิตลูกค้าเมื่อได้ null — ห้ามส่งคำทำนายปลอมแทน
+     * เพราะนี่คือสินค้าที่ลูกค้าจ่ายเงินซื้อโดยเฉพาะ
+     *
+     * @param  array<int,string>  $questions
+     * @return array{reading:string,ai_provider:?string,ai_model:?string}|null
+     */
+    public function deepReading(?User $user, array $questions, ?string $birthDate, ?string $name = null): ?array
+    {
+        if (! $this->isAvailable($user) || empty($questions)) {
+            return null;
+        }
+
+        try {
+            $resp = $this->client($user)->post($this->fortuneUrl('/deep'), array_filter([
+                'questions'  => array_values($questions),
+                'birth_date' => $birthDate,
+                'name'       => $name,
+            ], fn ($v) => $v !== null && $v !== ''));
+
+            if ($resp->successful()) {
+                $data = $resp->json('data');
+                if (is_array($data) && ! empty($data['reading'])) {
+                    return $data;
+                }
+            }
+
+            if (! in_array($resp->status(), [404, 405], true)) {
+                $this->handleUnauthorized($user, $resp->status());
+            }
+            Log::info('FortuneBotClient::deepReading unavailable', [
+                'status' => $resp->status(),
+                'body'   => mb_substr((string) $resp->body(), 0, 300),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('FortuneBotClient::deepReading threw', ['err' => $e->getMessage()]);
+        }
+
+        return null;
+    }
+
+    /**
      * ตรวจสลิปโอนเงินผ่าน SlipOK ของ Thaiprompt (บัญชี + โควตา + flood guard
      * ก้อนเดียวกับบอท FB/LINE — ไม่แยกโควตาสองที่ให้แอดมินต้องดูแลซ้ำ)
      *

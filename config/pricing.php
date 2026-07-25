@@ -26,6 +26,10 @@ return [
     'palmistry'  => env('PRICING_PALMISTRY', 29),
     'auspicious' => env('PRICING_AUSPICIOUS', 19),
 
+    // ดูดวงเชิงลึก — แพ็กเดียวกับที่บอท FB/LINE ขายอยู่ (READING_TYPE_DEEP)
+    // ราคาต้องตรงกับฝั่งบอท ไม่งั้นลูกค้าคนเดียวกันเจอสองราคาคนละช่องทาง
+    'deep' => env('PRICING_DEEP', 39),
+
     // AI chat — debited per outbound user message (the bot reply is free).
     // Set to 0 to disable per-message billing.
     'chat_message' => env('PRICING_CHAT_MESSAGE', 2),
