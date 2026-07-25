@@ -52,6 +52,7 @@ Route::get('/r/{code}', [ReferralController::class, 'show'])
 
 // หน้าแนะนำดาวน์โหลดแอพมือถือ — /download/go นับคลิกก่อนเด้งไป Play Store
 // (ลิงก์สโตร์ตั้งได้ใน /admin → ตั้งค่าเว็บไซต์ → แอปพลิเคชันมือถือ).
+// /app = ทางเข้าถาวรจาก LINE Rich Menu บอทแม่หมอ — เปลี่ยนลิงก์สโตร์ที่ admin ได้เลย
 Route::get('/download',    [DownloadController::class, 'show'])->name('download');
 Route::get('/download/go', [DownloadController::class, 'go'])->middleware('throttle:60,1')->name('download.go');
 Route::redirect('/app', '/download');
