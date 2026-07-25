@@ -13,10 +13,19 @@
   $asks        = $spreadKey ? array_column(TarotSpreads::positions($spreadKey), 'asks') : [];
 
   // Follow-up eligibility: only the owner may consult about their own reading,
-  // and (like any chat) only once linked via FB/LINE through Thaiprompt.
+  // and only when the chat itself would let them in.
+  // 🩹 (2026-07-26) ยึด ChatPolicy::gate() แทนการเช็ค isLinkedViaFbOrLine() เอง —
+  //    ลูกค้าที่มาจาก Magic Link ของบอทมี facebook_psid ฝั่ง Thaiprompt แต่ไม่มี
+  //    facebook_user_id ฝั่งนี้ จึงถูกตีว่า "ยังไม่เชื่อมบัญชี" ทั้งที่คุยได้อยู่แล้ว
+  //    (โหมดคุยฟรีไม่บังคับเชื่อมช่องทาง — กติกาอยู่ที่ ChatPolicy ที่เดียว)
   $viewer      = auth()->user();
   $isOwner     = $viewer && $reading->user_id === $viewer->id;
-  $canConsult  = $isOwner && $viewer->isLinkedViaFbOrLine() && ! empty($viewer->thaiprompt_token);
+  $chatGate    = \App\Support\ChatPolicy::gate($viewer);
+  $canConsult  = $isOwner && $chatGate['allowed'];
+
+  // 🎁 ไพ่ฟรี 1 ใบ — ตัวแยกคือธงใน payload (ห้ามใช้ราคาเป็นตัวแยก แอดมินปรับได้ตลอด)
+  $isFreeReading = (bool) data_get($reading->payload, 'free', false);
+  $nextQuestions = array_filter((array) data_get($reading->payload, 'next_questions', []));
 @endphp
 
 @push('head')
@@ -155,6 +164,41 @@
       <x-reading-prose :text="$reading->result" />
     </div>
 
+    {{-- 🎁 ไพ่ฟรี: คำถามที่ควรถามต่อ + ชวนเปิดไพ่ชุดเต็ม
+         คำทำนายฟรีตอบครบแล้ว ตรงนี้คือ "ปลายเปิด" — ประเด็นที่ไพ่ใบเดียวตอบไม่ได้ --}}
+    @if ($isFreeReading)
+      <div class="followup-box" style="margin-top:40px">
+        <div class="eyebrow" style="display:inline-flex">อยากรู้ลึกกว่านี้</div>
+        <p class="followup-hint">
+          ไพ่ใบเดียวบอกได้แค่ภาพรวมของช่วงนี้ค่ะ — ถ้าอยากเห็นว่าใครคือคนที่กำลังเข้ามา
+          เรื่องจะคลี่คลายเมื่อไร หรือควรเลือกทางไหน ต้องเปิดไพ่ชุดเต็มถึงจะเห็นภาพทั้งหมด
+        </p>
+
+        @if ($canConsult && ! empty($nextQuestions))
+          {{-- .chip-wrap (ห่อบรรทัดได้) ไม่ใช่ .chip-row ที่ overflow-x:auto —
+               บนจอแคบ justify-content:center บนแถวที่เลื่อนได้จะตัดหัวชิปใบแรกทิ้ง --}}
+          <div class="chip-wrap" style="justify-content:center;margin-bottom:20px">
+            @foreach ($nextQuestions as $q)
+              <form action="{{ route('chat.from-reading', $reading) }}" method="POST" style="display:inline">
+                @csrf
+                <input type="hidden" name="question" value="{{ $q }}">
+                <button type="submit" class="chip chip-strong" style="cursor:pointer;border:0;font-family:inherit">
+                  {{ $q }}
+                </button>
+              </form>
+            @endforeach
+          </div>
+        @endif
+
+        <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+          <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ชุดเต็ม
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </a>
+          <a href="{{ route('wallet.topup') }}" class="btn btn-ghost">เติมเครดิต</a>
+        </div>
+      </div>
+    @endif
+
     {{-- Follow-up: ask แม่หมอ about THIS spread. She's primed with the exact
          cards drawn, so answers read those cards — not a blank-slate chat. --}}
     @if ($canConsult)
@@ -163,7 +207,10 @@
         <p class="followup-hint">
           แม่หมอเห็นไพ่ทั้ง {{ $count }} ใบที่คุณเพิ่งเปิดแล้ว — พิมพ์ถามเจาะจงได้เลย
           เช่น “เรื่องงานควรตัดสินใจอย่างไร” หรือ “ไพ่ใบนี้เตือนอะไรฉัน”
-          <span class="followup-fee">· คิดค่าบริการต่อข้อความตามระบบแชท</span>
+          {{-- โชว์บรรทัดค่าบริการเฉพาะตอนที่คิดเงินจริง — โหมดคุยฟรีจะทำให้ลูกค้าลังเลเปล่า ๆ --}}
+          @if (! \App\Support\ChatPolicy::isFree())
+            <span class="followup-fee">· คิดค่าบริการต่อข้อความตามระบบแชท</span>
+          @endif
         </p>
         <form action="{{ route('chat.from-reading', $reading) }}" method="POST" class="followup-form"
               x-data="{ sending:false }" @submit="sending=true">

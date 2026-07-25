@@ -1,11 +1,13 @@
 <?php
 
 use App\Http\Controllers\AccountController;
-use App\Http\Controllers\Auth\ThaipromptController;
 use App\Http\Controllers\AuspiciousController;
+use App\Http\Controllers\Auth\ThaipromptController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ChatTopupController;
 use App\Http\Controllers\DeepReadingController;
 use App\Http\Controllers\DownloadController;
+use App\Http\Controllers\FreeTarotController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\HoroscopeController;
 use App\Http\Controllers\Install\InstallerController;
@@ -20,14 +22,14 @@ use Illuminate\Support\Facades\Route;
 
 // Installer wizard — only reachable until storage/app/.installed exists.
 Route::middleware('block.installed')->prefix('install')->name('install.')->group(function () {
-    Route::get('/',             [InstallerController::class, 'welcome'])->name('welcome');
-    Route::get('/database',     [InstallerController::class, 'databaseForm'])->name('database');
-    Route::post('/database',    [InstallerController::class, 'databaseSave'])->name('database.save');
-    Route::get('/admin',        [InstallerController::class, 'adminForm'])->name('admin');
-    Route::post('/admin',       [InstallerController::class, 'adminSave'])->name('admin.save');
+    Route::get('/', [InstallerController::class, 'welcome'])->name('welcome');
+    Route::get('/database', [InstallerController::class, 'databaseForm'])->name('database');
+    Route::post('/database', [InstallerController::class, 'databaseSave'])->name('database.save');
+    Route::get('/admin', [InstallerController::class, 'adminForm'])->name('admin');
+    Route::post('/admin', [InstallerController::class, 'adminSave'])->name('admin.save');
     Route::get('/integrations', [InstallerController::class, 'integrationsForm'])->name('integrations');
-    Route::post('/integrations',[InstallerController::class, 'integrationsSave'])->name('integrations.save');
-    Route::get('/finish',       [InstallerController::class, 'finish'])->name('finish');
+    Route::post('/integrations', [InstallerController::class, 'integrationsSave'])->name('integrations.save');
+    Route::get('/finish', [InstallerController::class, 'finish'])->name('finish');
 });
 
 // Thaiprompt SSO
@@ -54,14 +56,14 @@ Route::get('/r/{code}', [ReferralController::class, 'show'])
 // หน้าแนะนำดาวน์โหลดแอพมือถือ — /download/go นับคลิกก่อนเด้งไป Play Store
 // (ลิงก์สโตร์ตั้งได้ใน /admin → ตั้งค่าเว็บไซต์ → แอปพลิเคชันมือถือ).
 // /app = ทางเข้าถาวรจาก LINE Rich Menu บอทแม่หมอ — เปลี่ยนลิงก์สโตร์ที่ admin ได้เลย
-Route::get('/download',    [DownloadController::class, 'show'])->name('download');
+Route::get('/download', [DownloadController::class, 'show'])->name('download');
 Route::get('/download/go', [DownloadController::class, 'go'])->middleware('throttle:60,1')->name('download.go');
 Route::redirect('/app', '/download');
 
 // Static legal pages — theme-agnostic Blade (the ThemeServiceProvider view
 // composer injects $activeTheme/$themeConfig into every view, so Route::view works).
 Route::view('/privacy', 'pages.legal.privacy')->name('legal.privacy');
-Route::view('/terms',   'pages.legal.terms')->name('legal.terms');
+Route::view('/terms', 'pages.legal.terms')->name('legal.terms');
 
 // Tarot — paid actions throttled (per-user, see AppServiceProvider) so a
 // rapid double-submit can't double-charge.
@@ -71,6 +73,14 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
     Route::post('/cast', 'cast')->middleware('throttle:reading')->name('cast'); // step 3 → any spread
     Route::get('/result/{reading}', 'show')->name('show');
+});
+
+// 🎁 ดูดวงฟรี 1 ใบ — ปลายทางของปุ่ม "ดูดวงฟรี" จากบอท FB/LINE (magic link ?to=/tarot/free)
+// GET เรนเดอร์หน้ารอเท่านั้น (ห้ามให้ GET ยิง AI — รีเฟรช/prefetch จะยิงซ้ำ)
+// POST เป็นตัวเปิดไพ่จริง + throttle เดียวกับรายการที่ตัดเงิน
+Route::prefix('tarot')->name('tarot.')->controller(FreeTarotController::class)->group(function () {
+    Route::get('/free', 'index')->name('free');
+    Route::post('/free/cast', 'cast')->middleware('throttle:reading')->name('free.cast');
 });
 
 // ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับที่บอท FB/LINE ขาย (คำทำนายมาจาก Thaiprompt)
@@ -124,27 +134,27 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
 // เติมเงินจบในห้องแชท (สแกน QR แล้วเครดิตเข้าเอง) — ให้ลูกค้าไม่ต้องเดินออก
 // จากบทสนทนาเหมือนบอท FB/LINE. throttle:topup ใช้ตัวเดียวกับหน้าเติมเงินปกติ
 Route::middleware('auth')->prefix('chat/topup')->name('chat.topup.')
-    ->controller(\App\Http\Controllers\ChatTopupController::class)->group(function () {
-        Route::post('/',            'store')->middleware('throttle:topup')->name('store');
-        Route::get('/{tx}',         'status')->name('status');
-        Route::post('/{tx}/slip',   'slip')->middleware('throttle:topup')->name('slip');
+    ->controller(ChatTopupController::class)->group(function () {
+        Route::post('/', 'store')->middleware('throttle:topup')->name('store');
+        Route::get('/{tx}', 'status')->name('status');
+        Route::post('/{tx}/slip', 'slip')->middleware('throttle:topup')->name('slip');
     });
 
 // Account / member area
 Route::middleware('auth')->prefix('account')->name('account.')->group(function () {
     Route::get('/dashboard', [AccountController::class, 'dashboard'])->name('dashboard');
-    Route::get('/history',   [AccountController::class, 'history'])->name('history');
-    Route::get('/chats',     [AccountController::class, 'chats'])->name('chats');
+    Route::get('/history', [AccountController::class, 'history'])->name('history');
+    Route::get('/chats', [AccountController::class, 'chats'])->name('chats');
 
     // Astrology profile (DOB / birth time / zodiacs) — feeds horoscope/numerology etc.
-    Route::get('/astrology',   [AccountController::class, 'astrology'])->name('astrology');
+    Route::get('/astrology', [AccountController::class, 'astrology'])->name('astrology');
     Route::patch('/astrology', [AccountController::class, 'astrologyUpdate'])->name('astrology.update');
 
     // Sessions & API tokens (Sanctum). The throttle prevents brute-forcing
     // the current-password gate on logoutOtherBrowsers.
-    Route::get('/security',                [AccountController::class, 'security'])->name('security');
-    Route::delete('/tokens/{tokenId}',     [AccountController::class, 'revokeToken'])->whereNumber('tokenId')->name('tokens.revoke');
-    Route::post('/tokens/revoke-all',      [AccountController::class, 'revokeAllTokens'])->name('tokens.revoke-all');
+    Route::get('/security', [AccountController::class, 'security'])->name('security');
+    Route::delete('/tokens/{tokenId}', [AccountController::class, 'revokeToken'])->whereNumber('tokenId')->name('tokens.revoke');
+    Route::post('/tokens/revoke-all', [AccountController::class, 'revokeAllTokens'])->name('tokens.revoke-all');
     Route::post('/sessions/logout-others', [AccountController::class, 'logoutOtherBrowsers'])
         ->middleware('throttle:6,1')
         ->name('sessions.logout-others');
@@ -154,23 +164,23 @@ Route::middleware('auth')->prefix('account')->name('account.')->group(function (
 // Slip uploads live on the private 'local' disk; the slip route streams them
 // back through PHP after verifying the requester is the owner or an admin.
 Route::middleware('auth')->prefix('wallet')->name('wallet.')->controller(WalletController::class)->group(function () {
-    Route::get('/',                   'index')->name('index');
-    Route::get('/topups',             'topups')->name('topups');
-    Route::get('/topup',              'topupForm')->name('topup');
-    Route::post('/topup',             'topupSubmit')->middleware('throttle:topup')->name('topup.submit');
-    Route::get('/topup/{tx}',         'topupShow')->name('topup.show');
-    Route::get('/topup/{tx}/slip',    'topupSlip')->name('topup.slip');
+    Route::get('/', 'index')->name('index');
+    Route::get('/topups', 'topups')->name('topups');
+    Route::get('/topup', 'topupForm')->name('topup');
+    Route::post('/topup', 'topupSubmit')->middleware('throttle:topup')->name('topup.submit');
+    Route::get('/topup/{tx}', 'topupShow')->name('topup.show');
+    Route::get('/topup/{tx}/slip', 'topupSlip')->name('topup.slip');
     Route::post('/topup/{tx}/cancel', 'topupCancel')->middleware('throttle:topup')->name('topup.cancel');
 });
 
 // MLM dashboard — reads canonical data from Thaiprompt-Affiliate via OAuth bearer.
 Route::middleware('auth')->prefix('mlm')->name('mlm.')->group(function () {
-    Route::get('/',             [MlmController::class, 'dashboard'])->name('dashboard');
-    Route::get('/commissions',  [MlmController::class, 'commissions'])->name('commissions');
-    Route::get('/users',        [MlmController::class, 'users'])->name('users');
+    Route::get('/', [MlmController::class, 'dashboard'])->name('dashboard');
+    Route::get('/commissions', [MlmController::class, 'commissions'])->name('commissions');
+    Route::get('/users', [MlmController::class, 'users'])->name('users');
     // Live-sync: bust the per-user MLM cache → next load = fresh Thaiprompt
     // numbers. Throttled — each refresh triggers real upstream calls.
-    Route::post('/refresh',     [MlmController::class, 'refresh'])->middleware('throttle:6,1')->name('refresh');
+    Route::post('/refresh', [MlmController::class, 'refresh'])->middleware('throttle:6,1')->name('refresh');
 });
 
 // Breeze-compatible dashboard route (alias of account.dashboard)
@@ -185,6 +195,6 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-if (file_exists(__DIR__ . '/auth.php')) {
-    require __DIR__ . '/auth.php';
+if (file_exists(__DIR__.'/auth.php')) {
+    require __DIR__.'/auth.php';
 }

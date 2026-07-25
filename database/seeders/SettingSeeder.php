@@ -34,6 +34,14 @@ class SettingSeeder extends Seeder
             ['pricing_chat_message', '2',  'pricing', false],
             ['promptpay_id',         '',   'pricing', false],
             ['promptpay_name',       '',   'pricing', false],
+
+            // 🎁 (2026-07-26) ดูดวงฟรี 1 ใบ — ปลายทางปุ่ม "ดูดวงฟรี" จากบอท FB/LINE
+            // ต้องมีแถวจริงใน DB ตั้งแต่แรก ไม่งั้น Setting::get() จะ cache
+            // ค่า default ไว้ตลอดกาล (rememberForever ครอบทั้ง closure)
+            ['free_reading_enabled',   '1',   'free_reading', false],
+            ['free_reading_daily_cap', '0',   'free_reading', false],  // 0 = ไม่จำกัด
+            ['free_reading_max_chars', '500', 'free_reading', false],
+            ['free_reading_batch',     'v1',  'free_reading', false],  // เลื่อนรอบ = แจกใหม่ทุกคน
         ];
 
         // CRITICAL: deploy.sh re-runs this seeder on every push. Use
