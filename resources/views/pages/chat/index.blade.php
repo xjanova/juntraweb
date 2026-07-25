@@ -632,6 +632,20 @@ document.addEventListener('alpine:init', () => {
           m.pay.error = j.error || 'ส่งสลิปไม่สำเร็จ ลองใหม่อีกครั้งนะคะ';
           return;
         }
+
+        // ตรวจสลิปผ่านทันที (SlipOK) → ข้ามการรอ SMS ไปหน้าสำเร็จได้เลย
+        if (j.paid) {
+          clearInterval(this.payTimer);
+          m.pay.step = 'done';
+          if (typeof j.balance === 'number') this.balance = j.balance;
+          if (this.blockedReason.includes('เครดิต')) {
+            this.blocked = false;
+            this.blockedReason = '';
+          }
+          this.scrollToBottom(true);
+          return;
+        }
+
         m.pay.notice = j.message || 'ได้รับสลิปแล้วค่ะ';
       } catch (_) {
         m.pay.error = 'เครือข่ายมีปัญหาค่ะ ลองส่งสลิปใหม่อีกครั้งนะคะ';

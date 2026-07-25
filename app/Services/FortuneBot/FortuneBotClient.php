@@ -194,6 +194,49 @@ class FortuneBotClient
         return $this->base() . '/api/v1/juntra/chat/mae-mor' . $suffix;
     }
 
+    /**
+     * ตรวจสลิปโอนเงินผ่าน SlipOK ของ Thaiprompt (บัญชี + โควตา + flood guard
+     * ก้อนเดียวกับบอท FB/LINE — ไม่แยกโควตาสองที่ให้แอดมินต้องดูแลซ้ำ)
+     *
+     * คืน null เมื่อยังไม่ได้เชื่อมบัญชี / endpoint ยังไม่ deploy / ตรวจไม่ได้
+     * ผู้เรียกต้องถือว่า null = "ตรวจอัตโนมัติไม่ได้" แล้วปล่อยให้แอดมินตรวจมือ
+     * ห้ามตีความว่าเป็นการปฏิเสธสลิป
+     *
+     * @return array{ok:bool,trans_ref:?string,amount:?float,receiver_matches:bool,message:string}|null
+     */
+    public function verifySlip(?User $user, string $absolutePath): ?array
+    {
+        if (! $this->isAvailable($user) || ! is_file($absolutePath)) {
+            return null;
+        }
+
+        try {
+            $resp = $this->client($user)
+                ->attach('slip', file_get_contents($absolutePath), basename($absolutePath))
+                ->post($this->base() . '/api/v1/juntra/payment/verify-slip');
+
+            if ($resp->successful()) {
+                $data = $resp->json('data');
+
+                return is_array($data) ? $data : null;
+            }
+
+            if (! in_array($resp->status(), [404, 405], true)) {
+                $this->handleUnauthorized($user, $resp->status());
+                Log::info('FortuneBotClient::verifySlip non-200 — falling back to manual review', [
+                    'status' => $resp->status(),
+                    'body'   => mb_substr((string) $resp->body(), 0, 300),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('FortuneBotClient::verifySlip threw — falling back to manual review', [
+                'err' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
     private function fortuneUrl(string $suffix): string
     {
         return $this->base() . '/api/v1/juntra/fortune' . $suffix;
