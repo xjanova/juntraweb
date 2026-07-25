@@ -45,6 +45,9 @@ class WalletSettings extends Page implements HasForms
 
             'promptpay_id'   => Setting::get('promptpay_id',   $cfg['promptpay_id']),
             'promptpay_name' => Setting::get('promptpay_name', $cfg['promptpay_name']),
+
+            // เพดานข้อความฟรีต่อคนต่อวัน (0 = ไม่จำกัด) — เดิมต้องแก้ใน DB มือ
+            'chat_daily_limit' => (int) Setting::get('chat_daily_limit', 0),
         ];
 
         // Tarot: one price + one charge-toggle per registered spread.
@@ -93,6 +96,15 @@ class WalletSettings extends Page implements HasForms
                 ->description('เลขศาสตร์ · ลายมือ · ฤกษ์ยาม · แชท — สวิตช์แยกแต่ละบริการ')
                 ->schema($otherRows),
 
+            Section::make('เพดานคุยฟรีต่อวัน')
+                ->description('ใช้เฉพาะตอนที่แชทตั้งเป็นฟรี (ปิดสวิตช์เก็บเงินของ "แชทกับแม่หมอ") — โหมดคิดเงินมีวอลเลตเป็นเบรกอยู่แล้ว')
+                ->schema([
+                    TextInput::make('chat_daily_limit')
+                        ->label('จำนวนข้อความฟรีต่อคนต่อวัน')
+                        ->helperText('0 = ไม่จำกัด (คุยฟรีเหมือนแชทกับบอทแม่หมอใน Facebook) · ใส่ตัวเลขเมื่อต้องการคุมต้นทุน AI — มีผลทั้งเว็บและแอพพร้อมกัน นับรวมกันทุกช่องทาง รีเซ็ตทุกเที่ยงคืน')
+                        ->numeric()->minValue(0)->maxValue(1000)->default(0),
+                ]),
+
             Section::make('PromptPay (สำหรับเติมเงิน)')
                 ->description('ข้อมูลที่จะแสดงในหน้าเติมเงินของผู้ใช้ — ใส่เบอร์ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก (ตัวเลขล้วน)')
                 ->schema([
@@ -135,6 +147,9 @@ class WalletSettings extends Page implements HasForms
                 // charge_<feature> → pricing_<feature>_enabled
                 $feature = substr($key, strlen('charge_'));
                 Setting::put("pricing_{$feature}_enabled", $value ? '1' : '0', 'pricing');
+            } elseif ($key === 'chat_daily_limit') {
+                // เก็บไว้กลุ่ม chat — ChatPolicy อ่านคีย์นี้ทั้งเว็บและ API มือถือ
+                Setting::put('chat_daily_limit', (string) max(0, (int) $value), 'chat');
             } else {
                 // pricing_* and promptpay_* stored as-is.
                 Setting::put($key, (string) $value, 'pricing');

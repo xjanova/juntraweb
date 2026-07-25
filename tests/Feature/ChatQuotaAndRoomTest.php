@@ -158,6 +158,52 @@ class ChatQuotaAndRoomTest extends TestCase
         $res->assertJsonPath('data.daily_left', 0);
     }
 
+    /**
+     * ค่าเริ่มต้น = ไม่จำกัด (คุยฟรีเหมือนแชทกับบอทแม่หมอใน Facebook)
+     * ตามที่เจ้าของกำหนด — ห้ามมีเพดานโผล่มาเองถ้าแอดมินไม่ได้ตั้งค่า
+     */
+    public function test_free_chat_is_unlimited_by_default(): void
+    {
+        Setting::put('pricing_chat_message', '0', 'pricing', false);
+        Cache::flush(); // ไม่ตั้ง chat_daily_limit เลย = ใช้ค่าเริ่มต้น
+
+        $user = $this->member();
+
+        $this->assertSame(0, ChatPolicy::dailyLimit(), 'ค่าเริ่มต้นต้องเป็นไม่จำกัด');
+        $this->assertNull(ChatPolicy::dailyLeft($user));
+        $this->assertFalse(ChatPolicy::exhausted($user));
+
+        $this->actingAs($user)->get('/chat')->assertOk();
+        for ($i = 1; $i <= 6; $i++) {
+            $this->actingAs($user)
+                ->postJson('/chat/send', ['message' => "ข้อความที่ {$i}"])
+                ->assertOk();
+        }
+    }
+
+    /** แอดมินตั้งเพดานเมื่อไหร่ ต้องมีผลทันทีทั้งเว็บและแอพ */
+    public function test_admin_can_cap_the_daily_limit_later(): void
+    {
+        Setting::put('pricing_chat_message', '0', 'pricing', false);
+        Cache::flush();
+        $user = $this->member();
+
+        $this->assertSame(0, ChatPolicy::dailyLimit());
+
+        // แอดมินตั้งเพดานเป็น 1
+        Setting::put('chat_daily_limit', '1', 'chat', false);
+        Cache::flush();
+
+        $this->assertSame(1, ChatPolicy::dailyLimit());
+
+        $this->actingAs($user)->get('/chat')->assertOk();
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อความแรก'])->assertOk();
+        $this->actingAs($user)
+            ->postJson('/chat/send', ['message' => 'ข้อความที่สอง'])
+            ->assertStatus(429)
+            ->assertJsonPath('reason_code', 'daily_limit');
+    }
+
     /** คำตอบต้องมาพร้อม HTML ที่ render markdown แล้ว ไม่ใช่ให้ client เดาเอง */
     public function test_web_send_returns_rendered_html_and_quota_state(): void
     {
