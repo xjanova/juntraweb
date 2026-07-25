@@ -10,6 +10,7 @@ use App\Services\SmsPayment\SmsCheckerService;
 use App\Services\Wallet\SlipAutoVerifier;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\PayoutAccount;
 use App\Support\PromptPayQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -122,17 +123,23 @@ class WalletController extends Controller
             $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base])]);
         }
 
-        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id'));
+        // บัญชีเดียวกับแม่หมอใน FB/LINE — ตกหล่นจากรอบที่แก้ฝั่งเว็บ ทำให้แอพ
+        // ยังสร้าง QR ด้วยบัญชีของเว็บ ซึ่งอาจคนละใบกับที่ SlipOK/SMS ผูกไว้
+        $payout      = PayoutAccount::resolve($request->user());
+        $promptpayId = $payout['promptpay_id'] ?? '';
 
         return response()->json([
             'data' => [
                 'transaction'    => $this->txPayload($tx),
+                // id ระดับบนสุดด้วย — client บางตัวอ่านตรงนี้ และการต้องขุดเข้า
+                // transaction.id เป็นจุดที่พลาดง่าย (QR ขึ้นแต่ poll ไม่ทำงาน)
+                'id'             => $tx->id,
                 'base_amount'    => $base,
                 'payable_amount' => (float) $payable,
                 'auto_confirm'   => (bool) config('smschecker.enabled'),
                 'promptpay'      => [
                     'id'   => $promptpayId,
-                    'name' => Setting::get('promptpay_name', config('pricing.promptpay_name')),
+                    'name' => $payout['name'] ?? '',
                     // EMVCo payload (render natively) + ready-made SVG data URI,
                     // both carrying the EXACT payable amount so scan-to-pay matches.
                     'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, (float) $payable) : null,

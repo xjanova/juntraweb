@@ -179,6 +179,52 @@ class MobileDeepAndSlipTest extends TestCase
         $this->assertSame('pending', WalletTransaction::find($tx->id)->status);
     }
 
+    /* ── รูปทรง response ที่แอพพึ่งพา ─────────────────────── */
+
+    /**
+     * การ์ดเติมเงินในแอพอ่าน id / payable_amount / promptpay.qr_payload
+     * ถ้าคีย์ใดหาย: QR ว่าง หรือ poll สถานะไม่ทำงาน (เงินเข้าแล้วแต่จอไม่เปลี่ยน)
+     * เคยพลาดมาแล้วตอน wallet_screen อ่าน qr_payload ผิดชั้น
+     */
+    public function test_mobile_topup_payload_has_the_keys_the_app_reads(): void
+    {
+        $user = $this->member();
+
+        $res = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/wallet/topup/promptpay', ['amount' => 100])
+            ->assertStatus(201)
+            ->assertJsonStructure(['data' => [
+                'id', 'payable_amount', 'auto_confirm',
+                'transaction' => ['id', 'status'],
+                'promptpay'   => ['id', 'name', 'qr_payload', 'qr_svg'],
+            ]]);
+
+        $this->assertSame($res->json('data.id'), $res->json('data.transaction.id'));
+        $this->assertNotEmpty($res->json('data.promptpay.qr_payload'));
+        // ยอดต้องมีเศษสตางค์ ไม่งั้นตัวจับคู่ SMS ทำงานไม่ได้
+        $this->assertNotSame(100.0, (float) $res->json('data.payable_amount'));
+    }
+
+    /** QR ของแอพต้องใช้บัญชีของแม่หมอเหมือนเว็บ ไม่ใช่ค่าที่ตั้งในเว็บ */
+    public function test_mobile_topup_uses_the_maemor_account(): void
+    {
+        Setting::put('promptpay_id', '0899999999', 'pricing', false);
+        Cache::flush();
+
+        Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
+            'promptpay_id' => '0811111111', 'account_name' => 'แม่หมอจันทรา',
+        ]], 200)]);
+
+        $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
+
+        $res = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/wallet/topup/promptpay', ['amount' => 100])
+            ->assertStatus(201);
+
+        $this->assertStringContainsString('0066811111111', (string) $res->json('data.promptpay.qr_payload'));
+        $this->assertSame('แม่หมอจันทรา', $res->json('data.promptpay.name'));
+    }
+
     /* ── หมวดคำถาม ────────────────────────────────────────── */
 
     public function test_topics_endpoint_matches_the_web_catalogue(): void
