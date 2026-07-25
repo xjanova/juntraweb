@@ -25,27 +25,32 @@ return new class extends Migration
         // 1) ย้ายข้อความจากห้องกำพร้ากลับเข้าห้องของเจ้าของ
         //    เลือกห้องเป้าหมายเป็นห้องที่ "ใหม่ที่สุด" ของ token นั้น เพราะเป็น
         //    ห้องที่หน้าเว็บ render อยู่จริงหลังล็อกอิน
-        $orphans = DB::table('chat_conversations')
+        // ใช้ select('id','session_token') ไม่ใช่ pluck('id','session_token')
+        // เพราะ pluck ทำ token เป็น "คีย์" ของ collection — ถ้ามีห้องกำพร้า
+        // หลายแถวที่ token เดียวกัน แถวก่อนหน้าจะถูกทับหายไปเงียบ ๆ
+        // และข้อความในแถวนั้นจะไม่ถูกกู้กลับเลย
+        DB::table('chat_conversations')
             ->whereNull('user_id')
-            ->pluck('id', 'session_token');
+            ->orderBy('id')
+            ->chunkById(200, function ($orphans) {
+                foreach ($orphans as $orphan) {
+                    $target = DB::table('chat_conversations')
+                        ->where('session_token', $orphan->session_token)
+                        ->whereNotNull('user_id')
+                        ->orderByDesc('id')
+                        ->first();
 
-        foreach ($orphans as $token => $orphanId) {
-            $target = DB::table('chat_conversations')
-                ->where('session_token', $token)
-                ->whereNotNull('user_id')
-                ->orderByDesc('id')
-                ->first();
+                    if (! $target) {
+                        continue; // guest แท้ ๆ ที่ไม่เคยล็อกอิน — ปล่อยไว้ตามเดิม
+                    }
 
-            if (! $target) {
-                continue; // guest แท้ ๆ ที่ไม่เคยล็อกอิน — ปล่อยไว้ตามเดิม
-            }
+                    DB::table('chat_messages')
+                        ->where('chat_conversation_id', $orphan->id)
+                        ->update(['chat_conversation_id' => $target->id]);
 
-            DB::table('chat_messages')
-                ->where('chat_conversation_id', $orphanId)
-                ->update(['chat_conversation_id' => $target->id]);
-
-            DB::table('chat_conversations')->where('id', $orphanId)->delete();
-        }
+                    DB::table('chat_conversations')->where('id', $orphan->id)->delete();
+                }
+            });
 
         // 2) index ให้ตัวนับโควตารายวัน (นับ role=user ต่อห้องต่อวัน) ใช้ได้จริง
         //    ของเดิมสแกน chat_messages ทั้งตารางทุกครั้งที่โหลดหน้าแชท

@@ -446,9 +446,16 @@ class ChatController extends Controller
         $request->session()->put('thaiprompt_chat_session', $sessionId);
 
         $primer = $request->session()->get('chat_reading_primer');
-        if (is_string($primer) && $primer !== '') {
+        $primedAt = (int) $request->session()->get('chat_reading_primer_at', 0);
+
+        // จำกัดอายุไว้ 24 ชม. — ไม่งั้นบริบทไพ่จะติดอยู่ใน session ตลอดไป
+        // แล้วผู้ใช้ที่กลับมาคุยเรื่องอื่นอีกหลายวันจะเจอแม่หมออ้างถึงไพ่ชุดเก่า
+        // ที่เขาไม่ได้เปิดวันนี้ (บริบทที่ควรช่วย กลายเป็นบริบทที่หลอน)
+        if (is_string($primer) && $primer !== '' && $primedAt > 0 && (time() - $primedAt) < 86400) {
             // ป้อนบริบทไพ่เงียบ ๆ — คำตอบของ primer ไม่ถูกแสดงและไม่คิดเงิน
             $this->bot->send($user, $sessionId, $primer);
+        } elseif ($primer !== null) {
+            $request->session()->forget(['chat_reading_primer', 'chat_reading_primer_at', 'chat_primed_reading']);
         }
 
         return $sessionId;
@@ -464,8 +471,9 @@ class ChatController extends Controller
     private function primeReadingContext(Request $request, $user, Reading $reading): string
     {
         $primer = $this->buildReadingPrimer($reading);
-        // เก็บไว้ให้ openUpstreamSession ป้อนซ้ำเมื่อ session หมุน
+        // เก็บไว้ให้ openUpstreamSession ป้อนซ้ำเมื่อ session หมุน (มีอายุ 24 ชม.)
         $request->session()->put('chat_reading_primer', $primer);
+        $request->session()->put('chat_reading_primer_at', time());
 
         if ($this->bot->isAvailable($user)) {
             $start     = $this->bot->start($user);

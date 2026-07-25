@@ -117,17 +117,16 @@ class ChatController extends Controller
             'message' => 'required|string|max:2000',
         ]);
 
-        // Idempotency — block a double-send of the same message (Idempotency-Key header).
-        if ($this->guardCharge($request, 'chat') === false) {
-            return response()->json(['message' => 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
-        }
-
         $user = $request->user();
         $cost = ChatPolicy::cost();
 
         // 🆓 เพดานคุยฟรีรายวัน — เดิมมีแต่ฝั่งเว็บ ผู้ใช้แอพจึงยิง AI ฟรีได้
         //    ไม่จำกัด (ต้นทุนบานปลาย) กติกาอยู่ใน ChatPolicy ที่เดียวแล้ว
         //    นับรวมทุกช่องทางเพราะเป็นคนเดียวกันและต้นทุนก้อนเดียวกัน
+        //
+        //    เช็คก่อนจับ idempotency lock — ถ้าเช็คทีหลัง lock (TTL 90 วิ) จะถูก
+        //    จับไว้ทั้งที่คำขอถูกปฏิเสธ ผู้ใช้ที่ลองส่งซ้ำด้วยคีย์เดิมภายใน 90 วิ
+        //    จะได้ 409 แทนที่จะได้เหตุผลจริงว่าโควตาหมด
         if (ChatPolicy::exhausted($user)) {
             return response()->json([
                 'message'     => ChatPolicy::limitMessage(),
@@ -135,6 +134,11 @@ class ChatController extends Controller
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => 0,
             ], 429);
+        }
+
+        // Idempotency — block a double-send of the same message (Idempotency-Key header).
+        if ($this->guardCharge($request, 'chat') === false) {
+            return response()->json(['message' => 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
         }
 
         $balance = $this->wallet->balance($user);
