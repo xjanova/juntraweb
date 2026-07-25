@@ -9,6 +9,7 @@ use App\Services\FortuneBot\FortuneBotClient;
 use App\Services\SmsPayment\SmsCheckerService;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
+use App\Support\PayoutAccount;
 use App\Support\Pricing;
 use App\Support\PromptPayQr;
 use Illuminate\Http\JsonResponse;
@@ -51,9 +52,12 @@ class ChatTopupController extends Controller
             'amount' => "required|numeric|min:$min|max:$max",
         ]);
 
-        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id', ''));
-        if (! $promptpayId) {
-            // ยังไม่ได้ตั้งค่า PromptPay = สร้าง QR ไม่ได้ ต้องบอกตรง ๆ ไม่ใช่
+        // ใช้บัญชีเดียวกับแม่หมอใน FB/LINE เสมอ (ตกไปใช้ค่าที่ตั้งเองเมื่อ
+        // upstream ล่ม) — ถ้าใช้คนละบัญชี ตัวตรวจสลิปจะเห็นว่าปลายทางไม่ใช่
+        // บัญชีเราแล้วปฏิเสธทั้งที่ลูกค้าโอนถูก
+        $account = PayoutAccount::resolve($user);
+        if (! $account) {
+            // ตั้งค่าไม่ได้ทั้งสองทาง = สร้าง QR ไม่ได้ ต้องบอกตรง ๆ ไม่ใช่
             // ปล่อยให้ลูกค้าเห็นกล่องว่างแล้วงงว่าต้องโอนไปไหน
             return response()->json([
                 'error'       => 'ระบบเติมเงินยังไม่พร้อมชั่วคราว กรุณาติดต่อแอดมินค่ะ',
@@ -78,7 +82,7 @@ class ChatTopupController extends Controller
             $tx->update(['meta' => array_merge((array) $tx->meta, ['source' => 'chat'])]);
         }
 
-        return response()->json($this->payload($tx, $promptpayId));
+        return response()->json($this->payload($tx, $account));
     }
 
     /** เช็คว่าเงินเข้าหรือยัง — หน้าแชท poll ทุกไม่กี่วินาที */
@@ -209,7 +213,8 @@ class ChatTopupController extends Controller
     }
 
     /** @return array<string,mixed> */
-    private function payload(WalletTransaction $tx, string $promptpayId): array
+    /** @param array{promptpay_id:string,name:string,source:string} $account */
+    private function payload(WalletTransaction $tx, array $account): array
     {
         $payable = (float) $tx->amount;
         $base    = (float) (($tx->meta['base_amount'] ?? null) ?: $payable);
@@ -219,9 +224,9 @@ class ChatTopupController extends Controller
             'reference_code' => $tx->reference_code,
             'base_amount'    => $base,
             'payable'        => $payable,
-            'qr'             => PromptPayQr::svgDataUri($promptpayId, $payable),
-            'qr_payload'     => PromptPayQr::payload($promptpayId, $payable),
-            'promptpay_name' => Setting::get('promptpay_name', config('pricing.promptpay_name', '')),
+            'qr'             => PromptPayQr::svgDataUri($account['promptpay_id'], $payable),
+            'qr_payload'     => PromptPayQr::payload($account['promptpay_id'], $payable),
+            'promptpay_name' => $account['name'],
             'auto_confirm'   => (bool) config('smschecker.enabled'),
             'expires_at'     => optional($tx->expires_at)->toIso8601String(),
         ];

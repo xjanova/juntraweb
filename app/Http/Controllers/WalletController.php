@@ -8,6 +8,7 @@ use App\Models\WalletTransaction;
 use App\Services\SmsPayment\SmsCheckerService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\PayoutAccount;
 use App\Support\PromptPayQr;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -79,14 +80,16 @@ class WalletController extends Controller
         // Read PromptPay info from Setting (admin-editable via /admin/wallet-settings)
         // and fall back to config (env-driven). Without this fallback, admin's live
         // edits don't reach the user-facing top-up form until the next deploy.
-        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id', ''));
+        // บัญชีเดียวกับแม่หมอใน FB/LINE (ดู App\Support\PayoutAccount)
+        $payout      = PayoutAccount::resolve($request->user());
+        $promptpayId = $payout['promptpay_id'] ?? '';
 
         return view('pages.wallet.topup', [
             'bundles'        => config('pricing.topup_bundles', [50, 100, 200, 500]),
             'min'            => (int) config('pricing.min_topup', 20),
             'max'            => (int) config('pricing.max_topup', 50000),
             'promptpayId'    => $promptpayId,
-            'promptpayName'  => Setting::get('promptpay_name', config('pricing.promptpay_name', '')),
+            'promptpayName'  => $payout['name'] ?? '',
             // Static QR (no amount) — user scans then types the amount in their
             // banking app. A dynamic per-amount QR is shown on the status page
             // once the amount is locked in.
@@ -191,7 +194,8 @@ class WalletController extends Controller
 
         // While the top-up is still pending, show a PromptPay QR carrying the
         // exact amount so the user can scan-to-pay without re-typing it.
-        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id', ''));
+        $payout      = PayoutAccount::resolve($request->user());
+        $promptpayId = $payout['promptpay_id'] ?? '';
         $qr = ($tx->status === 'pending' && $promptpayId)
             ? PromptPayQr::svgDataUri($promptpayId, (float) $tx->amount)
             : null;
@@ -202,7 +206,7 @@ class WalletController extends Controller
             // on the private disk so direct disk URLs would 404 anyway.
             'slipUrl'       => $tx->slip_path ? route('wallet.topup.slip', $tx) : null,
             'promptpayQr'   => $qr,
-            'promptpayName' => Setting::get('promptpay_name', config('pricing.promptpay_name', '')),
+            'promptpayName' => $payout['name'] ?? '',
             'canCancel'     => $tx->status === 'pending' && $tx->user_id === $request->user()->id,
         ]);
     }

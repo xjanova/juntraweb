@@ -5,6 +5,7 @@ namespace App\Services\FortuneBot;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -192,6 +193,45 @@ class FortuneBotClient
     private function chatUrl(string $suffix): string
     {
         return $this->base() . '/api/v1/juntra/chat/mae-mor' . $suffix;
+    }
+
+    /**
+     * บัญชีรับเงินของแม่หมอ — ตัวเดียวกับที่บอท FB/LINE ใช้
+     *
+     * เจ้าของกำหนด (2026-07-25): ค่าการชำระเงินให้ใช้ค่าเดิมของแม่หมอชุดเดียวกัน
+     * ไม่ให้ตั้งแยกที่เว็บ เพราะถ้าตั้งสองที่แล้วไม่ตรงกัน ลูกค้าเว็บจะโอนเข้า
+     * คนละบัญชีกับที่ SlipOK/SMS ผูกไว้ → ตรวจสลิปอัตโนมัติจับปลายทางไม่ได้
+     *
+     * cache 10 นาที: เป็นข้อมูลที่แทบไม่เปลี่ยน แต่ถูกอ่านทุกครั้งที่ลูกค้ากด
+     * เติมเงิน จะยิง upstream ทุกครั้งไม่ไหว — และถ้า upstream ล่มชั่วคราว
+     * ค่าที่ cache ไว้ยังทำให้เติมเงินต่อได้
+     *
+     * @return array{promptpay_id:?string,account_name:?string,bank_name:?string}|null
+     */
+    public function payoutAccount(?User $user): ?array
+    {
+        if (! $this->isAvailable($user)) {
+            return null;
+        }
+
+        return Cache::remember('juntra:payout_account', now()->addMinutes(10), function () use ($user) {
+            try {
+                $resp = $this->client($user)->get($this->base().'/api/v1/juntra/payment/account');
+                if ($resp->successful()) {
+                    $data = $resp->json('data');
+                    if (is_array($data) && ! empty($data['promptpay_id'])) {
+                        return $data;
+                    }
+                }
+                Log::info('FortuneBotClient::payoutAccount unavailable', ['status' => $resp->status()]);
+            } catch (\Throwable $e) {
+                Log::warning('FortuneBotClient::payoutAccount threw', ['err' => $e->getMessage()]);
+            }
+
+            // cache ค่า null ไม่ได้ (Cache::remember จะยิงซ้ำทุกครั้ง) — ยอมรับได้
+            // เพราะเคสนี้คือ upstream ล่ม ซึ่งควรลองใหม่ทุกครั้งอยู่แล้ว
+            return null;
+        });
     }
 
     /**

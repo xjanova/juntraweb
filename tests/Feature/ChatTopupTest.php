@@ -142,6 +142,45 @@ class ChatTopupTest extends TestCase
         $this->assertNotNull(WalletTransaction::find($id)->slip_path);
     }
 
+    /* ══════════ บัญชีรับเงิน — ต้องเป็นบัญชีเดียวกับแม่หมอ ══════════
+       เจ้าของกำหนด (2026-07-25): ใช้ค่าเดิมของดูดวงแม่หมอชุดเดียวกัน
+       ถ้าเว็บใช้คนละบัญชี ตัวตรวจสลิปจะเห็นว่าปลายทางไม่ใช่บัญชีเรา
+       แล้วปฏิเสธทั้งที่ลูกค้าโอนถูก */
+
+    public function test_qr_uses_the_maemor_account_not_the_local_setting(): void
+    {
+        // ตั้งค่าท้องถิ่นไว้คนละเบอร์ เพื่อพิสูจน์ว่าไม่ได้ถูกใช้
+        Setting::put('promptpay_id', '0899999999', 'pricing', false);
+        Setting::put('promptpay_name', 'บัญชีเว็บ (ไม่ควรถูกใช้)', 'pricing', false);
+        Cache::flush();
+
+        Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
+            'promptpay_id' => '0811111111',
+            'account_name' => 'แม่หมอจันทรา',
+            'bank_name'    => 'กสิกรไทย',
+        ]], 200)]);
+
+        $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
+
+        $res = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 100])->assertOk();
+
+        $this->assertSame('แม่หมอจันทรา', $res->json('promptpay_name'));
+        // เลข PromptPay ฝังอยู่ใน EMVCo payload — 0811111111 → 0066811111111
+        $this->assertStringContainsString('0066811111111', (string) $res->json('qr_payload'));
+        $this->assertStringNotContainsString('0066899999999', (string) $res->json('qr_payload'));
+    }
+
+    /** upstream ล่ม = ต้องยังเติมเงินได้ด้วยค่าที่ตั้งไว้เอง ไม่ใช่ตายทั้งระบบ */
+    public function test_falls_back_to_local_account_when_maemor_is_unreachable(): void
+    {
+        $this->slipUnavailable();          // ทุก endpoint รวมถึง /payment/account = 503
+        $user = $this->member();           // member() ตั้ง promptpay_id ท้องถิ่นไว้
+
+        $res = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 100])->assertOk();
+
+        $this->assertStringContainsString('0066812345678', (string) $res->json('qr_payload'));
+    }
+
     /* ══════════ ตรวจสลิปอัตโนมัติ (SlipOK ผ่าน Thaiprompt) ══════════
        เส้นทางนี้แตะเงินโดยตรง — ทุกด่านต้องมีเทสต์ ไม่งั้นสลิปปลอม/สลิปคนอื่น/
        สลิปยอดน้อย/สลิปซ้ำ จะกลายเป็นเครดิตฟรี */
