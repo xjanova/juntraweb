@@ -15,6 +15,7 @@ use App\Http\Controllers\MlmController;
 use App\Http\Controllers\NumerologyController;
 use App\Http\Controllers\PalmistryController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ReadingController;
 use App\Http\Controllers\ReferralController;
 use App\Http\Controllers\TarotController;
 use App\Http\Controllers\WalletController;
@@ -139,6 +140,11 @@ Route::middleware('auth')->prefix('chat/topup')->name('chat.topup.')
         Route::get('/{tx}', 'status')->name('status');
         Route::post('/{tx}/slip', 'slip')->middleware('throttle:topup')->name('slip');
     });
+
+// เปิดดูผลย้อนหลังของทุกบริการผ่านประตูเดียว (ดู App\Http\Controllers\ReadingController)
+// ไม่ผูก middleware auth ที่ route เพราะรายการที่ตั้งเป็นสาธารณะต้องเปิดได้โดยไม่ล็อกอิน
+// — การตรวจสิทธิ์อยู่ในคอนโทรลเลอร์ และตอบ 404 กับคนที่ไม่มีสิทธิ์เพื่อไม่ให้ไล่เดา id ได้
+Route::get('/reading/{reading}', [ReadingController::class, 'show'])->name('reading.show');
 
 // Account / member area
 Route::middleware('auth')->prefix('account')->name('account.')->group(function () {

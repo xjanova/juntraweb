@@ -4,13 +4,17 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Exceptions\InsufficientFundsException;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
+use App\Http\Controllers\AuspiciousController as WebAuspiciousController;
 use App\Http\Controllers\Controller;
 use App\Models\Reading;
 use App\Services\AiOracle;
+use App\Services\AuspiciousAdvisor;
 use App\Services\AuspiciousScorer;
 use App\Services\Numerology;
 use App\Services\Wallet\WalletService;
+use App\Support\AuspiciousOccasions;
 use App\Support\Pricing;
+use App\Support\ThaiAstro;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -50,46 +54,62 @@ class FortuneController extends Controller
         });
     }
 
-    public function auspicious(Request $request, AiOracle $oracle, AuspiciousScorer $scorer): JsonResponse
+    /**
+     * ฤกษ์ยามบนแอพ — ใช้ scorer/advisor ตัวเดียวกับเว็บเป๊ะ (ดู AuspiciousController)
+     * ถ้าแยกสองชุด วันที่แอพกับเว็บแนะนำจะไม่ตรงกัน แล้วลูกค้าจะไม่เชื่อทั้งสองที่
+     */
+    public function auspicious(Request $request, AuspiciousAdvisor $advisor, AuspiciousScorer $scorer): JsonResponse
     {
         $data = $request->validate([
-            'occasion'  => 'required|string|max:128',
-            'from_date' => 'nullable|date',
-            'to_date'   => 'nullable|date|after_or_equal:from_date',
+            'occasion'      => 'required|string|max:128',
+            'occasion_type' => 'nullable|string|max:32',
+            'from_date'     => 'nullable|date',
+            'to_date'       => 'nullable|date|after_or_equal:from_date',
         ]);
 
+        $occasionKey = AuspiciousOccasions::has($data['occasion_type'] ?? null)
+            ? $data['occasion_type']
+            : AuspiciousOccasions::detect($data['occasion']);
+
+        $today = Carbon::today(ThaiAstro::TZ);
+        $from = isset($data['from_date']) ? Carbon::parse($data['from_date'], ThaiAstro::TZ) : $today->copy();
+        if ($from->lt($today)) {
+            $from = $today->copy();
+        }
+        $to = isset($data['to_date']) ? Carbon::parse($data['to_date'], ThaiAstro::TZ) : $from->copy()->addDays(59);
+        $max = $from->copy()->addDays(AuspiciousScorer::MAX_SCAN_DAYS - 1);
+        if ($to->lt($from) || $to->gt($max)) {
+            $to = $to->lt($from) ? $from->copy()->addDays(59) : $max;
+        }
+
         // Compute candidates BEFORE charging — empty window = no charge.
-        $from = isset($data['from_date']) ? Carbon::parse($data['from_date']) : Carbon::today();
-        $to   = isset($data['to_date'])   ? Carbon::parse($data['to_date'])   : $from->copy()->addDays(60);
-        $candidates = $scorer->candidateDays($from, $to);
+        $candidates = $scorer->candidateDays($from, $to, $occasionKey);
         if (empty($candidates)) {
             return response()->json([
-                'message'     => 'ไม่พบวันมงคลในช่วงที่เลือก กรุณาขยายช่วงวัน — ยังไม่มีการหักเครดิต',
+                'message'     => 'ช่วงวันที่เลือกไม่มีวันไหนผ่านเกณฑ์ฤกษ์สำหรับงานนี้ กรุณาขยายช่วงวัน — ยังไม่มีการหักเครดิต',
                 'reason_code' => 'no_auspicious_day',
             ], 422);
         }
 
-        return $this->withCharge($request, 'auspicious', 'หาฤกษ์ยาม: ' . $data['occasion'], function () use ($oracle, $data, $from, $to, $candidates, $request) {
-            $advice = $oracle->adviseAuspiciousDates($data['occasion'], $candidates);
+        return $this->withCharge($request, 'auspicious', 'หาฤกษ์ยาม: ' . $data['occasion'], function () use ($advisor, $data, $occasionKey, $from, $to, $candidates, $request) {
+            $advice = $advisor->advise($request->user(), $occasionKey, $data['occasion'], $candidates);
+
             return Reading::create([
                 'user_id'       => $request->user()->id,
                 'session_token' => Str::uuid()->toString(),
                 'type'          => 'auspicious',
                 'question'      => $data['occasion'],
-                'payload'       => [
-                    'occasion'   => $data['occasion'],
-                    'from_date'  => $from->toDateString(),
-                    'to_date'    => $to->toDateString(),
-                    'candidates' => array_map(fn ($c) => [
-                        'date'  => $c['date']->toDateString(),
-                        'score' => $c['score'],
-                        'label' => $c['label'],
-                    ], $candidates),
-                    'source'     => 'mobile',
-                ],
-                'result'        => $advice,
-                'ai_provider'   => $oracle->provider(),
-                'ai_model'      => $oracle->model(),
+                'payload'       => WebAuspiciousController::payload(
+                    $occasionKey,
+                    $data['occasion'],
+                    $from,
+                    $to,
+                    $candidates,
+                    (float) Pricing::for('auspicious'),
+                ) + ['source' => 'mobile'],
+                'result'        => $advice['text'],
+                'ai_provider'   => $advice['ai_provider'],
+                'ai_model'      => $advice['ai_model'],
             ]);
         });
     }

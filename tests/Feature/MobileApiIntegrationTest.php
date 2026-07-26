@@ -93,9 +93,22 @@ class MobileApiIntegrationTest extends TestCase
         app(WalletService::class)->credit($u, 100, 'seed');
         Sanctum::actingAs($u);
 
-        // 2025-01-06 (Mon, day 6, digit-sum 16) scores 5 (<7) → no candidates.
+        // หาวันที่ฤกษ์ตกเกณฑ์แบบไดนามิก — ฤกษ์ผูกกับตำแหน่งดวงจันทร์จริง จึงไม่มี
+        // วันตายตัวที่แย่เสมอ และวันที่ในอดีตจะถูกดันมาเป็นวันนี้ก่อนคำนวณ
+        $scorer = app(\App\Services\AuspiciousScorer::class);
+        $today  = \Illuminate\Support\Carbon::today(\App\Support\ThaiAstro::TZ);
+        $bad    = null;
+        foreach ($scorer->scoreRange($today, $today->copy()->addDays(40), 'wedding') as $day) {
+            if ($day['score_pct'] < \App\Services\AuspiciousScorer::PASS_MARK) {
+                $bad = $day['date']->toDateString();
+                break;
+            }
+        }
+        $this->assertNotNull($bad, 'ไม่พบวันที่ตกเกณฑ์ใน 40 วัน');
+
         $r = $this->postJson('/api/v1/fortune/auspicious', [
-            'occasion' => 'แต่งงาน', 'from_date' => '2025-01-06', 'to_date' => '2025-01-06',
+            'occasion' => 'แต่งงาน', 'occasion_type' => 'wedding',
+            'from_date' => $bad, 'to_date' => $bad,
         ]);
 
         $r->assertStatus(422)->assertJsonPath('reason_code', 'no_auspicious_day');

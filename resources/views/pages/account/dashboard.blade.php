@@ -67,9 +67,8 @@
                   </div>
                   <div style="text-align:right;flex-shrink:0">
                     <div style="font-size:12px;color:var(--ink-faint)">{{ $r->created_at->diffForHumans() }}</div>
-                    @if (str_starts_with($r->type, 'tarot'))
-                      <a href="{{ route('tarot.show', $r) }}" style="color:var(--gold);font-family:var(--display);font-size:11px;letter-spacing:.18em;text-transform:uppercase;margin-top:6px;display:inline-block">ดู →</a>
-                    @endif
+                    {{-- ทุกบริการเปิดดูย้อนหลังได้ ไม่ใช่เฉพาะไพ่ (ดู ReadingController) --}}
+                    <a href="{{ route('reading.show', $r) }}" style="color:var(--gold);font-family:var(--display);font-size:11px;letter-spacing:.18em;text-transform:uppercase;margin-top:6px;display:inline-block">ดู →</a>
                   </div>
                 </div>
               @endforeach

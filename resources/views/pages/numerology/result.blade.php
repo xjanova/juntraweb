@@ -27,11 +27,15 @@
 
     <div class="panel" style="margin-top:32px">
       <div class="eyebrow" style="display:inline-flex">บทวิเคราะห์</div>
-      <x-reading-prose :text="$result['narrative']" />
+      {{-- ตอนเปิดย้อนหลังต้องโชว์ "ข้อความที่ลูกค้าได้รับตอนซื้อ" ไม่ใช่ผลที่คำนวณใหม่
+           เลขศาสตร์เป็นคณิตล้วนจึงได้ค่าเท่าเดิมอยู่แล้ว แต่ถ้าวันหนึ่งสูตรถูกปรับ
+           ประวัติเก่าต้องไม่ถูกเขียนทับเงียบ ๆ --}}
+      <x-reading-prose :text="$reading->result ?: $result['narrative']" />
     </div>
 
     <div style="text-align:center;margin-top:48px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
       <a href="{{ route('numerology.index') }}" class="btn btn-ghost">คำนวณอีกชื่อ</a>
+      <a href="{{ route('account.history') }}" class="btn btn-ghost">ประวัติของฉัน</a>
       <a href="{{ route('chat.index') }}" class="btn btn-primary">ถามเพิ่มเติมกับ AI</a>
     </div>
   </div>

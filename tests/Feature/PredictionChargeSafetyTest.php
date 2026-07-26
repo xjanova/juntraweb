@@ -80,18 +80,39 @@ class PredictionChargeSafetyTest extends TestCase
     public function test_auspicious_does_not_charge_when_no_dates_in_range(): void
     {
         $u = $this->memberWithBalance(100);
+        $bad = $this->firstUnsuitableDay('wedding');
 
-        // 2025-01-06 is a Monday, day 6, digit-sum 16 (not %9) → score 5 (< 7),
-        // so a single-day window yields zero candidates.
         $resp = $this->actingAs($u)->post('/auspicious/find', [
-            'occasion'  => 'แต่งงาน',
-            'from_date' => '2025-01-06',
-            'to_date'   => '2025-01-06',
+            'occasion'      => 'แต่งงาน',
+            'occasion_type' => 'wedding',
+            'from_date'     => $bad,
+            'to_date'       => $bad,
         ]);
 
         $resp->assertRedirect(route('auspicious.index'));
         $this->assertSame(100.0, $this->balance($u), 'no charge when the window has no auspicious day');
         $this->assertSame(0, Reading::where('type', 'auspicious')->count());
+    }
+
+    /**
+     * วันแรกในอนาคตที่ฤกษ์ "ไม่ผ่านเกณฑ์" สำหรับงานหมวดนั้น
+     *
+     * หาแบบไดนามิกแทนการฮาร์ดโค้ดวันที่ เพราะ (1) ฤกษ์ผูกกับตำแหน่งดวงจันทร์จริง
+     * จึงไม่มีวันตายตัวที่ "แย่เสมอ" และ (2) คอนโทรลเลอร์ดันวันที่เป็นอดีตให้เป็น
+     * วันนี้เสมอ วันที่ฮาร์ดโค้ดไว้จะกลายเป็นอดีตแล้วเทสต์พังเองในอนาคต
+     */
+    private function firstUnsuitableDay(string $occasionKey): string
+    {
+        $scorer = app(\App\Services\AuspiciousScorer::class);
+        $today  = \Illuminate\Support\Carbon::today(\App\Support\ThaiAstro::TZ);
+
+        foreach ($scorer->scoreRange($today, $today->copy()->addDays(40), $occasionKey) as $day) {
+            if ($day['score_pct'] < \App\Services\AuspiciousScorer::PASS_MARK) {
+                return $day['date']->toDateString();
+            }
+        }
+
+        $this->fail('ไม่พบวันที่ตกเกณฑ์ใน 40 วัน — เกณฑ์หลวมเกินไปจนไม่มีวันไหนถูกคัดออกเลย');
     }
 
     /** Chat must not charge when the only reply is the degraded "not ready" placeholder. */

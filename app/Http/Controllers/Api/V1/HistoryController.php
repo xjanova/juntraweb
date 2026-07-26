@@ -47,7 +47,9 @@ class HistoryController extends Controller
             'cursor' => 'sometimes|nullable|string',
             'type'   => ['sometimes', 'string', Rule::in([
                 ...array_map(fn ($k) => "tarot_{$k}", TarotSpreads::keys()),
-                'numerology', 'palmistry', 'auspicious', 'chat',
+                // 'deep' ตกหล่นมาตั้งแต่เปิดขายดูดวงเชิงลึก 39฿ — แอพกรองหมวดนี้
+                // ไม่ได้เลย ส่ง type=deep แล้วโดน 422 ทั้งที่รายการถูกบันทึกไว้ครบ
+                'numerology', 'palmistry', 'auspicious', 'deep', 'chat',
             ])],
         ]);
         $limit = (int) $request->input('limit', 20);

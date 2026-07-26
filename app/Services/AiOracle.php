@@ -4,10 +4,8 @@ namespace App\Services;
 
 use App\Models\Reading;
 use App\Models\Setting;
-use App\Models\Zodiac;
 use App\Services\FortuneBot\TarotPromptBuilder;
 use App\Support\TarotSpreads;
-use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -50,52 +48,26 @@ class AiOracle
         return $this->complete($prompt, fallback: $this->fallbackTarot($reading, $cards));
     }
 
-    public function generateDailyHoroscope(Zodiac $zodiac, Carbon $date): array
-    {
-        $prompt = "เขียนคำพยากรณ์ประจำวันสำหรับราศี{$zodiac->name_th} วันที่ {$date->format('d/m/Y')} แบ่ง 4 หัวข้อ: ความรัก, การงาน, การเงิน, สุขภาพ — แต่ละหัวข้อ 2-3 ประโยค ปิดท้ายด้วยเลขนำโชค (1-99) สีมงคล (สีไทย) และไพ่ประจำวัน (เลือกจากไพ่ Major Arcana 1 ใบ) — ตอบในรูปแบบ JSON: {\"summary\": \"...\", \"love\": \"...\", \"career\": \"...\", \"money\": \"...\", \"health\": \"...\", \"lucky_number\": \"...\", \"lucky_color\": \"...\", \"lucky_card\": \"...\"}";
+    /* ⛔ ลบ generateDailyHoroscope() ออกแล้ว (2026-07-26)
+     *
+     * fallback ของเมธอดนั้นคืนข้อความชุดเดียวกันเป๊ะให้ทั้ง 12 ราศี ต่างกันแค่
+     * เลขนำโชค/สี/ไพ่ ที่สุ่มจาก crc32 — และเพราะ `ai_api_key` บนโปรดักชันเป็น
+     * ค่าว่างมาตลอด เส้นทางนั้นจึงเป็น DEFAULT ไม่ใช่ทางสำรอง
+     *
+     * ตอนนี้ดวงรายวันไปที่ App\Services\DailyHoroscopeWriter แทน — คีย์พูลก่อน
+     * แล้วค่อยเขียนเองจากธาตุ/ดาวเจ้าเรือนของราศี + ดิถีและวารจริงของวันนั้น
+     */
 
-        $raw = $this->complete($prompt, fallback: null);
-
-        $parsed = $this->extractJson($raw);
-        if ($parsed) {
-            return [
-                'summary' => $parsed['summary'] ?? "วันนี้ราศี{$zodiac->name_th}จะมีพลังบวกในหลายด้าน",
-                'love'    => $parsed['love']    ?? 'ความรักก้าวหน้าอย่างเรียบง่าย',
-                'career'  => $parsed['career']  ?? 'มีโอกาสใหม่เข้ามา',
-                'money'   => $parsed['money']   ?? 'การเงินเริ่มเข้าสู่ความสมดุล',
-                'health'  => $parsed['health']  ?? 'พักผ่อนให้พอเพียง',
-                // Clamp to the daily_horoscopes column widths (8/32/64) so a
-                // verbose AI value can't throw "Data too long" and 500 the page.
-                'lucky_number' => mb_substr((string) ($parsed['lucky_number'] ?? random_int(1, 99)), 0, 8),
-                'lucky_color'  => mb_substr((string) ($parsed['lucky_color'] ?? 'ทองอ่อน'), 0, 32),
-                'lucky_card'   => mb_substr((string) ($parsed['lucky_card']  ?? 'The Star'), 0, 64),
-                'ai_generated' => $this->isConfigured(),
-            ];
-        }
-
-        // Heuristic fallback (so site works without API key configured)
-        $luckyColors = ['ทองอ่อน','ม่วงเข้ม','ฟ้าคราม','เขียวมรกต','ขาวงาช้าง','ชมพูกุหลาบ','แดงทับทิม'];
-        $luckyCards  = ['The Magician','The Sun','The Star','The World','The Empress','The Lovers','Wheel of Fortune'];
-        $seed = crc32($zodiac->slug . $date->toDateString());
-        return [
-            'summary' => "วันนี้ราศี{$zodiac->name_th}เปิดรับพลังจักรวาลที่หล่อเลี้ยงด้วยความหวังและสติ",
-            'love'    => 'ความรักจะเดินไปอย่างนุ่มนวล หากใจเปิด คนรอบข้างจะเข้าหาเอง',
-            'career'  => 'งานที่ค้างไว้จะคืบหน้า ผู้ใหญ่เริ่มเห็นความตั้งใจของคุณ',
-            'money'   => 'การเงินสมดุลขึ้น ระวังการใช้จ่ายฟุ่มเฟือยเพียงเล็กน้อย',
-            'health'  => 'พักผ่อนเพียงพอ ดื่มน้ำ และยืดเส้นยืดสายช่วยให้สดชื่น',
-            'lucky_number' => (string) (($seed % 99) + 1),
-            'lucky_color'  => $luckyColors[$seed % count($luckyColors)],
-            'lucky_card'   => $luckyCards[$seed % count($luckyCards)],
-            'ai_generated' => false,
-        ];
-    }
-
-    public function adviseAuspiciousDates(string $occasion, array $candidates): string
-    {
-        $list = collect($candidates)->take(10)->map(fn($d) => '- ' . $d['label'] . " (คะแนน {$d['score']}/10)")->implode("\n");
-        $prompt = "ผู้ใช้กำลังหาฤกษ์ดีสำหรับ: {$occasion}\nวันที่ระบบคำนวณว่าเหมาะสม:\n{$list}\n\nช่วยอธิบายว่าวันที่เหล่านี้ดีอย่างไรในบริบทไทย เลือก 3 วันที่ดีที่สุด แนะนำเวลาที่เหมาะสมในวันนั้น และข้อแนะนำการเตรียมตัว — ตอบเป็นภาษาไทย 4-6 ย่อหน้า";
-        return $this->complete($prompt, fallback: "ระบบได้คำนวณวันมงคลตามหลักเลขศาสตร์และเลขผลรวมหารด้วย 9 ลงตัว — แนะนำให้เลือกวันที่คะแนนสูงสุด 3 อันดับ และทำพิธีในช่วงเช้า 06.09–09.09 น. ซึ่งเป็นเวลามงคลตามคติไทย");
-    }
+    /* ⛔ ลบ adviseAuspiciousDates() ออกแล้ว (2026-07-26)
+     *
+     * เมธอดนั้นคืน fallback ตายตัวประโยคเดียวเมื่อไม่มีคีย์ Gemini ซึ่งเป็นสภาพจริง
+     * บนโปรดักชัน (`ai_api_key` = '' มาตลอด) → ลูกค้าจ่าย ฿19 แล้วได้ข้อความเดียวกัน
+     * ทุกคน ทุกโอกาส ทุกช่วงวัน ไม่อ้างถึงวันที่คำนวณได้เลยสักวัน
+     *
+     * ตอนนี้ฤกษ์ยามไปที่ App\Services\AuspiciousAdvisor แทน — ใช้คีย์พูลของ Thaiprompt
+     * ชุดเดียวกับไพ่/แชท และมี fallback ที่เขียนจากผลคำนวณจริงของลูกค้าคนนั้น
+     * อย่าเพิ่มเมธอดแนวนี้กลับเข้ามาโดยไม่มีทางที่คืน "เนื้อหาจริง" ให้ครบทุกเส้นทาง
+     */
 
     /**
      * Palmistry REQUIRES a vision model — there is NO heuristic fallback for
@@ -189,16 +161,6 @@ class AiOracle
         }
 
         return $resp->json('candidates.0.content.parts.0.text');
-    }
-
-    private function extractJson(?string $raw): ?array
-    {
-        if (!$raw) return null;
-        if (preg_match('/\{[\s\S]*\}/', $raw, $m)) {
-            $decoded = json_decode($m[0], true);
-            return is_array($decoded) ? $decoded : null;
-        }
-        return null;
     }
 
     /**

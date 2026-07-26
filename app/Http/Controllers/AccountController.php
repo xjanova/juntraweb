@@ -36,11 +36,20 @@ class AccountController extends Controller
 
     public function history(Request $request)
     {
+        $query = Reading::where('user_id', $request->user()->id);
+
+        // ตัวกรองหมวด — 'tarot' ครอบทุกสเปรด (tarot_single, tarot_celtic, ...)
+        // ไม่งั้นต้องมีปุ่มกรองแยกทีละสเปรดซึ่งยาวเกินหน้าจอมือถือ
+        $type = (string) $request->input('type', '');
+        if ($type === 'tarot') {
+            $query->where('type', 'like', 'tarot%');
+        } elseif (in_array($type, ['numerology', 'palmistry', 'auspicious', 'deep'], true)) {
+            $query->where('type', $type);
+        }
+
         return view('pages.account.history', [
             'user'     => $request->user(),
-            'readings' => Reading::where('user_id', $request->user()->id)
-                ->latest()
-                ->paginate(20),
+            'readings' => $query->latest()->paginate(20)->withQueryString(),
         ]);
     }
 
