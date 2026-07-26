@@ -29,6 +29,12 @@ use Illuminate\Support\Facades\Log;
  */
 class FortuneBotClient
 {
+    /** บัญชีรับเงินของร้าน — ค่าเดียวกันทั้งเว็บ ไม่ผูกกับผู้ใช้คนไหน */
+    public const PAYOUT_CACHE_KEY = 'juntra:payout_account';
+
+    /** ค่าที่ใส่แทน null ใน cache เพื่อกันยิง upstream ซ้ำตอนล่ม */
+    private const PAYOUT_MISS = 'miss';
+
     /** Start a new chat conversation. */
     public function start(User $user): ?array
     {
@@ -139,6 +145,97 @@ class FortuneBotClient
             ]);
         } catch (\Throwable $e) {
             Log::warning('FortuneBotClient::freeTarot threw', ['err' => $e->getMessage()]);
+        }
+
+        return null;
+    }
+
+    /**
+     * คำแนะนำฤกษ์ยาม — ใช้คีย์พูลชุดเดียวกับบอท FB/LINE
+     *
+     * (2026-07-26) ก่อนหน้านี้ฤกษ์ยามเป็นบริการเดียวที่ยังเรียก AiOracle (Gemini
+     * ในเครื่อง) ตรง ๆ ซึ่ง `ai_api_key` บนโปรดักชันเป็นค่าว่าง → ลูกค้าจ่าย ฿19
+     * แล้วได้ข้อความ fallback ตายตัวบรรทัดเดียวเหมือนกันทุกคน
+     *
+     * โครงเดียวกับ interpretTarot: ลอง endpoint เฉพาะก่อน ถ้ายังไม่ deploy ฝั่ง
+     * Thaiprompt (404/405) ค่อยไหลผ่านท่อแชท ซึ่งใช้พูลเดียวกันและใช้ได้จริงบน prod
+     * (ต่างจาก freeTarot ที่ห้ามไหลไปท่อแชทเพราะเป็นของฟรี — อันนี้ลูกค้าจ่ายแล้ว)
+     *
+     * @param  array{prompt:string}  $payload
+     * @return array{advice:string,ai_provider?:string,ai_model?:string}|null
+     */
+    public function auspiciousAdvice(?User $user, array $payload): ?array
+    {
+        if (! $this->isAvailable($user) || empty($payload['prompt'])) {
+            return null;
+        }
+
+        try {
+            $resp = $this->client($user)->post($this->fortuneUrl('/auspicious'), $payload);
+            if ($resp->successful()) {
+                $data = $resp->json('data');
+                if (is_array($data) && ! empty($data['advice'])) {
+                    return $data;
+                }
+            }
+            if (! in_array($resp->status(), [404, 405], true)) {
+                $this->handleUnauthorized($user, $resp->status());
+                Log::info('FortuneBotClient::auspiciousAdvice non-200 — falling back to chat pipeline', [
+                    'status' => $resp->status(),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('FortuneBotClient::auspiciousAdvice threw — falling back to chat', ['err' => $e->getMessage()]);
+        }
+
+        $start = $this->start($user);
+        $sessionId = $start['session_id'] ?? null;
+        if (! $sessionId) {
+            return null;
+        }
+        $reply = $this->send($user, $sessionId, $payload['prompt']);
+        if (! $reply || empty($reply['reply'])) {
+            return null;
+        }
+
+        return [
+            'advice'      => $reply['reply'],
+            'ai_provider' => $reply['ai_provider'] ?? 'thaiprompt',
+            'ai_model'    => 'pool',
+        ];
+    }
+
+    /**
+     * ดวงรายวันของราศี — ใช้คลังความรู้ + คีย์พูลเดียวกับบอท FB/LINE
+     *
+     * ⚠️ **ไม่มี fallback ไปท่อแชท** โดยเจตนา (เหมือน freeTarot): ดวงรายวันเป็น
+     * ของฟรีและเปิดดูได้โดยไม่ต้องล็อกอิน ถ้าไหลไปท่อแชทจะไปกินโควตาแชทของบัญชี
+     * ที่เรายืม token มา ทั้งที่ไม่มีใครจ่ายอะไร — ให้ผู้เรียกไปเขียนเองดีกว่า
+     *
+     * @param  array{zodiac:string,zodiac_th:string,date:string}  $payload
+     * @return array<string,mixed>|null
+     */
+    public function dailyHoroscope(?User $user, array $payload): ?array
+    {
+        if (! $this->isAvailable($user)) {
+            return null;
+        }
+
+        try {
+            $resp = $this->client($user)->post($this->fortuneUrl('/horoscope/daily'), $payload);
+            if ($resp->successful()) {
+                $data = $resp->json('data');
+                if (is_array($data) && ! empty($data['summary'])) {
+                    return $data;
+                }
+            }
+            // 404/405 = ยังไม่ได้ deploy ฝั่ง Thaiprompt — ไม่ใช่ token เสีย อย่าล้างทิ้ง
+            if (! in_array($resp->status(), [404, 405], true)) {
+                $this->handleUnauthorized($user, $resp->status());
+                Log::info('FortuneBotClient::dailyHoroscope non-200', ['status' => $resp->status()]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('FortuneBotClient::dailyHoroscope threw', ['err' => $e->getMessage()]);
         }
 
         return null;
@@ -257,32 +354,50 @@ class FortuneBotClient
      * บัญชีที่ SlipOK ไม่ได้ผูกไว้ → ตรวจสลิปตีกลับทั้งที่โอนถูก
      * (ฝั่งแม่หมอเองก็ cache settings แค่ 5 วินาทีด้วยเหตุผลเดียวกัน)
      *
+     * ⚠️ อ่าน cache "ก่อน" เช็ค token โดยเจตนา (2026-07-26): ค่าที่ได้คือบัญชีของ
+     * ร้าน ไม่ใช่ข้อมูลส่วนตัวของผู้เรียก ใครดึงมาได้ก็ใช้ร่วมกันได้ทั้งเว็บ
+     * เดิมเช็ค token ก่อน → ลูกค้าที่สมัครด้วยเบอร์/อีเมล (ไม่มี thaiprompt_token)
+     * ได้ null เสมอ แม้ cache จะอุ่นอยู่ = หน้าเติมเงินขึ้น "แอดมินยังไม่ได้ตั้งค่า"
+     *
      * @return array{promptpay_id:?string,account_name:?string,bank_name:?string}|null
      */
     public function payoutAccount(?User $user): ?array
     {
+        $cached = Cache::get(self::PAYOUT_CACHE_KEY);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        // negative cache: upstream เพิ่งล่ม — อย่ายิงซ้ำทุก request ไม่งั้นหน้า
+        // เติมเงินจะค้างรอ connect timeout ทุกครั้งที่เปิด (ยิ่งตอนนี้ resolve()
+        // ยืม token ของบัญชีที่ผูกไว้มาเรียกแทนลูกค้าที่ยังไม่ผูก = โดนทุกคน)
+        if ($cached === self::PAYOUT_MISS) {
+            return null;
+        }
         if (! $this->isAvailable($user)) {
             return null;
         }
 
-        return Cache::remember('juntra:payout_account', now()->addSeconds(60), function () use ($user) {
-            try {
-                $resp = $this->client($user)->get($this->base().'/api/v1/juntra/payment/account');
-                if ($resp->successful()) {
-                    $data = $resp->json('data');
-                    if (is_array($data) && ! empty($data['promptpay_id'])) {
-                        return $data;
-                    }
-                }
-                Log::info('FortuneBotClient::payoutAccount unavailable', ['status' => $resp->status()]);
-            } catch (\Throwable $e) {
-                Log::warning('FortuneBotClient::payoutAccount threw', ['err' => $e->getMessage()]);
-            }
+        try {
+            $resp = $this->client($user)->get($this->base().'/api/v1/juntra/payment/account');
+            if ($resp->successful()) {
+                $data = $resp->json('data');
+                if (is_array($data) && ! empty($data['promptpay_id'])) {
+                    Cache::put(self::PAYOUT_CACHE_KEY, $data, now()->addSeconds(60));
 
-            // cache ค่า null ไม่ได้ (Cache::remember จะยิงซ้ำทุกครั้ง) — ยอมรับได้
-            // เพราะเคสนี้คือ upstream ล่ม ซึ่งควรลองใหม่ทุกครั้งอยู่แล้ว
-            return null;
-        });
+                    return $data;
+                }
+            }
+            // token ตายให้ต่ออายุ/ล้างทิ้ง ไม่งั้น PayoutAccount::serviceUser()
+            // จะหยิบบัญชีเดิมที่ยิงไม่ผ่านซ้ำ ๆ ไม่ขยับไปตัวถัดไปสักที
+            $this->handleUnauthorized($user, $resp->status());
+            Log::info('FortuneBotClient::payoutAccount unavailable', ['status' => $resp->status()]);
+        } catch (\Throwable $e) {
+            Log::warning('FortuneBotClient::payoutAccount threw', ['err' => $e->getMessage()]);
+        }
+
+        Cache::put(self::PAYOUT_CACHE_KEY, self::PAYOUT_MISS, now()->addSeconds(30));
+
+        return null;
     }
 
     /**
