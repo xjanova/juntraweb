@@ -49,6 +49,11 @@
       </div>
     @endif
 
+    {{-- ฟอร์มคุมความกว้างไว้ที่ 680px เท่าหน้าเลขศาสตร์/ลายมือ/เชิงลึก
+         ตัวหน้าเปิดกว้าง 880px เพื่อให้แถบ 14 วันกับตารางฤกษ์บน 9 มีที่พอ แต่ถ้าปล่อยฟอร์ม
+         กว้างตามไปด้วย ปุ่ม width:100% จะยืดเป็นแผ่นทองยาว 880px — กว้างกว่าปุ่มเดียวกัน
+         ในหน้าอื่นของเว็บ 200px และดูใหญ่เกินเหตุ --}}
+    <div style="max-width:680px;margin:0 auto">
     @if (isset($cost) && $cost > 0)
       <div style="text-align:center;margin-bottom:18px;font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase">
         ค่าบริการ ฿{{ number_format($cost, $cost == intval($cost) ? 0 : 2) }} / ครั้ง
@@ -102,6 +107,7 @@
         ถ้าในช่วงที่เลือกไม่มีวันไหนผ่านเกณฑ์ฤกษ์ ระบบจะไม่หักเครดิต
       </p>
     </form>
+    </div>
 
     {{-- ตำราฤกษ์บน 9 — ทำให้ลูกค้าตรวจสอบผลที่ได้กับตำราได้เอง --}}
     @if (! empty($ruekList))
