@@ -29,19 +29,34 @@ class DailyHoroscopeTest extends TestCase
         $this->withoutVite();
     }
 
+    /**
+     * ต้อง seed ครบ 12 ราศี ไม่ใช่ 4
+     *
+     * รอบแรก seed แค่ 4 ราศี (ธาตุละหนึ่ง) เทสต์เลยผ่านทั้งที่ของจริงบนโปรดักชัน
+     * ยังพัง — เมษ/สิงห์/ธนู เป็นธาตุไฟเหมือนกัน ถ้าข้อความอิงแค่ธาตุ สามราศีนั้น
+     * จะอ่านได้เหมือนกัน 3 ใน 5 ช่อง (ยืนยันบน prod: career/money/health distinct 2/3)
+     */
     private function seedZodiacs(): void
     {
         $signs = [
-            ['aries', 'Aries', 'เมษ', '♈', 'Fire', 'Mars'],
-            ['taurus', 'Taurus', 'พฤษภ', '♉', 'Earth', 'Venus'],
-            ['gemini', 'Gemini', 'เมถุน', '♊', 'Air', 'Mercury'],
-            ['cancer', 'Cancer', 'กรกฎ', '♋', 'Water', 'Moon'],
+            ['aries', 'Aries', 'เมษ', '♈', 'Fire', 'Mars', 'กล้าหาญ มุ่งมั่น'],
+            ['taurus', 'Taurus', 'พฤษภ', '♉', 'Earth', 'Venus', 'มั่นคง รักความสบาย'],
+            ['gemini', 'Gemini', 'เมถุน', '♊', 'Air', 'Mercury', 'ช่างพูด ปรับตัวเก่ง'],
+            ['cancer', 'Cancer', 'กรกฎ', '♋', 'Water', 'Moon', 'อ่อนโยน รักครอบครัว'],
+            ['leo', 'Leo', 'สิงห์', '♌', 'Fire', 'Sun', 'สง่างาม มีภาวะผู้นำ'],
+            ['virgo', 'Virgo', 'กันย์', '♍', 'Earth', 'Mercury', 'ละเอียด ช่างสังเกต'],
+            ['libra', 'Libra', 'ตุล', '♎', 'Air', 'Venus', 'ประนีประนอม รักความงาม'],
+            ['scorpio', 'Scorpio', 'พิจิก', '♏', 'Water', 'Mars', 'ลึกซึ้ง มุ่งมั่นเงียบ ๆ'],
+            ['sagittarius', 'Sagittarius', 'ธนู', '♐', 'Fire', 'Jupiter', 'รักอิสระ มองไกล'],
+            ['capricorn', 'Capricorn', 'มังกร', '♑', 'Earth', 'Saturn', 'อดทน มีวินัย'],
+            ['aquarius', 'Aquarius', 'กุมภ์', '♒', 'Air', 'Saturn', 'คิดต่าง รักเพื่อน'],
+            ['pisces', 'Pisces', 'มีน', '♓', 'Water', 'Jupiter', 'อ่อนไหว มีจินตนาการ'],
         ];
-        foreach ($signs as $i => [$slug, $en, $th, $glyph, $element, $ruler]) {
+        foreach ($signs as $i => [$slug, $en, $th, $glyph, $element, $ruler, $traits]) {
             Zodiac::create([
                 'slug' => $slug, 'name_en' => $en, 'name_th' => $th, 'glyph' => $glyph,
                 'element' => $element, 'ruler' => $ruler, 'date_range' => '1 ม.ค. - 31 ม.ค.',
-                'order_index' => $i + 1, 'traits_th' => 'ทดสอบ',
+                'order_index' => $i + 1, 'traits_th' => $traits,
             ]);
         }
     }
