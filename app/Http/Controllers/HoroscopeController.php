@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ChineseZodiac;
 use App\Models\DailyHoroscope;
 use App\Models\Zodiac;
-use App\Services\AiOracle;
+use App\Services\DailyHoroscopeWriter;
 use Carbon\Carbon;
 
 class HoroscopeController extends Controller
@@ -17,7 +17,7 @@ class HoroscopeController extends Controller
         ]);
     }
 
-    public function show(Zodiac $zodiac, AiOracle $oracle)
+    public function show(Zodiac $zodiac, DailyHoroscopeWriter $writer)
     {
         $today = Carbon::today();
 
@@ -28,7 +28,9 @@ class HoroscopeController extends Controller
             ->first();
 
         if (!$horoscope) {
-            $payload = $oracle->generateDailyHoroscope($zodiac, $today);
+            // เขียนวันละครั้งต่อราศีแล้วเก็บลง DB — คนที่เปิดคนถัดไปอ่านของเดิม
+            // (ดู App\Services\DailyHoroscopeWriter ว่าทำไมถึงไม่ไหลไปท่อแชท)
+            $payload = $writer->write($zodiac, $today);
             try {
                 $horoscope = DailyHoroscope::create(array_merge($payload, [
                     'zodiac_id' => $zodiac->id,

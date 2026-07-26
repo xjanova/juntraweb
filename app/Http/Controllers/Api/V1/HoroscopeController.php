@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\DailyHoroscope;
 use App\Models\Zodiac;
-use App\Services\AiOracle;
+use App\Services\DailyHoroscopeWriter;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -34,7 +34,7 @@ class HoroscopeController extends Controller
     }
 
     /** GET /v1/horoscope/{zodiac} — today's reading for one sign. */
-    public function show(Zodiac $zodiac, AiOracle $oracle): JsonResponse
+    public function show(Zodiac $zodiac, DailyHoroscopeWriter $writer): JsonResponse
     {
         $today = Carbon::today();
 
@@ -43,7 +43,8 @@ class HoroscopeController extends Controller
             ->first();
 
         if (!$h) {
-            $payload = $oracle->generateDailyHoroscope($zodiac, $today);
+            // เครื่องเขียนตัวเดียวกับเว็บ — แอพกับเว็บต้องเห็นดวงวันเดียวกัน
+            $payload = $writer->write($zodiac, $today);
             try {
                 $h = DailyHoroscope::create(array_merge($payload, [
                     'zodiac_id' => $zodiac->id,
