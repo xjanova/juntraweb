@@ -251,9 +251,11 @@ class FortuneBotClient
      * ไม่ให้ตั้งแยกที่เว็บ เพราะถ้าตั้งสองที่แล้วไม่ตรงกัน ลูกค้าเว็บจะโอนเข้า
      * คนละบัญชีกับที่ SlipOK/SMS ผูกไว้ → ตรวจสลิปอัตโนมัติจับปลายทางไม่ได้
      *
-     * cache 10 นาที: เป็นข้อมูลที่แทบไม่เปลี่ยน แต่ถูกอ่านทุกครั้งที่ลูกค้ากด
-     * เติมเงิน จะยิง upstream ทุกครั้งไม่ไหว — และถ้า upstream ล่มชั่วคราว
-     * ค่าที่ cache ไว้ยังทำให้เติมเงินต่อได้
+     * cache 60 วินาที: ถูกอ่านทุกครั้งที่ลูกค้ากดเติมเงิน จะยิง upstream ทุกครั้ง
+     * ไม่ไหว — แต่ตั้งสั้น ๆ เพราะเป็น "บัญชีที่แอดมินติ๊กไว้" ซึ่งสลับได้ตลอด
+     * ถ้า cache ยาว หลังสลับบัญชีเว็บจะยังสร้าง QR เป็นบัญชีเก่า ลูกค้าโอนเข้า
+     * บัญชีที่ SlipOK ไม่ได้ผูกไว้ → ตรวจสลิปตีกลับทั้งที่โอนถูก
+     * (ฝั่งแม่หมอเองก็ cache settings แค่ 5 วินาทีด้วยเหตุผลเดียวกัน)
      *
      * @return array{promptpay_id:?string,account_name:?string,bank_name:?string}|null
      */
@@ -263,7 +265,7 @@ class FortuneBotClient
             return null;
         }
 
-        return Cache::remember('juntra:payout_account', now()->addMinutes(10), function () use ($user) {
+        return Cache::remember('juntra:payout_account', now()->addSeconds(60), function () use ($user) {
             try {
                 $resp = $this->client($user)->get($this->base().'/api/v1/juntra/payment/account');
                 if ($resp->successful()) {
