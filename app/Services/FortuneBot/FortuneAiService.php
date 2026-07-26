@@ -113,7 +113,7 @@ class FortuneAiService
             ],
             'position_name' => (string) ($card->position_label ?? 'คำตอบของไพ่'),
             'max_chars' => $maxChars,
-            'customer_name' => (string) ($user?->name ?? ''),
+            'customer_name' => $this->addressableName($user?->name),
         ]);
 
         if (! $remote || empty($remote['interpretation'])) {
@@ -126,5 +126,35 @@ class FortuneAiService
             'model' => (string) ($remote['ai_model'] ?? 'pool'),
             'next_questions' => is_array($remote['next_questions'] ?? null) ? $remote['next_questions'] : [],
         ];
+    }
+
+    /**
+     * ชื่อที่แม่หมอ "เรียกได้" — ถ้าไม่ใช่ชื่อคนก็ไม่ต้องส่งไปเลย
+     *
+     * ทดสอบบน prod แล้วได้คำทำนายว่า "ชีวิตช่วงนี้ของ adminthaiprompt กำลัง…"
+     * เพราะ users.name บางบัญชีเป็น username/อีเมล ไม่ใช่ชื่อจริง
+     * ลูกค้าจากบอทได้ชื่อจริงมาจากโปรไฟล์ FB/LINE ตอน SSO อยู่แล้ว
+     * เคสที่เหลือปล่อยว่างดีกว่า — แม่หมอจะใช้ "เจ้าชะตา" แทนเอง
+     */
+    private function addressableName(?string $name): string
+    {
+        $name = trim((string) $name);
+
+        if ($name === '' || mb_strlen($name) < 2 || mb_strlen($name) > 40) {
+            return '';
+        }
+
+        // อีเมล/แฮนเดิล/มี URL = ไม่ใช่ชื่อที่เรียกออกเสียงได้
+        if (preg_match('/[@\/\\\\:_]|\d{3}/u', $name)) {
+            return '';
+        }
+
+        // ชื่อไทย (มีอักษรไทย) ผ่านเลย · ชื่อละตินต้องมีช่องว่างแบบชื่อ-นามสกุล
+        // (คำละตินคำเดียวติดกันมักเป็น username เช่น adminthaiprompt)
+        if (preg_match('/\p{Thai}/u', $name)) {
+            return $name;
+        }
+
+        return str_contains($name, ' ') ? $name : '';
     }
 }

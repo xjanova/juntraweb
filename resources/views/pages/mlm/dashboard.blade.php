@@ -169,7 +169,8 @@
     </div>
 
     {{-- ── Network chart (ผังสายงาน) ────────────────────────── --}}
-    <div class="panel" style="padding:28px;margin-bottom:24px">
+    {{-- id: ปลายทางของลิงก์ "ทีมดูดวงของฉัน" จากเมนู Thaiprompt (ดู MlmController::users) --}}
+    <div id="team" class="panel" style="padding:28px;margin-bottom:24px;scroll-margin-top:120px">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px">
         <div class="eyebrow" style="display:inline-flex;margin:0">ผังสายงาน</div>
         <div style="flex:1"></div>
@@ -263,7 +264,8 @@
     </div>
 
     {{-- ── Commission table ────────────────────────────────── --}}
-    <div class="panel" style="padding:28px">
+    {{-- id: ปลายทางของลิงก์ "คอมมิชชั่นดูดวง" จากเมนู Thaiprompt (ดู MlmController::commissions) --}}
+    <div id="commissions" class="panel" style="padding:28px;scroll-margin-top:120px">
       <div class="eyebrow" style="display:inline-flex;margin-bottom:18px">ประวัติคอมมิชชั่น</div>
       <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:14px">

@@ -205,4 +205,50 @@ class MlmSyncTest extends TestCase
         $up = app(MlmApiClient::class)->stats($u);
         $this->assertSame(777.0, (float) $up['totals']['all_time']);
     }
+
+    /** Accept header ของเบราว์เซอร์จริง — ไม่ใช่ XHR */
+    private const BROWSER = ['Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'];
+
+    /**
+     * เมนู "คอมมิชชั่นดูดวง" ในหลังบ้าน Thaiprompt ลิงก์มาที่ /mlm/commissions ตรง ๆ
+     * ซึ่งเป็นปลายทาง XHR ของตาราง → เดิมผู้ใช้เจอ JSON ดิบเต็มจอ
+     */
+    public function test_browser_hitting_commissions_lands_on_the_dashboard_table(): void
+    {
+        $u = $this->linkedUser();
+        $this->fakeUpstream();
+
+        $this->actingAs($u)->get(route('mlm.commissions'), self::BROWSER)
+            ->assertRedirect(route('mlm.dashboard').'#commissions');
+    }
+
+    /** ตารางในหน้าแดชบอร์ดยังต้องได้ JSON เหมือนเดิม (อย่าแก้จนพังของเดิม) */
+    public function test_commissions_still_serves_json_to_the_table_xhr(): void
+    {
+        $u = $this->linkedUser();
+        $this->fakeUpstream();
+
+        $this->actingAs($u)
+            ->get(route('mlm.commissions'), ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+            ->assertOk()
+            ->assertJsonStructure(['data', 'meta']);
+    }
+
+    /** เมนู "ทีมดูดวงของฉัน" ก็ลิงก์มาที่ /mlm/users — สมาชิกทั่วไปเคยเจอ 403 */
+    public function test_browser_hitting_users_does_not_403_a_regular_member(): void
+    {
+        $u = $this->linkedUser(); // ไม่ใช่แอดมิน
+        $this->fakeUpstream();
+
+        $this->actingAs($u)->get(route('mlm.users'), self::BROWSER)
+            ->assertRedirect(route('mlm.dashboard').'#team');
+    }
+
+    /** ช่องค้นหาผู้ใช้ของแอดมินยังเป็น JSON และยังปิดไม่ให้สมาชิกทั่วไปเรียก */
+    public function test_users_json_stays_admin_only(): void
+    {
+        $this->fakeUpstream();
+
+        $this->actingAs($this->linkedUser())->getJson(route('mlm.users'))->assertForbidden();
+    }
 }

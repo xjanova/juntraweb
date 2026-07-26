@@ -54,7 +54,16 @@ class MlmController extends Controller
     {
         $auth     = $request->user();
         $targetId = $this->resolveTarget($request, $auth);
-        $page     = max(1, (int) $request->input('page', 1));
+
+        // เมนู "คอมมิชชั่นดูดวง" ในหลังบ้าน Thaiprompt ลิงก์มาที่ URL นี้ตรง ๆ
+        // (config/menus.php → /auth/thaiprompt/redirect?to=/mlm/commissions)
+        // แต่ที่นี่เป็นปลายทาง XHR ของตารางในหน้า /mlm ไม่ใช่หน้าเว็บ → คนกดเมนู
+        // เลยเจอ JSON ดิบเต็มจอ ส่งไปที่ตารางจริงในแดชบอร์ดแทน
+        if (! $this->wantsJson($request)) {
+            return $this->redirectToDashboard($targetId, 'commissions');
+        }
+
+        $page = max(1, (int) $request->input('page', 1));
 
         $data = $this->api->commissions($auth, $targetId, $page, [
             'status'   => $request->input('status'),
@@ -69,9 +78,36 @@ class MlmController extends Controller
     /** Admin search-box: list users with fortune activity for the picker. */
     public function users(Request $request)
     {
+        // เมนู "ทีมดูดวงของฉัน" ของ Thaiprompt ก็ลิงก์มาที่นี่ตรง ๆ เหมือนกัน
+        // สมาชิกทั่วไปจะเจอ 403 ส่วนแอดมินเจอ JSON ดิบ — ทั้งที่สิ่งที่เขาอยากดู
+        // คือผังสายงานในหน้าแดชบอร์ด (ซึ่งทุกคนดูของตัวเองได้อยู่แล้ว)
+        // เช็คก่อน abort เพื่อไม่ให้สมาชิกทั่วไปโดนปิดประตูตั้งแต่ยังไม่ทันเห็นหน้า
+        if (! $this->wantsJson($request)) {
+            return $this->redirectToDashboard($this->resolveTarget($request, $request->user()), 'team');
+        }
+
         abort_unless($request->user()->isAdmin(), 403);
         $data = $this->api->users($request->user(), q: (string) $request->input('q', ''));
         return response()->json($data);
+    }
+
+    /**
+     * เบราว์เซอร์เปิด URL ตรง ๆ หรือ XHR ของหน้าแดชบอร์ดเรียกมา
+     *
+     * เช็คทั้งสองอย่างเพราะ expectsJson() อย่างเดียวไม่พอ — Accept ของเบราว์เซอร์
+     * มี * / * ต่อท้ายเสมอ ทำให้ wantsJson() ตีความว่าเป็น JSON ได้ในบางเคส
+     */
+    private function wantsJson(Request $request): bool
+    {
+        return $request->ajax() || $request->expectsJson();
+    }
+
+    /** ส่งกลับแดชบอร์ด /mlm แล้วเลื่อนไปที่ส่วนที่ผู้ใช้ตั้งใจจะดู */
+    private function redirectToDashboard(?int $targetId, string $anchor)
+    {
+        return redirect()
+            ->route('mlm.dashboard', array_filter(['user_id' => $targetId]))
+            ->withFragment($anchor);
     }
 
     private function resolveTarget(Request $request, User $auth): ?int
