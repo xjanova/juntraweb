@@ -443,6 +443,8 @@ document.addEventListener('alpine:init', () => {
     dailyLeft: cfg.dailyLeft || 0,
     blocked: !!cfg.blocked,
     blockedReason: '',
+    // 🎁 (2026-07-28) เตือนเรื่องเริ่มหักเงินไปแล้วหรือยัง (ครั้งเดียวต่อการเปิดหน้า)
+    costNotified: false,
     draft: '',
     thinking: false,
     showTopics: false,
@@ -760,7 +762,25 @@ document.addEventListener('alpine:init', () => {
 
         this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '');
 
-        if (this.dailyLimit > 0 && this.dailyLeft <= 0) {
+        // 🎁 (2026-07-28) "โควตาฟรีหมด" ไม่ได้แปลว่าคุยต่อไม่ได้เสมอไป
+        //    ถ้าตั้งราคาต่อข้อความไว้ ลูกค้าจ่ายเครดิตคุยต่อได้ — ปิดช่องพิมพ์ตรงนี้
+        //    = ปิดปากคนที่พร้อมจ่าย เสียทั้งลูกค้าและรายได้
+        //    → เชื่อ `blocked` จากเซิร์ฟเวอร์ (เดิม client เดาเองจาก daily_left)
+        // เตือนก่อนโดนหักเงินครั้งแรก — แถบโควตาด้านบนเรนเดอร์จากเซิร์ฟเวอร์
+        // จึงยังค้างคำว่า "คุยฟรีวันนี้" จนกว่าจะรีเฟรช ถ้าไม่บอกตรงนี้
+        // ลูกค้าจะถูกหักเครดิตข้อความถัดไปโดยไม่รู้ตัว = เรื่องร้องเรียน
+        if (typeof j.next_cost === 'number' && j.next_cost > 0
+            && this.dailyLimit > 0 && !this.costNotified) {
+          this.costNotified = true;
+          this.say('โควตาคุยฟรีวันนี้หมดแล้วนะคะลูก 🌙 ข้อความถัดไปแม่หมอจะหักจากเครดิตครั้งละ ฿'
+            + j.next_cost + ' ค่ะ (พรุ่งนี้ได้โควตาฟรีใหม่)');
+        }
+
+        if (j.blocked === true) {
+          this.blocked = true;
+          this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้แม่หมอรอฟังต่อนะคะ';
+        } else if (typeof j.blocked === 'undefined' && this.dailyLimit > 0 && this.dailyLeft <= 0) {
+          // เซิร์ฟเวอร์รุ่นเก่ายังไม่ส่ง blocked (ช่วง deploy คาบเกี่ยว) → ใช้เกณฑ์เดิม
           this.blocked = true;
           this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้แม่หมอรอฟังต่อนะคะ';
         }

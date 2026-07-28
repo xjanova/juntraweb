@@ -103,9 +103,11 @@ class ChatController extends Controller
             'data' => [
                 'conversation' => $this->convoPayload($convo->fresh('messages')),
                 'balance'      => (float) $this->wallet->balance($user),
-                'cost'         => ChatPolicy::cost(),
+                // 🎁 (2026-07-28) ราคาที่คนนี้ต้องจ่ายข้อความถัดไป (0 = ยังอยู่ในโควตาฟรี)
+                'cost'         => ChatPolicy::costFor($user),
                 'daily_limit'  => ChatPolicy::dailyLimit(),
                 'daily_left'   => ChatPolicy::dailyLeft($user),
+                'blocked'      => ChatPolicy::exhausted($user),
                 // ปุ่มคำถามลัดชุดเริ่มต้น — ชุดเดียวกับเว็บ (ChatSuggestions)
                 'suggestions'  => ChatSuggestions::starter(),
             ],
@@ -128,7 +130,9 @@ class ChatController extends Controller
         ]);
 
         $user = $request->user();
-        $cost = ChatPolicy::cost();
+        // 🎁 (2026-07-28) ราคาต่อคน — 0 ระหว่างที่ยังอยู่ในโควตาฟรีของวันนี้
+        //    ต้องอ่านก่อนบันทึกข้อความ ไม่งั้น dailyUsed() นับข้อความนี้รวมด้วย
+        $cost = ChatPolicy::costFor($user);
 
         // 🆓 เพดานคุยฟรีรายวัน — เดิมมีแต่ฝั่งเว็บ ผู้ใช้แอพจึงยิง AI ฟรีได้
         //    ไม่จำกัด (ต้นทุนบานปลาย) กติกาอยู่ใน ChatPolicy ที่เดียวแล้ว
@@ -234,6 +238,9 @@ class ChatController extends Controller
                 'degraded'    => $degraded,
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => ChatPolicy::dailyLeft($user),
+                // 🎁 (2026-07-28) โควตาหมด ≠ คุยต่อไม่ได้ — แอพต้องไม่ปิดช่องพิมพ์เอง
+                'blocked'     => ChatPolicy::exhausted($user),
+                'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
                 'suggestions' => $awaiting ? [] : ChatSuggestions::followUp(),
             ],

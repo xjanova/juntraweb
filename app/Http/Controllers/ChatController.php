@@ -68,7 +68,10 @@ class ChatController extends Controller
         }
 
         // 🆓 ข้อมูลเพดานข้อความฟรีต่อวัน — โชว์ยอดคงเหลือในหน้าแชท
-        $cost       = ChatPolicy::cost();
+        // 🎁 (2026-07-28) ใช้ costFor() = ราคาที่ "คนนี้" ต้องจ่ายข้อความถัดไป
+        //    ยังอยู่ในโควตาฟรี → 0 → หน้าแชทโชว์แถบ "คุยฟรีวันนี้ N/10"
+        //    ใช้ครบแล้ว → ราคาจริง → สลับเป็นแถบเครดิต "หักครั้งละ ฿X" เอง
+        $cost       = $user ? ChatPolicy::costFor($user) : ChatPolicy::cost();
         $dailyLimit = ChatPolicy::dailyLimit();
         $dailyLeft  = $user ? ChatPolicy::dailyLeft($user) : null;
 
@@ -170,10 +173,14 @@ class ChatController extends Controller
                 : redirect()->route('chat.index')->with('status', 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่');
         }
 
-        $cost = ChatPolicy::cost();
+        // 🎁 (2026-07-28) ราคาต่อคน — 0 ระหว่างที่ยังอยู่ในโควตาฟรีของวันนี้
+        //    ต้องอ่าน **ก่อน** บันทึกข้อความของผู้ใช้ ไม่งั้น dailyUsed() จะนับข้อความนี้
+        //    รวมไปด้วย → ข้อความที่ 10 (ซึ่งควรฟรี) จะโดนคิดเงิน
+        $cost = ChatPolicy::costFor($user);
 
         // 🆓 (2026-07-24) โหมดคุยฟรี — เพดานข้อความต่อวัน กันต้นทุน AI บานปลาย
         //   ครบเพดานแล้วแม่หมอชวนไปเปิดไพ่แบบเจาะลึกแทน (เตะเบาๆ ไม่ใช่ error แข็งๆ)
+        //   ⚠️ exhausted() บล็อกเฉพาะโหมดฟรีล้วน — โหมดคิดเงินให้ผ่านไปหักเครดิตแทน
         if (ChatPolicy::exhausted($user)) {
             $limitMsg = ChatPolicy::limitMessage();
 
@@ -272,6 +279,11 @@ class ChatController extends Controller
                 'degraded'    => $degraded,
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => ChatPolicy::dailyLeft($user),
+                // 🎁 (2026-07-28) "โควตาหมด" ไม่ได้แปลว่าคุยต่อไม่ได้เสมอไป
+                //    ฝั่ง client เคยเดาเองจาก daily_left <= 0 แล้วปิดช่องพิมพ์
+                //    → พอเปิดโหมดคิดเงิน คนที่พร้อมจ่ายจะโดนปิดปาก ต้องให้เซิร์ฟเวอร์บอก
+                'blocked'     => ChatPolicy::exhausted($user),
+                'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
                 'suggestions' => $awaiting ? [] : ChatSuggestions::followUp(),
             ]);
