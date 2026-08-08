@@ -71,17 +71,28 @@ class ReadingHistoryTest extends TestCase
         $p = Reading::where('type', 'auspicious')->firstOrFail()->payload;
 
         $this->assertSame('wedding', $p['occasion_type']);
-        $this->assertSame('thai-astro-v1', $p['engine']);
+        $this->assertSame('thai-astro-v2', $p['engine']);
         $this->assertNotEmpty($p['candidates']);
 
         $first = $p['candidates'][0];
-        foreach (['date', 'label', 'score', 'score_pct', 'grade', 'weekday', 'nakshatra', 'ruek', 'tithi', 'reasons'] as $key) {
+        foreach (['date', 'label', 'score', 'score_pct', 'grade', 'weekday', 'nakshatra', 'ruek', 'tithi', 'yam', 'reasons'] as $key) {
             $this->assertArrayHasKey($key, $first, "payload ต้องมี {$key} ไม่งั้นหน้าย้อนหลัง render ไม่ครบ");
         }
         $this->assertNotEmpty($first['ruek']['name']);
         $this->assertNotEmpty($first['tithi']['label']);
         // สเกล 0-10 เดิมต้องอยู่ครบ แอพมือถือที่ deploy ไปแล้วอ่านคีย์นี้
         $this->assertLessThanOrEqual(10, $first['score']);
+
+        // ยามต้องเก็บ "ลำดับเลข" ไว้ครบ ไม่งั้นตารางลงเลขในหน้าย้อนหลังวาดใหม่ไม่ได้
+        $this->assertCount(8, $first['yam']['day_seq']);
+        $this->assertCount(8, $first['yam']['night_seq']);
+        $this->assertSame($first['yam']['lord'], $first['yam']['day_seq'][0], 'ช่องแรกต้องเป็นดาวเจ้าวัน');
+        $this->assertContains($first['yam']['picked'], range(1, 8));
+        $this->assertSame(
+            $first['best_from'],
+            \App\Support\ThaiAstro::yamRows($first['yam']['day_seq'])[$first['yam']['picked'] - 1]['from'],
+            'เวลาที่แนะนำต้องตรงกับช่องยามที่ปักไว้ ไม่งั้นตารางกับข้อความจะขัดกัน',
+        );
     }
 
     /** คำแนะนำต้องอ้างถึงวันและฤกษ์ของลูกค้าคนนั้นจริง ไม่ใช่ข้อความสำเร็จรูป */

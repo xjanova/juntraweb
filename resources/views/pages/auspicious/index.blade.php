@@ -8,9 +8,10 @@
     <div style="text-align:center;margin-bottom:44px">
       <div class="eyebrow" style="display:inline-flex">ฤกษ์ยาม · AUSPICIOUS DATES</div>
       <h1 class="display" style="font-size:clamp(44px,6vw,80px);margin:16px 0 20px">หาวัน <em>มงคล</em></h1>
-      <p class="lede" style="margin:0 auto;max-width:600px">
+      <p class="lede" style="margin:0 auto;max-width:640px">
         คำนวณจากตำแหน่งจริงของดวงจันทร์บนจักรราศี — อ่านฤกษ์บน 9 จากนักษัตรที่ดวงจันทร์สถิต
-        ประกอบกับดิถีข้างขึ้น-ข้างแรมและวารประจำวัน แล้วถ่วงน้ำหนักตามประเภทงานของคุณ
+        ประกอบกับดิถีข้างขึ้น-ข้างแรมและวารประจำวัน แล้วลงเลข <em>ยามอัฐกาล</em>
+        หาชั่วโมงที่ควรตั้งพิธีจริง ๆ ถ่วงน้ำหนักตามประเภทงานของคุณ
       </p>
     </div>
 
@@ -46,6 +47,24 @@
         <p style="color:var(--ink-faint);font-size:12px;margin-top:2px">
           แถบสีคือคะแนนฤกษ์กลาง — เลือกประเภทงานด้านล่างแล้วคะแนนจะเปลี่ยนตามหลักของงานนั้น
         </p>
+      </div>
+    @endif
+
+    {{-- ตารางลงเลขยามของวันนี้ — โชว์ฟรีก่อนจ่าย ให้ลูกค้าเห็นกับตาว่าเลขในตาราง
+         มาจากการคำนวณจริงตามระบบ +๕/+๔ ไม่ใช่ตารางสำเร็จรูปที่แปะไว้เฉย ๆ --}}
+    @if (! empty($todayYam))
+      <div style="margin-bottom:34px">
+        <x-yam-table :yam="$todayYam"
+                     title="ยามอัฐกาลวันนี้ · ลงเลขให้ดูฟรี"
+                     :date-label="'วัน'.\App\Support\ThaiAstro::WEEKDAY[$todayYam['weekday_index']]['name'].' ที่ '.$todayYam['date']->format('d/m/Y')"
+                     :highlight="! empty($nowYam) ? ['side' => $nowYam['side'], 'no' => $nowYam['no']] : null" />
+        @if (! empty($nowYam))
+          <p style="color:var(--ink-faint);font-size:12px;margin-top:8px">
+            ช่องที่ขอบทองคือ <strong style="color:var(--gold)">ยามนี้</strong> —
+            ยาม{{ $nowYam['name'] }} ({{ $nowYam['planet_name'] }}) {{ $nowYam['from'] }}–{{ $nowYam['to'] }} น.
+            ยามที่ {{ \App\Support\ThaiAstro::thaiNumber($nowYam['no']) }} ของฟาก{{ $nowYam['side'] === 'night' ? 'กลางคืน' : 'กลางวัน' }}
+          </p>
+        @endif
       </div>
     @endif
 

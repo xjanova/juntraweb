@@ -8,7 +8,12 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 
 /**
- * ให้คะแนนวันตามหลักฤกษ์ไทย — ฤกษ์บน (นักษัตร/ฤกษ์ 9) × วาร × ดิถี × ประเภทงาน
+ * ให้คะแนนวันตามหลักฤกษ์ไทย — ฤกษ์บน (นักษัตร/ฤกษ์ 9) × วาร × ดิถี × ยาม × ประเภทงาน
+ *
+ * 🔴 (2026-08-08) เพิ่ม "ยาม" ซึ่งเป็นครึ่งหลังของคำว่าฤกษ์ยามและหายไปทั้งก้อน
+ * ของเดิมบอกเวลาทำพิธีเป็น "ช่วงที่นักษัตรครอง ∩ 06:09–18:00" ซึ่งไม่มีในตำราไทย
+ * เลข 06:09 ก็ไม่ได้มาจากอะไร ตอนนี้เวลาที่แนะนำคือ **ยามอัฐกาล** ที่ลงเลขจริง
+ * ผู้ใช้ไล่ตรวจตัวเลขกับตำราได้ทีละช่อง (ดู ThaiAstro::yamAtthakan)
  *
  * 🔴 (2026-07-26 REWRITE) ของเดิมให้ฐาน 5 แล้ว +2 ถ้าเป็น อ./พฤ./ส. +2 ถ้าวันที่
  * 9/19/29 +2 ถ้าผลรวมเลขวันหาร 9 ลงตัว ผ่านที่ 7 — ผลคือ **ทุกวันอังคาร/พฤหัส/เสาร์
@@ -147,12 +152,25 @@ class AuspiciousScorer
             }
         }
 
-        $scorePct = max(0, min(100, (int) round($score)));
+        // ── ยาม: ลงเลขยามอัฐกาล แล้วเลือกยามตั้งพิธีที่อยู่ในช่วงฤกษ์ ──────
+        // ทุกวันมีครบทั้ง ๗ ดาวในแปดยามกลางวัน ตัวที่ต่างกันจริงคือ "ยามดีดวงไหน
+        // ตกในช่วงที่ฤกษ์ครองบ้าง" — ค่านี้จึงมีสิทธิ์ขยับคะแนนวัน ไม่ใช่ค่าคงที่
+        $yamTable = ThaiAstro::yamAtthakan($date);
+        $yam      = $this->pickYam($yamTable, $occasion, $window['from'], $window['to']);
+        $score   += $yam['weight'] * 2;
 
-        // ── ช่วงเวลาแนะนำ: ตัดช่วงที่ฤกษ์ครอง ∩ เวลาทำพิธีปกติ ────────────
-        $bestFrom = $window['from']->copy()->max($date->copy()->setTime(6, 9));
-        $bestTo   = $window['to']->copy()->min($date->copy()->setTime(18, 0));
-        $hasSlot  = $bestTo->greaterThan($bestFrom);
+        $pick = $yam['watch'];
+        if ($yam['weight'] >= 2) {
+            $reasons[] = "ตั้งพิธีได้ที่ยาม{$pick['name']} ({$pick['from']}–{$pick['to']} น.) ยามของ{$pick['planet_name']}"
+                .($yam['in_ruek'] ? " ซึ่งตกในช่วงที่{$ruek['name']}ครองพอดี" : '');
+        } elseif ($yam['weight'] <= -2) {
+            $warnings[] = "ช่วงที่ฤกษ์ครองเหลือยามดีที่สุดแค่ยาม{$pick['name']} ({$pick['from']}–{$pick['to']} น.) ซึ่งเป็นยามของ{$pick['planet_name']} ที่ตำราไม่หนุนงานหมวดนี้";
+        }
+        if (! $yam['in_ruek']) {
+            $warnings[] = 'ยามที่แนะนำอยู่นอกช่วงที่ฤกษ์บนครอง — ในวันนี้ทั้งสองอย่างไม่ทับกันในเวลาทำพิธีปกติ';
+        }
+
+        $scorePct = max(0, min(100, (int) round($score)));
 
         return [
             'date'       => $date,
@@ -167,11 +185,69 @@ class AuspiciousScorer
             'ruek'       => $ruek + ['index' => $window['ruek']],
             'ruek_from'  => $window['from'],
             'ruek_to'    => $window['to'],
-            'best_from'  => $hasSlot ? $bestFrom : null,
-            'best_to'    => $hasSlot ? $bestTo : null,
+            // ช่วงที่แนะนำ = "ยาม" ที่เลือกไว้ (๑ ชม. ๓๐ นาทีเต็มยาม) ไม่ใช่ทั้งช่วง
+            // ที่นักษัตรครองเหมือนเดิม — โหรไทยบอกเวลาเป็นยาม ไม่ได้บอกเป็นช่วงกว้าง ๆ
+            'best_from'  => $pick['starts_at'],
+            'best_to'    => $pick['ends_at'],
+            'yam'        => [
+                'lord'       => $yamTable['lord'],
+                'lord_name'  => $yamTable['lord_name'],
+                'day_seq'    => $yamTable['day_seq'],
+                'night_seq'  => $yamTable['night_seq'],
+                'picked'     => $yam['picked'],
+                'weights'    => $yam['weights'],
+                'in_ruek'    => $yam['in_ruek_flags'],
+                'name'       => $pick['name'],
+                'planet'     => $pick['planet'],
+                'from'       => $pick['from'],
+                'to'         => $pick['to'],
+            ],
             'tithi'      => $tithi,
             'reasons'    => $reasons,
             'warnings'   => $warnings,
+        ];
+    }
+
+    /**
+     * เลือกยามกลางวันที่ควรตั้งพิธี
+     *
+     * ลำดับความสำคัญ: (1) ต้องคาบเกี่ยวช่วงที่ฤกษ์บนครองก่อน เพราะตำราถือฤกษ์เป็นใหญ่
+     * ยามเป็นแค่การเลือกชั่วโมงภายในฤกษ์ (2) ดาวเจ้ายามต้องหนุนงานหมวดนั้น — ใช้ตาราง
+     * น้ำหนักวารชุดเดียวกับที่ใช้ให้คะแนน "วัน" เพราะยามก็คือดาวดวงเดียวกันกับที่ครองวาร
+     * (3) คาบเกี่ยวฤกษ์นานกว่าชนะ (4) ยามเช้ากว่าชนะ — งานมงคลไทยนิยมช่วงเช้า
+     *
+     * @param  array<string,mixed>  $table  ผลจาก ThaiAstro::yamAtthakan()
+     * @return array{picked:int,weight:int,in_ruek:bool,watch:array<string,mixed>,weights:array<int,int>,in_ruek_flags:array<int,bool>}
+     */
+    private function pickYam(array $table, array $occasion, CarbonInterface $ruekFrom, CarbonInterface $ruekTo): array
+    {
+        $weights = [];
+        $flags   = [];
+        $rank    = [];
+
+        foreach ($table['day'] as $i => $w) {
+            // เลขดาว ๑–๗ ตรงกับ index วาร ๐–๖ (อาทิตย์=๑ → index ๐)
+            $weight = (int) ($occasion['weekday'][$w['planet'] - 1] ?? 0);
+
+            $from = $w['starts_at']->greaterThan($ruekFrom) ? $w['starts_at'] : $ruekFrom;
+            $to   = $w['ends_at']->lessThan($ruekTo) ? $w['ends_at'] : $ruekTo;
+            $overlap = $to->greaterThan($from) ? (int) round($from->diffInMinutes($to)) : 0;
+
+            $weights[] = $weight;
+            $flags[]   = $overlap > 0;
+            $rank[$i]  = [$overlap > 0 ? 1 : 0, $weight, $overlap, -$i];
+        }
+
+        arsort($rank);
+        $best = (int) array_key_first($rank);
+
+        return [
+            'picked'        => $best + 1,
+            'weight'        => $weights[$best],
+            'in_ruek'       => $flags[$best],
+            'watch'         => $table['day'][$best],
+            'weights'       => $weights,
+            'in_ruek_flags' => $flags,
         ];
     }
 

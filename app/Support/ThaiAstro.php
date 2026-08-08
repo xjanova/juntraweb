@@ -8,6 +8,13 @@ use Illuminate\Support\Carbon;
 /**
  * ดาราศาสตร์เท่าที่ "ฤกษ์ยาม" ไทยต้องใช้ — คำนวณตำแหน่งจริงของดวงจันทร์/ดวงอาทิตย์
  * แล้วแปลงเป็น นักษัตร 27 · ฤกษ์บน 9 · ดิถี (ข้างขึ้น-ข้างแรม) · เฟสดวงจันทร์
+ * บวก "ยามอัฐกาล" ซึ่งเป็นฝั่ง **ยาม** ของคำว่าฤกษ์ยาม
+ *
+ * ทำไมต้องมียาม (2026-08-08): ของเดิมมีแต่ "ฤกษ์" (นักษัตร) แล้วบอกเวลาทำพิธีด้วย
+ * ช่วงที่นักษัตรครอง ∩ 06:09–18:00 ซึ่งไม่ใช่ "ยาม" ของโหรไทยเลย — โหรไทยแบ่งวันเป็น
+ * ๘ ยามกลางวัน ๘ ยามกลางคืน ยามละชั่วโมงครึ่ง แล้ว "ลงเลข" ดาวประจำยามจากดาวเจ้าวัน
+ * ด้วยระบบ +๕ (กลางวัน) / +๔ (กลางคืน) ตัวเลขชุดนี้คือหน้าตาที่ลูกค้าคาดหวังจะเห็น
+ * และตรวจกับตำราได้ทีละช่อง
  *
  * ทำไมต้องคำนวณจริง (2026-07-26): ของเดิมให้คะแนนวันจาก "เป็นวันอังคาร/พฤหัส/เสาร์
  * ไหม + วันที่ 9/19/29 ไหม" ซึ่งทำให้ทุกวัน อ./พฤ./ส. ผ่านหมด ผลลัพธ์ซ้ำกันทุกคำถาม
@@ -120,6 +127,179 @@ final class ThaiAstro
         ['name' => 'ศุกร์',   'planet' => 'ศุกร์',   'glyph' => '♀', 'color' => '#c77fb0', 'note' => 'วารเสน่ห์ เหมาะงานแต่งและงานรื่นเริง'],
         ['name' => 'เสาร์',   'planet' => 'เสาร์',   'glyph' => '♄', 'color' => '#7a7f8c', 'note' => 'วารหนัก เหมาะงานตัดและงานที่ต้องความอึด'],
     ];
+
+    /**
+     * พระเคราะห์ประจำวาร ๑–๗ — ยามอัฐกาลใช้เจ็ดดวง ไม่มีราหู (๘)
+     *
+     * day_yam/night_yam คือชื่อบาลีของยามที่ดาวดวงนั้นเป็นเจ้ายาม ซึ่งตำราเรียก
+     * คนละชื่อกันระหว่างฟากกลางวันกับฟากกลางคืน (เช่น อาทิตย์ = สุริชะ ตอนกลางวัน
+     * แต่เรียก รวิ ตอนกลางคืน) — ไม่ใช่ชื่อประจำ "ช่องที่เท่าไร" ของตาราง
+     */
+    public const PLANETS = [
+        1 => ['no' => 1, 'name' => 'อาทิตย์',  'glyph' => '☉', 'color' => '#d94f4f', 'day_yam' => 'สุริชะ', 'night_yam' => 'รวิ'],
+        2 => ['no' => 2, 'name' => 'จันทร์',   'glyph' => '☾', 'color' => '#e8e4d9', 'day_yam' => 'จันเทา', 'night_yam' => 'ศศิ'],
+        3 => ['no' => 3, 'name' => 'อังคาร',   'glyph' => '♂', 'color' => '#c96a4a', 'day_yam' => 'ภุมมะ',  'night_yam' => 'ภุมโม'],
+        4 => ['no' => 4, 'name' => 'พุธ',      'glyph' => '☿', 'color' => '#5f9e6e', 'day_yam' => 'พุธะ',   'night_yam' => 'พุโธ'],
+        5 => ['no' => 5, 'name' => 'พฤหัสบดี', 'glyph' => '♃', 'color' => '#e0b642', 'day_yam' => 'ครู',    'night_yam' => 'ชีโว'],
+        6 => ['no' => 6, 'name' => 'ศุกร์',    'glyph' => '♀', 'color' => '#c77fb0', 'day_yam' => 'ศุกระ',  'night_yam' => 'ศุกโกร'],
+        7 => ['no' => 7, 'name' => 'เสาร์',    'glyph' => '♄', 'color' => '#7a7f8c', 'day_yam' => 'เสารี',  'night_yam' => 'โสโร'],
+    ];
+
+    /** ยามละ ๑ ชั่วโมง ๓๐ นาที · ฟากละ ๘ ยาม (กลางวัน ๐๖–๑๘ · กลางคืน ๑๘–๐๖) */
+    public const YAM_MINUTES = 90;
+
+    /** ระบบ "+๕" ของยามกลางวัน และ "+๔" ของยามกลางคืน — เกิน ๗ เอา ๗ ลบ */
+    public const YAM_STEP_DAY = 5;
+
+    public const YAM_STEP_NIGHT = 4;
+
+    /* ============================================================
+       ยามอัฐกาล — ยามแปดของโหรไทย
+       ============================================================ */
+
+    /**
+     * ลำดับเลขยาม ๘ ช่องของฟากหนึ่ง — นี่คือ "การลงเลข" ที่โหรเขียนลงตาราง
+     *
+     * ตั้งต้นที่ดาวเจ้าวัน แล้วบวกทีละ ๕ (กลางวัน) หรือ ๔ (กลางคืน) เกิน ๗ เอา ๗ ลบ
+     * วันอาทิตย์กลางวันจึงได้ ๑ ๖ ๔ ๒ ๗ ๕ ๓ ๑ และกลางคืนได้ ๑ ๕ ๒ ๖ ๓ ๗ ๔ ๑
+     * (ช่องที่ ๘ วนกลับเป็นเลขเดียวกับช่องแรกเสมอ เพราะ ๕×๗ และ ๔×๗ หาร ๗ ลงตัว)
+     *
+     * @return array<int,int> เลขดาว ๑–๗ จำนวน ๘ ช่อง
+     */
+    public static function yamSequence(int $lord, bool $night = false): array
+    {
+        $step = $night ? self::YAM_STEP_NIGHT : self::YAM_STEP_DAY;
+
+        $seq = [];
+        $p   = self::wrap7($lord);
+        for ($i = 0; $i < 8; $i++) {
+            $seq[] = $p;
+            $p = self::wrap7($p + $step);
+        }
+
+        return $seq;
+    }
+
+    /**
+     * ขั้นตอนลงเลขทีละช่อง — โชว์บวก/ลบ ๗ ให้ลูกค้าไล่ตามตรวจเองได้
+     *
+     * @return array<int, array{from:int,step:int,sum:int,carry:bool,to:int}>
+     */
+    public static function yamWorking(int $lord, bool $night = false): array
+    {
+        $step = $night ? self::YAM_STEP_NIGHT : self::YAM_STEP_DAY;
+        $seq  = self::yamSequence($lord, $night);
+
+        $steps = [];
+        for ($i = 0; $i < 7; $i++) {
+            $sum = $seq[$i] + $step;
+            $steps[] = [
+                'from'  => $seq[$i],
+                'step'  => $step,
+                'sum'   => $sum,
+                'carry' => $sum > 7,
+                'to'    => $seq[$i + 1],
+            ];
+        }
+
+        return $steps;
+    }
+
+    /**
+     * ขยายลำดับเลขยามเป็นแถวเต็ม ๘ ช่อง (เวลาเป็นสตริง ไม่ผูกกับวันที่)
+     *
+     * แยกจาก yamAtthakan() เพราะหน้าที่อ่านผลย้อนหลังเก็บไว้แค่ลำดับเลข แล้วขยาย
+     * กลับเป็นตารางตอน render — เก็บทั้งตารางลง payload ทุกวันจะบวมโดยไม่จำเป็น
+     * ชื่อยาม/เวลา/สี เป็นค่าคงที่ที่ derive จากลำดับเลขได้ตรงกันเสมอ
+     *
+     * @param  array<int,int>  $seq
+     * @return array<int, array<string,mixed>>
+     */
+    public static function yamRows(array $seq, bool $night = false): array
+    {
+        $baseMin = $night ? 18 * 60 : 6 * 60;
+
+        $rows = [];
+        foreach (array_values($seq) as $i => $planet) {
+            $planet = self::wrap7((int) $planet);
+            $p      = self::PLANETS[$planet];
+            $from   = $baseMin + $i * self::YAM_MINUTES;
+
+            $rows[] = [
+                'no'          => $i + 1,
+                'thai_no'     => self::thaiNumber($i + 1),
+                'planet'      => $planet,
+                'thai_planet' => self::thaiNumber($planet),
+                'name'        => $night ? $p['night_yam'] : $p['day_yam'],
+                'planet_name' => $p['name'],
+                'glyph'       => $p['glyph'],
+                'color'       => $p['color'],
+                'side'        => $night ? 'night' : 'day',
+                'from'        => self::clock($from),
+                'to'          => self::clock($from + self::YAM_MINUTES),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * ตารางยามอัฐกาลของวันหนึ่ง — ๘ ยามกลางวัน + ๘ ยามกลางคืน พร้อมเวลาจริง
+     *
+     * วันของโหรเริ่ม ๐๖:๐๐ ไม่ใช่เที่ยงคืน — ยามกลางคืนของวันนี้จึงพาดไปถึง
+     * ๐๖:๐๐ ของวันปฏิทินถัดไป
+     *
+     * @return array<string,mixed>
+     */
+    public static function yamAtthakan(CarbonInterface $day): array
+    {
+        $date = Carbon::parse($day->format('Y-m-d'), self::TZ)->startOfDay();
+        $lord = $date->dayOfWeek + 1;   // อาทิตย์=๑ … เสาร์=๗
+
+        $daySeq   = self::yamSequence($lord, false);
+        $nightSeq = self::yamSequence($lord, true);
+
+        return [
+            'date'          => $date,
+            'weekday_index' => $date->dayOfWeek,
+            'lord'          => $lord,
+            'lord_name'     => self::PLANETS[$lord]['name'],
+            'lord_thai_no'  => self::thaiNumber($lord),
+            'day_seq'       => $daySeq,
+            'night_seq'     => $nightSeq,
+            'day'           => self::withRealClock(self::yamRows($daySeq, false), $date, 6 * 60),
+            'night'         => self::withRealClock(self::yamRows($nightSeq, true), $date, 18 * 60),
+            'working_day'   => self::yamWorking($lord, false),
+            'working_night' => self::yamWorking($lord, true),
+        ];
+    }
+
+    /**
+     * ยามที่ครอบคลุมเวลาหนึ่ง — ก่อน ๐๖:๐๐ ยังนับเป็นยามกลางคืนของวันก่อนหน้า
+     *
+     * @return array<string,mixed>
+     */
+    public static function yamAt(CarbonInterface $moment): array
+    {
+        $t      = Carbon::parse($moment->format('Y-m-d H:i:s'), self::TZ);
+        $anchor = $t->hour < 6 ? $t->copy()->subDay() : $t->copy();
+        $table  = self::yamAtthakan($anchor);
+        $stamp  = ['lord' => $table['lord'], 'lord_name' => $table['lord_name'], 'date' => $table['date']];
+
+        foreach (array_merge($table['day'], $table['night']) as $w) {
+            if ($t->gte($w['starts_at']) && $t->lt($w['ends_at'])) {
+                return $w + $stamp;
+            }
+        }
+
+        return $table['day'][0] + $stamp;   // ไปไม่ถึงอยู่แล้ว — ๑๖ ยามปูเต็ม ๒๔ ชม.
+    }
+
+    /** แปลงเลขอารบิกเป็นเลขไทย — ตารางยามต้องเป็นเลขไทยถึงจะอ่านเหมือนในตำรา */
+    public static function thaiNumber(int|string $n): string
+    {
+        return strtr((string) $n, ['0' => '๐', '1' => '๑', '2' => '๒', '3' => '๓', '4' => '๔', '5' => '๕', '6' => '๖', '7' => '๗', '8' => '๘', '9' => '๙']);
+    }
 
     /* ============================================================
        ฤกษ์ประจำวัน
@@ -335,6 +515,37 @@ final class ThaiAstro
         }
 
         return $hi;
+    }
+
+    /** วนเลขดาวให้อยู่ในช่วง ๑–๗ ("เกิน ๗ เอา ๗ ลบ" ของตำรา) */
+    private static function wrap7(int $n): int
+    {
+        $n = ($n - 1) % 7;
+
+        return ($n < 0 ? $n + 7 : $n) + 1;
+    }
+
+    /** นาทีจากเที่ยงคืน → นาฬิกา (๑๔๔๐ = "24:00" ให้ตรงกับที่ตำราพิมพ์) */
+    private static function clock(int $minutes): string
+    {
+        if ($minutes === 1440) {
+            return '24:00';
+        }
+        $m = $minutes % 1440;
+
+        return sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+    }
+
+    /** ติดเวลาจริง (Carbon) ให้แถวยาม เพื่อเทียบกับช่วงที่ฤกษ์ครองได้ */
+    private static function withRealClock(array $rows, Carbon $date, int $baseMin): array
+    {
+        foreach ($rows as $i => $row) {
+            $starts = $date->copy()->addMinutes($baseMin + $i * self::YAM_MINUTES);
+            $rows[$i]['starts_at'] = $starts;
+            $rows[$i]['ends_at']   = $starts->copy()->addMinutes(self::YAM_MINUTES);
+        }
+
+        return $rows;
     }
 
     private static function julianCenturies(CarbonInterface $t): float

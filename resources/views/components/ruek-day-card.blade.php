@@ -12,7 +12,17 @@
   $grade   = $day['grade'] ?? 'fair';
   $gradeLabel = \App\Services\AuspiciousScorer::gradeLabel($grade);
   $hasSlot = ! empty($day['best_from']) && ! empty($day['best_to']);
+  $yam     = $day['yam'] ?? null;                 // ผลเก่า (engine v1) ไม่มียาม
   $pad     = $featured ? '30px' : '22px';
+
+  // นาทีจากเที่ยงคืน → % บนแถบ 06:00–18:00 · "00:00" ของขอบบนคือเที่ยงคืนวันถัดไป
+  $pct = function (?string $hhmm, bool $isEnd = false) {
+      if (! $hhmm) return null;
+      [$h, $m] = array_map('intval', explode(':', $hhmm));
+      $min = $h * 60 + $m;
+      if ($isEnd && $min === 0) $min = 1440;
+      return max(0, min(100, ($min - 360) / 720 * 100));
+  };
 @endphp
 
 <div class="panel" style="padding:{{ $pad }};border-color:{{ $color }}33;position:relative;overflow:hidden">
@@ -48,24 +58,44 @@
       </div>
 
       @if ($hasSlot)
-        <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-family:var(--display);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)">ช่วงที่ฤกษ์ครอง</span>
+        <div style="margin-top:14px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+          <span style="font-family:var(--display);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)">
+            {{ $yam ? 'ยามที่ควรตั้งฤกษ์' : 'ช่วงที่ฤกษ์ครอง' }}
+          </span>
           <span style="font-family:var(--display);font-size:19px;color:var(--gold)">{{ $day['best_from'] }} – {{ $day['best_to'] }} น.</span>
+          @if ($yam)
+            @php $yamPlanet = \App\Support\ThaiAstro::PLANETS[$yam['planet']] ?? null; @endphp
+            <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid {{ $yamPlanet['color'] ?? 'var(--gold)' }}55;border-radius:999px;padding:3px 11px">
+              <span style="font-family:var(--display);font-size:15px;color:{{ $yamPlanet['color'] ?? 'var(--gold)' }}">{{ \App\Support\ThaiAstro::thaiNumber($yam['planet']) }}</span>
+              <span style="font-size:12.5px;color:var(--ink-dim)">ยาม{{ $yam['name'] }} · ยามที่ {{ \App\Support\ThaiAstro::thaiNumber($yam['picked']) }}</span>
+            </span>
+          @endif
         </div>
         @php
-          // แถบเวลา 06:00–18:00 ให้เห็นว่าฤกษ์กินช่วงไหนของวัน
-          [$fh, $fm] = array_map('intval', explode(':', $day['best_from']));
-          [$th, $tm] = array_map('intval', explode(':', $day['best_to']));
-          $startPct = max(0, min(100, (($fh * 60 + $fm) - 360) / 720 * 100));
-          $endPct   = max(0, min(100, (($th * 60 + $tm) - 360) / 720 * 100));
+          // แถบเวลา 06:00–18:00 — แถบจาง = ช่วงที่ฤกษ์บนครอง · แท่งทึบ = ยามที่เลือก
+          $yamStart  = $pct($day['best_from']);
+          $yamEnd    = $pct($day['best_to'], true);
+          $ruekStart = $pct($day['ruek_from'] ?? null);
+          $ruekEnd   = $pct($day['ruek_to'] ?? null, true);
         @endphp
         <div style="margin-top:8px">
-          <div style="position:relative;height:9px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden">
-            <div style="position:absolute;left:{{ round($startPct, 2) }}%;width:{{ round(max($endPct - $startPct, 1.5), 2) }}%;top:0;bottom:0;background:{{ $color }};border-radius:999px"></div>
+          <div style="position:relative;height:11px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden">
+            @if ($ruekStart !== null && $ruekEnd !== null && $ruekEnd > $ruekStart)
+              <div title="ช่วงที่{{ $ruek['name'] ?? 'ฤกษ์' }}ครอง"
+                   style="position:absolute;left:{{ round($ruekStart, 2) }}%;width:{{ round($ruekEnd - $ruekStart, 2) }}%;top:0;bottom:0;background:{{ $color }}3d"></div>
+            @endif
+            <div title="ยามที่ควรตั้งฤกษ์"
+                 style="position:absolute;left:{{ round($yamStart, 2) }}%;width:{{ round(max($yamEnd - $yamStart, 1.5), 2) }}%;top:0;bottom:0;background:{{ $color }};border-radius:999px"></div>
           </div>
           <div style="display:flex;justify-content:space-between;color:var(--ink-faint);font-size:10px;font-family:var(--display);letter-spacing:.1em;margin-top:4px">
             <span>06:00</span><span>12:00</span><span>18:00</span>
           </div>
+          @if ($yam && ! empty($day['ruek_from']))
+            <div style="color:var(--ink-faint);font-size:11px;margin-top:5px;line-height:1.7">
+              แถบจาง = ช่วงที่{{ $ruek['name'] ?? 'ฤกษ์' }}ครอง ({{ $day['ruek_from'] }}–{{ $day['ruek_to'] === '00:00' ? '24:00' : $day['ruek_to'] }} น.) ·
+              แท่งทึบ = ยามที่ตกในฤกษ์นั้น
+            </div>
+          @endif
         </div>
       @endif
     </div>

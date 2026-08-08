@@ -46,7 +46,7 @@ class AuspiciousAdvisor
             'text'        => $this->localAdvice($occasionKey, $occasionText, $days),
             'source'      => 'local',
             'ai_provider' => 'chantra-ruek',
-            'ai_model'    => 'thai-astro-v1',
+            'ai_model'    => 'thai-astro-v2',
         ];
     }
 
@@ -76,8 +76,16 @@ class AuspiciousAdvisor
                 $d['tithi']['label'],
                 $d['score_pct'],
             );
-            if ($d['best_from']) {
-                $lines[] = sprintf('   ช่วงที่ฤกษ์ครอง: %s–%s น.', $d['best_from']->format('H:i'), $d['best_to']->format('H:i'));
+            $lines[] = sprintf('   ช่วงที่ฤกษ์บนครอง: %s–%s น.', $d['ruek_from']->format('H:i'), $d['ruek_to']->format('H:i'));
+            if (! empty($d['yam'])) {
+                $lines[] = sprintf(
+                    '   ยามที่ควรตั้งพิธี: ยาม%s (ยามที่ %d ของฟากกลางวัน · ดาวเจ้ายาม %s) %s–%s น.',
+                    $d['yam']['name'],
+                    $d['yam']['picked'],
+                    ThaiAstro::PLANETS[$d['yam']['planet']]['name'],
+                    $d['yam']['from'],
+                    $d['yam']['to'],
+                );
             }
             if ($d['reasons']) {
                 $lines[] = '   เหตุผล: '.implode(' / ', $d['reasons']);
@@ -93,7 +101,7 @@ class AuspiciousAdvisor
         $lines[] = 'ช่วยเขียนคำแนะนำให้ลูกค้าเป็นภาษาไทย 4-6 ย่อหน้า โดย:';
         $lines[] = '1) ฟันธงว่าควรเลือกวันไหนเป็นอันดับ 1 และเพราะอะไร (อ้างชื่อฤกษ์กับดิถีจริง)';
         $lines[] = '2) เสนอวันสำรองอีก 2 วันพร้อมข้อดีที่ต่างกัน';
-        $lines[] = '3) บอกช่วงเวลาที่ควรเริ่มพิธีในวันนั้น จากช่วงที่ฤกษ์ครองด้านบน';
+        $lines[] = '3) บอกเวลาตั้งพิธีเป็น "ยาม" ตามที่ระบุไว้ด้านบน — ต้องอ้างชื่อยามและช่วงเวลาให้ตรงเป๊ะ ห้ามเปลี่ยนเวลาเอง';
         $lines[] = '4) การเตรียมตัวที่เหมาะกับงานหมวดนี้โดยเฉพาะ';
         $lines[] = 'น้ำเสียงอบอุ่นเป็นกันเอง ไม่ขู่ ไม่ต้องขึ้นต้นด้วยคำทักทาย';
 
@@ -126,12 +134,22 @@ class AuspiciousAdvisor
             $occasion['label'],
         );
 
-        if ($top['best_from']) {
+        if (! empty($top['yam'])) {
             $out[] = sprintf(
-                '**ช่วงเวลาที่ควรเริ่มพิธี: %s–%s น.** เป็นช่วงที่%sครองจริงในวันนั้น ถ้าเริ่มก่อนหรือหลังช่วงนี้ ดวงจันทร์จะเคลื่อนเข้านักษัตรถัดไปแล้ว ฤกษ์จะเปลี่ยนทันที',
-                $top['best_from']->format('H:i'),
-                $top['best_to']->format('H:i'),
+                '**เวลาตั้งพิธี: ยาม%s %s–%s น.** ลงเลขยามอัฐกาลของวัน%sได้ดาวเจ้าวันเลข %d ตั้งต้น '
+                .'เดินระบบ +5 ไปทีละยาม ตกยามที่ %d เป็นยามของ%s ซึ่งเป็นยามที่หนุนงานหมวด%s '
+                .'และอยู่ในช่วงที่%sครองจริง (%s–%s น.) — พ้นช่วงนี้ดวงจันทร์เคลื่อนเข้านักษัตรถัดไป ฤกษ์เปลี่ยนทันที',
+                $top['yam']['name'],
+                $top['yam']['from'],
+                $top['yam']['to'],
+                $top['weekday']['name'],
+                $top['yam']['lord'],
+                $top['yam']['picked'],
+                ThaiAstro::PLANETS[$top['yam']['planet']]['name'],
+                $occasion['label'],
                 $top['ruek']['name'],
+                $top['ruek_from']->format('H:i'),
+                $top['ruek_to']->format('H:i'),
             );
         }
 
@@ -139,7 +157,9 @@ class AuspiciousAdvisor
         if ($alts) {
             $out[] = '**วันสำรอง**';
             foreach ($alts as $a) {
-                $time = $a['best_from'] ? sprintf(' ช่วง %s–%s น.', $a['best_from']->format('H:i'), $a['best_to']->format('H:i')) : '';
+                $time = ! empty($a['yam'])
+                    ? sprintf(' ตั้งพิธียาม%s %s–%s น.', $a['yam']['name'], $a['yam']['from'], $a['yam']['to'])
+                    : '';
                 $out[] = sprintf(
                     '- %s — %s (นักษัตร%s) %s คะแนน %d/100%s',
                     $a['label'],
@@ -163,7 +183,9 @@ class AuspiciousAdvisor
         $out[] = '**หลักที่ใช้ตัดสิน**';
         $out[] = $occasion['note'];
         $out[] = sprintf(
-            '_ระบบอ่านฤกษ์จากตำแหน่งจริงของดวงจันทร์บนจักรราศี (นักษัตร %d ฤกษ์บน 9) ประกอบกับดิถีข้างขึ้น-ข้างแรมและวารประจำวัน — ไม่ได้สุ่มและไม่ได้ดูแค่วันในสัปดาห์_',
+            '_ระบบอ่านฤกษ์จากตำแหน่งจริงของดวงจันทร์บนจักรราศี (นักษัตร %d ฤกษ์บน 9) ประกอบกับดิถีข้างขึ้น-ข้างแรมและวารประจำวัน '
+            .'ส่วนเวลาตั้งพิธีมาจากการลงเลขยามอัฐกาล ๘ ยามกลางวัน ยามละ ๑ ชั่วโมง ๓๐ นาที ระบบ +5 จากดาวเจ้าวัน '
+            .'— ตรวจย้อนกลับกับตำราได้ทีละช่อง ไม่ได้สุ่มและไม่ได้ดูแค่วันในสัปดาห์_',
             count(ThaiAstro::NAKSHATRAS),
         );
 

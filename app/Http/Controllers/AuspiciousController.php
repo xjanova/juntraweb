@@ -29,11 +29,15 @@ class AuspiciousController extends Controller
     public function index(AuspiciousScorer $scorer)
     {
         $today = Carbon::today(ThaiAstro::TZ);
+        $now   = Carbon::now(ThaiAstro::TZ);
 
         $upcoming = AuspiciousDate::where('active', true)
             ->whereBetween('date', [$today, $today->copy()->addDays(60)])
             ->orderBy('date')
             ->get();
+
+        // ยามของ "ตอนนี้" — วันของโหรเริ่ม 06:00 ก่อนหน้านั้นยังเป็นยามกลางคืนของเมื่อวาน
+        $nowYam = ThaiAstro::yamAt($now);
 
         return view('pages.auspicious.index', [
             'upcoming'  => $upcoming,
@@ -43,6 +47,9 @@ class AuspiciousController extends Controller
             // (หน้าเดิมมีแค่ฟอร์มลอย ๆ ลูกค้าไม่รู้ว่าจ่ายแล้วจะได้อะไร)
             'preview'   => $scorer->scoreRange($today, $today->copy()->addDays(13)),
             'ruekList'  => ThaiAstro::RUEK,
+            // ตารางลงเลขยามของวันนี้ โชว์ฟรีก่อนจ่าย — พิสูจน์ว่าเลขมาจากการคำนวณจริง
+            'todayYam'  => ThaiAstro::yamAtthakan($nowYam['date']),
+            'nowYam'    => $nowYam,
         ]);
     }
 
@@ -175,7 +182,8 @@ class AuspiciousController extends Controller
             'from_date'      => $from->toDateString(),
             'to_date'        => $to->toDateString(),
             'cost'           => $cost,
-            'engine'         => 'thai-astro-v1',
+            // v2 = มียามอัฐกาลแล้ว · ผลเก่า (v1) ไม่มีคีย์ yam — หน้าแสดงผลต้องทนได้
+            'engine'         => 'thai-astro-v2',
             'candidates'     => array_map(fn ($c) => [
                 'date'       => $c['date']->toDateString(),
                 'label'      => $c['label'],
@@ -186,6 +194,9 @@ class AuspiciousController extends Controller
                 'nakshatra'  => $c['nakshatra'],
                 'ruek'       => $c['ruek'],
                 'tithi'      => $c['tithi'],
+                'yam'        => $c['yam'],
+                'ruek_from'  => $c['ruek_from']->format('H:i'),
+                'ruek_to'    => $c['ruek_to']->format('H:i'),
                 'best_from'  => $c['best_from']?->format('H:i'),
                 'best_to'    => $c['best_to']?->format('H:i'),
                 'reasons'    => $c['reasons'],
