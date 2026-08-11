@@ -951,3 +951,176 @@
   .pick-status { padding: 10px 14px; font-size: 12px; border-radius: 14px; }
   .pick-status strong { font-size: 15px; }
 }
+
+/* ============================================================
+   PAGE HERO — แถบหัวเพจพร้อมภาพประกอบ (ใช้ร่วมกันทุกธีม)
+
+   ภาพที่ใช้ทุกใบมี "พื้นที่มืดว่าง" อยู่ฝั่งซ้ายมาตั้งแต่ตอนสร้าง
+   ตัวหนังสือจึงวางทับฝั่งซ้ายได้โดยไม่ต้องพึ่งกล่องทึบบังภาพ
+   แต่ยังไล่เฉดทับอีกชั้นไว้กันเหนียว เพราะ object-fit: cover
+   จะครอปไม่เท่ากันในแต่ละความกว้างจอ — ถ้าไม่มีเฉดนี้
+   บางจอจะเลื่อนส่วนสว่างของภาพมาอยู่ใต้ตัวอักษรพอดี
+   ตัวแปรสีใช้รูปแบบ var(--x, fallback) ตามที่ไฟล์นี้ใช้ทั้งไฟล์
+   เพราะหน้า shared ต้องเรนเดอร์ได้ทั้งสองธีม
+   ============================================================ */
+.page-hero {
+  position: relative;
+  isolation: isolate;          /* กัน z-index:-1 ของชั้นภาพทะลุไปหลัง section */
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid var(--line-soft, rgba(231, 201, 122, .13));
+  background: var(--bg-1, #160a26);
+  padding: clamp(28px, 4.4vw, 54px) clamp(22px, 4vw, 50px);
+  /* section.canvas กว้างได้ถึง 1440px ซึ่งกว้างเกินกว่าจะวางแบนเนอร์สวย ๆ
+     คุมไว้ 980px แล้วปล่อยให้หน้าที่ห่อด้วยกล่องแคบกว่า (ฟอร์ม 680px)
+     บีบ hero ลงตามคอนเทนต์ของหน้านั้นเอง */
+  max-width: 980px;
+  margin: 0 auto clamp(32px, 5vw, 56px);
+  min-height: 232px;
+  display: flex;
+  align-items: center;
+}
+
+.page-hero-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+.page-hero-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 72% center;  /* ดันให้เห็นตัวแบบฝั่งขวา เก็บพื้นมืดไว้ซ้าย */
+  opacity: .9;
+}
+.page-hero-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg,
+      var(--bg-0, #0a0612) 0%,
+      rgba(10, 6, 18, .93) 30%,
+      rgba(10, 6, 18, .55) 58%,
+      rgba(10, 6, 18, .18) 100%),
+    linear-gradient(0deg, rgba(10, 6, 18, .55) 0%, rgba(10, 6, 18, 0) 60%);
+}
+
+.page-hero-inner {
+  position: relative;
+  max-width: 640px;
+  width: 100%;
+}
+/* ⚠️ ต้องเจาะจงกว่า 1 คลาสเสมอ — layouts/app.blade.php โหลด CSS ของธีม
+   "ต่อจาก" app.css ฉะนั้นกฎธีมที่คลาสเดียวเท่ากัน (.lede) หรือมากกว่า
+   (h1.display = clamp(44px,7vw,96px)) จะชนะเสมอถ้าเขียน .page-hero-title
+   เฉย ๆ ผลคือหัวเรื่องในแบนเนอร์โตทะลุกล่องบนจอแคบ ตรวจเจอตอนวัดจริง */
+.page-hero .page-hero-eyebrow {
+  display: inline-flex;
+  margin-bottom: 14px;
+}
+.page-hero h1.page-hero-title {
+  font-size: clamp(32px, 4.4vw, 58px);
+  line-height: 1.16;
+  margin: 0 0 14px;
+  color: var(--ink, #f3e9ff);
+}
+.page-hero h1.page-hero-title em {
+  color: var(--gold-2, var(--gold, #e7c97a));
+}
+.page-hero .page-hero-lede {
+  margin: 0;
+  max-width: 560px;
+  font-size: clamp(14px, 1.2vw, 16px);
+  color: var(--ink-dim, #c8b8de);
+}
+
+/* แถบประดับล้วน (ไม่มีข้อความทับ) — ใช้กับหน้าที่มีหัวเรื่องของตัวเองแล้ว
+   เตี้ยกว่าปกติ และไม่ต้องหรี่ภาพมากเพราะไม่มีตัวอักษรต้องอ่านทับ */
+.page-hero--band {
+  min-height: 148px;
+  padding: 0;
+  margin-bottom: clamp(24px, 3vw, 34px);
+}
+.page-hero--band .page-hero-art img { opacity: 1; object-position: center 42%; }
+.page-hero--band .page-hero-art::after {
+  background: linear-gradient(0deg, rgba(10, 6, 18, .58) 0%, rgba(10, 6, 18, 0) 62%);
+}
+.page-hero--band .page-hero-inner { display: none; }
+
+@media (max-width: 720px) {
+  .page-hero--band { min-height: 112px; }
+}
+
+/* ไม่มีภาพ → ไม่ต้องมีกรอบ/พื้น ให้เหมือนหัวข้อความเดิม */
+.page-hero--bare {
+  border: 0;
+  background: none;
+  padding-left: 0;
+  padding-right: 0;
+  min-height: 0;
+}
+
+@media (max-width: 720px) {
+  .page-hero {
+    min-height: 200px;
+    border-radius: 18px;
+  }
+  /* จอแคบ กล่องเกือบเป็นสี่เหลี่ยมจัตุรัส ภาพจะถูกครอปจนเหลือแต่กลางภาพ
+     ดึง object-position กลับมากลาง แล้วเพิ่มน้ำหนักเฉดแนวตั้งแทนแนวนอน */
+  .page-hero-art img { object-position: 62% center; opacity: .74; }
+  .page-hero-art::after {
+    background:
+      linear-gradient(90deg, var(--bg-0, #0a0612) 0%, rgba(10, 6, 18, .82) 46%, rgba(10, 6, 18, .42) 100%),
+      linear-gradient(0deg, rgba(10, 6, 18, .78) 0%, rgba(10, 6, 18, .1) 72%);
+  }
+  .page-hero .page-hero-lede { font-size: 14px; }
+  .page-hero h1.page-hero-title { font-size: clamp(28px, 8vw, 40px); }
+}
+
+/* ============================================================
+   AUTH BACKDROP — ซุ้มประตูจักรวาลหลังกล่องเข้าสู่ระบบ
+
+   หน้า login พาดหัวว่า "เปิดประตู สู่ดวงชะตา" อยู่แล้ว ภาพจึงเป็น
+   ซุ้มประตูจริง ๆ วางไว้ "หลัง" ฟอร์ม ไม่ใช่แบนเนอร์ด้านบน
+   ฟอร์มยังอยู่กลางจอเหมือนเดิมทุกประการ แค่มีฉากหลัง
+   ============================================================ */
+.auth-canvas {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.auth-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.auth-backdrop img {
+  height: 100%;
+  width: auto;
+  max-width: none;              /* ทับ reset `img { max-width:100% }` ใน @layer base */
+  opacity: .3;
+  /* หรี่ขอบภาพให้จางหายไปกับพื้น แทนการเห็นเป็นสี่เหลี่ยมลอย */
+  -webkit-mask-image: radial-gradient(closest-side at 50% 44%, #000 42%, transparent 100%);
+  mask-image: radial-gradient(closest-side at 50% 44%, #000 42%, transparent 100%);
+}
+.auth-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+    var(--bg-0, #0a0612) 0%,
+    rgba(10, 6, 18, .34) 38%,
+    rgba(10, 6, 18, .62) 72%,
+    var(--bg-0, #0a0612) 100%);
+}
+
+@media (max-width: 720px) {
+  /* จอแคบ ภาพสูงเต็มจอจะล้นออกด้านข้างจนเห็นแต่กลางซุ้ม — หรี่ลงอีก
+     ให้ตัวอักษรบนพื้นมืดยังคอนทราสต์พอ */
+  .auth-backdrop img { opacity: .2; }
+}

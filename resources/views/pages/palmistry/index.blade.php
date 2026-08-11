@@ -4,11 +4,10 @@
 @section('content')
 <section class="canvas" style="padding-top:160px">
   <div style="max-width:680px;margin:0 auto">
-    <div style="text-align:center;margin-bottom:60px">
-      <div class="eyebrow" style="display:inline-flex">ดูลายมือ AI · PALMISTRY</div>
-      <h1 class="display" style="font-size:clamp(48px,6vw,84px);margin-bottom:24px">ฝ่ามือ <em>ภาพชะตา</em></h1>
-      <p class="lede" style="margin:0 auto">อัพโหลดรูปฝ่ามือซ้าย (สำหรับผู้ชาย) หรือฝ่ามือขวา (สำหรับผู้หญิง) ในที่มีแสงสว่างเพียงพอ — AI จะวิเคราะห์เส้นชีวิต เส้นใจ เส้นปัญญา</p>
-    </div>
+    <x-page-hero art="images/juntra/art/palmistry.webp" eyebrow="ดูลายมือ AI · PALMISTRY">
+      <x-slot:title>ฝ่ามือ <em>ภาพชะตา</em></x-slot:title>
+      <x-slot:lede>อัพโหลดรูปฝ่ามือซ้าย (สำหรับผู้ชาย) หรือฝ่ามือขวา (สำหรับผู้หญิง) ในที่มีแสงสว่างเพียงพอ — AI จะวิเคราะห์เส้นชีวิต เส้นใจ เส้นปัญญา</x-slot:lede>
+    </x-page-hero>
 
     @if (isset($cost) && $cost > 0)
       <div style="text-align:center;margin-bottom:24px;font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase">

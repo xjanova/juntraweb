@@ -3,11 +3,10 @@
 
 @section('content')
 <section class="canvas" style="padding-top:160px">
-  <div style="text-align:center;max-width:780px;margin:0 auto 60px">
-    <div class="eyebrow" style="display:inline-flex">ปีนักษัตร · 12 นักษัตร</div>
-    <h1 class="display" style="font-size:clamp(48px,6vw,84px);margin-bottom:24px">ปีเกิด <em>เขียนชะตา</em></h1>
-    <p class="lede" style="margin:0 auto">นักษัตรไทยจาก 12 ปีในรอบ — แต่ละปีมีพลังเฉพาะตัวที่ส่งผลต่อบุคลิกและโชคชะตาของผู้เกิดในปีนั้น</p>
-  </div>
+  <x-page-hero art="images/juntra/art/thai-zodiac.webp" eyebrow="ปีนักษัตร · 12 นักษัตร">
+    <x-slot:title>ปีเกิด <em>เขียนชะตา</em></x-slot:title>
+    <x-slot:lede>นักษัตรไทยจาก 12 ปีในรอบ — แต่ละปีมีพลังเฉพาะตัวที่ส่งผลต่อบุคลิกและโชคชะตาของผู้เกิดในปีนั้น</x-slot:lede>
+  </x-page-hero>
 
   <div class="services-grid" style="max-width:1080px;margin:0 auto">
     @foreach ($chineseZodiacs as $cz)

@@ -58,6 +58,10 @@
 <section class="canvas" style="padding-top:160px">
   <div class="free-wrap">
 
+    {{-- แบนเนอร์ประดับล้วน ไม่มีข้อความ — หัวเรื่องจริงของหน้านี้อยู่ในบล็อกด้านล่าง
+         ซึ่งเปลี่ยนไปตามสถานะ (ได้สิทธิ์ / ลองใหม่ / สิทธิ์หมด) --}}
+    <x-page-hero art="images/juntra/art/tarot-free.webp" />
+
     @if ($allowed)
       {{-- ── เปิดไพ่ (อัตโนมัติ / หรือให้กดเองเมื่อรอบก่อนล้ม) ───────── --}}
       <div x-data="{ sent: false }"

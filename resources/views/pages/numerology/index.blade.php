@@ -4,11 +4,10 @@
 @section('content')
 <section class="canvas" style="padding-top:160px">
   <div style="max-width:680px;margin:0 auto">
-    <div style="text-align:center;margin-bottom:60px">
-      <div class="eyebrow" style="display:inline-flex">เลขศาสตร์ · NUMEROLOGY</div>
-      <h1 class="display" style="font-size:clamp(48px,6vw,84px);margin-bottom:24px">ตัวเลข <em>กำหนดชะตา</em></h1>
-      <p class="lede" style="margin:0 auto">คำนวณเลข Life Path, Expression, และ Birth Day จากชื่อและวันเกิดของคุณ พร้อมคำอธิบายความหมายเชิงลึก</p>
-    </div>
+    <x-page-hero art="images/juntra/art/numerology.webp" eyebrow="เลขศาสตร์ · NUMEROLOGY">
+      <x-slot:title>ตัวเลข <em>กำหนดชะตา</em></x-slot:title>
+      <x-slot:lede>คำนวณเลข Life Path, Expression, และ Birth Day จากชื่อและวันเกิดของคุณ พร้อมคำอธิบายความหมายเชิงลึก</x-slot:lede>
+    </x-page-hero>
 
     @if (isset($cost) && $cost > 0)
       <div style="text-align:center;margin-bottom:24px;font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase">

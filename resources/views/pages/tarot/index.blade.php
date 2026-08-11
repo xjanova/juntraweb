@@ -200,11 +200,10 @@
 
 @section('content')
 <section class="canvas" style="padding-top:160px">
-  <div style="text-align:center;max-width:820px;margin:0 auto 44px">
-    <div class="eyebrow" style="display:inline-flex">ไพ่ยิปซี Rider-Waite · 78 ใบ</div>
-    <h1 class="display" style="font-size:clamp(48px,6vw,84px);margin-bottom:24px">เปิดไพ่ <em>ค้นหาคำตอบ</em></h1>
-    <p class="lede" style="margin:0 auto">เลือกรูปแบบการวางไพ่ที่ตรงกับใจคุณ — ตั้งแต่ไพ่ใบเดียวฟันธงเร็ว ไปจนถึง Celtic Cross 10 ใบ และพยากรณ์รายปี 12 เดือน แม่หมอจันทรา AI จะอ่านไพ่ × ตำแหน่งให้คุณอย่างแม่นยำ</p>
-  </div>
+  <x-page-hero art="images/juntra/art/tarot.webp" eyebrow="ไพ่ยิปซี Rider-Waite · 78 ใบ">
+    <x-slot:title>เปิดไพ่ <em>ค้นหาคำตอบ</em></x-slot:title>
+    <x-slot:lede>เลือกรูปแบบการวางไพ่ที่ตรงกับใจคุณ — ตั้งแต่ไพ่ใบเดียวฟันธงเร็ว ไปจนถึง Celtic Cross 10 ใบ และพยากรณ์รายปี 12 เดือน แม่หมอจันทรา AI จะอ่านไพ่ × ตำแหน่งให้คุณอย่างแม่นยำ</x-slot:lede>
+  </x-page-hero>
 
   <form action="{{ route('tarot.begin') }}" method="POST" style="max-width:1080px;margin:0 auto"
         x-data="{ spread: 'three', meta: {{ $spreadJs->toJson() }} }">

@@ -33,6 +33,8 @@
       })">
 
     {{-- ── Header ───────────────────────────────────────────── --}}
+    <x-page-hero art="images/juntra/art/mlm.webp" />
+
     <div style="margin-bottom: 26px">
       <div class="eyebrow" style="display:inline-flex">ระบบสายงาน · AFFILIATE</div>
       <h1 class="display" style="font-size:clamp(40px,5vw,68px);margin:6px 0 12px">

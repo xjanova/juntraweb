@@ -52,6 +52,8 @@
          ]),
        })">
 
+    <x-page-hero art="images/juntra/art/chat.webp" />
+
     <div style="text-align:center;margin-bottom:26px">
       <div class="eyebrow">CHANTRA AI ORACLE</div>
       <h1 class="display" style="font-size:clamp(34px,4.5vw,60px);margin-bottom:12px">

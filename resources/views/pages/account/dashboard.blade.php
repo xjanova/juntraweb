@@ -19,6 +19,8 @@
     @include('partials.account-sidebar', ['active' => 'dashboard'])
 
     <div class="account-content">
+      <x-page-hero art="images/juntra/art/account.webp" />
+
       <div class="eyebrow">บัญชีของฉัน</div>
       <h2 style="font-family:var(--serif);font-size:clamp(32px,4vw,52px);font-weight:400;margin:8px 0 24px">
         สวัสดี <em style="color:var(--gold)">{{ $user->name }}</em>

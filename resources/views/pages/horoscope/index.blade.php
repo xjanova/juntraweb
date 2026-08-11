@@ -3,11 +3,10 @@
 
 @section('content')
 <section class="canvas" style="padding-top:160px">
-  <div style="text-align:center;max-width:780px;margin:0 auto 60px">
-    <div class="eyebrow" style="display:inline-flex">ดวงรายวัน · 12 ราศี</div>
-    <h1 class="display" style="font-size:clamp(48px,6vw,84px);margin-bottom:24px">เลือกราศี <em>ของคุณ</em></h1>
-    <p class="lede" style="margin:0 auto">คำพยากรณ์ประจำวันสด ๆ ทุกวัน — ความรัก การงาน การเงิน สุขภาพ พร้อมเลขนำโชค สีมงคล และไพ่ประจำวัน</p>
-  </div>
+  <x-page-hero art="images/juntra/art/horoscope.webp" eyebrow="ดวงรายวัน · 12 ราศี">
+    <x-slot:title>เลือกราศี <em>ของคุณ</em></x-slot:title>
+    <x-slot:lede>คำพยากรณ์ประจำวันสด ๆ ทุกวัน — ความรัก การงาน การเงิน สุขภาพ พร้อมเลขนำโชค สีมงคล และไพ่ประจำวัน</x-slot:lede>
+  </x-page-hero>
 
   <div class="zodiac-list" style="grid-template-columns:repeat(4,1fr);max-width:880px;margin:0 auto;gap:14px">
     @foreach ($zodiacs as $z)

@@ -5,15 +5,14 @@
 <section class="canvas" style="padding-top:150px">
   <div style="max-width:880px;margin:0 auto">
 
-    <div style="text-align:center;margin-bottom:44px">
-      <div class="eyebrow" style="display:inline-flex">ฤกษ์ยาม · AUSPICIOUS DATES</div>
-      <h1 class="display" style="font-size:clamp(44px,6vw,80px);margin:16px 0 20px">หาวัน <em>มงคล</em></h1>
-      <p class="lede" style="margin:0 auto;max-width:640px">
+    <x-page-hero art="images/juntra/art/auspicious.webp" eyebrow="ฤกษ์ยาม · AUSPICIOUS DATES">
+      <x-slot:title>หาวัน <em>มงคล</em></x-slot:title>
+      <x-slot:lede>
         คำนวณจากตำแหน่งจริงของดวงจันทร์บนจักรราศี — อ่านฤกษ์บน 9 จากนักษัตรที่ดวงจันทร์สถิต
         ประกอบกับดิถีข้างขึ้น-ข้างแรมและวารประจำวัน แล้วลงเลข <em>ยามอัฐกาล</em>
         หาชั่วโมงที่ควรตั้งพิธีจริง ๆ ถ่วงน้ำหนักตามประเภทงานของคุณ
-      </p>
-    </div>
+      </x-slot:lede>
+    </x-page-hero>
 
     @if (session('status'))
       <div class="panel" style="margin-bottom:22px;border-color:rgba(224,182,66,.35);padding:18px 22px;color:var(--gold)">

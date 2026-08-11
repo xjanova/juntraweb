@@ -14,6 +14,8 @@
 
     <div class="account-content">
 
+    <x-page-hero art="images/juntra/art/wallet.webp" />
+
     <div class="eyebrow">วอลเลตของฉัน</div>
     <h1 class="display" style="font-size:clamp(32px,4vw,56px);margin:8px 0 12px">
       <em style="color:var(--gold)">เครดิต</em> สำหรับดูดวง

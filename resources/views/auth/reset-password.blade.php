@@ -2,7 +2,11 @@
 @section('title', 'ตั้งรหัสผ่านใหม่')
 
 @section('content')
-<section class="canvas" style="padding-top:160px">
+<section class="canvas auth-canvas" style="padding-top:160px">
+  {{-- ฉากหลังซุ้มประตูจักรวาล — ของประดับล้วน ไม่มีข้อมูลอยู่ในภาพ --}}
+  <div class="auth-backdrop" aria-hidden="true">
+    <img src="{{ asset('images/juntra/art/auth.webp') }}" alt="" width="1100" height="1467" decoding="async">
+  </div>
   <div style="max-width:520px;margin:0 auto">
     <div style="text-align:center;margin-bottom:48px">
       <div class="eyebrow" style="display:inline-flex">RESET PASSWORD</div>

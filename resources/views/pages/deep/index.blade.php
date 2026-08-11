@@ -6,16 +6,13 @@
 <section class="canvas">
   <div class="shell-read" style="max-width:680px;margin:0 auto">
 
-    <div style="text-align:center;margin-bottom:30px">
-      <div class="eyebrow">DEEP READING</div>
-      <h1 class="display" style="font-size:clamp(32px,4.5vw,54px);margin-bottom:12px">
-        ดูดวง<em>เชิงลึก</em>
-      </h1>
-      <p class="lede" style="margin:0 auto">
+    <x-page-hero art="images/juntra/art/deep.webp" eyebrow="DEEP READING">
+      <x-slot:title>ดูดวง<em>เชิงลึก</em></x-slot:title>
+      <x-slot:lede>
         แม่หมออ่านดวงชะตาจากวันเกิดของคุณ แล้วตอบคำถามที่ค้างคาใจทีละข้อ —
         แพ็กเดียวกับที่แม่หมอทำนายให้ลูกค้าในแชท Facebook / LINE
-      </p>
-    </div>
+      </x-slot:lede>
+    </x-page-hero>
 
     @if ($cost > 0)
       <div class="quota-bar" style="justify-content:center">
