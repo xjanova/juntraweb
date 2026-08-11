@@ -5,13 +5,13 @@
   /** ทะเบียนชนิดรายการ — ต้องครบทุกบริการที่เขียนลง readings
       ถ้าลืมเพิ่มชนิดใหม่ตรงนี้ รายการจะยังโชว์ได้ (ใช้ค่า default) แต่จะไม่มีไอคอน */
   $meta = collect(\App\Support\TarotSpreads::all())
-    ->mapWithKeys(fn ($m, $k) => ['tarot_' . $k => ['label' => $m['name_th'], 'icon' => '🃏', 'color' => '#b98cc4']])
+    ->mapWithKeys(fn ($m, $k) => ['tarot_' . $k => ['label' => $m['name_th'], 'icon' => 'tarot', 'color' => '#b98cc4']])
     ->merge([
-      'numerology' => ['label' => 'เลขศาสตร์',        'icon' => '🔢', 'color' => '#4a8bb0'],
-      'palmistry'  => ['label' => 'ลายมือ',           'icon' => '🖐', 'color' => '#c77fb0'],
-      'auspicious' => ['label' => 'ฤกษ์ยาม',          'icon' => '📅', 'color' => '#e0b642'],
-      'deep'       => ['label' => 'ดูดวงเชิงลึก',      'icon' => '🔮', 'color' => '#d4a017'],
-      'chat'       => ['label' => 'AI Chat',          'icon' => '💬', 'color' => '#5f9e6e'],
+      'numerology' => ['label' => 'เลขศาสตร์',        'icon' => 'numerology', 'color' => '#4a8bb0'],
+      'palmistry'  => ['label' => 'ลายมือ',           'icon' => 'palmistry',  'color' => '#c77fb0'],
+      'auspicious' => ['label' => 'ฤกษ์ยาม',          'icon' => 'calendar',   'color' => '#e0b642'],
+      'deep'       => ['label' => 'ดูดวงเชิงลึก',      'icon' => 'crystal',    'color' => '#d4a017'],
+      'chat'       => ['label' => 'AI Chat',          'icon' => 'chat',       'color' => '#5f9e6e'],
     ])->all();
 
   $filters = ['' => 'ทั้งหมด', 'tarot' => 'ไพ่ยิปซี', 'auspicious' => 'ฤกษ์ยาม',
@@ -44,7 +44,7 @@
     <div style="display:grid;gap:14px">
       @forelse ($readings as $r)
         @php
-          $m = $meta[$r->type] ?? ['label' => $r->type, 'icon' => '✦', 'color' => 'var(--gold)'];
+          $m = $meta[$r->type] ?? ['label' => $r->type, 'icon' => 'sparkle', 'color' => 'var(--gold)'];
           $cost = $r->payload['cost'] ?? null;
         @endphp
         <a href="{{ route('reading.show', $r) }}" class="panel"
@@ -53,7 +53,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
             <div style="flex:1;min-width:240px">
               <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px;flex-wrap:wrap">
-                <span style="font-size:16px">{{ $m['icon'] }}</span>
+                <x-glyph :name="$m['icon']" :size="17" style="color:{{ $m['color'] }}" />
                 <span style="font-family:var(--display);font-size:11px;letter-spacing:.18em;color:{{ $m['color'] }};text-transform:uppercase">{{ $m['label'] }}</span>
                 @if ($cost)
                   <span style="font-size:10px;color:var(--ink-faint);border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:2px 8px">฿{{ (int) $cost }}</span>

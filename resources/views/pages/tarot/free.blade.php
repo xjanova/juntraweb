@@ -67,7 +67,7 @@
       <div x-data="{ sent: false }"
            @if ($autoCast) x-init="$nextTick(() => { if (! sent) { sent = true; $refs.castForm.submit(); } })" @endif>
 
-        <div class="free-orb">🔮</div>
+        <div class="free-orb"><x-glyph name="crystal" :size="40" /></div>
         <div class="eyebrow" style="display:inline-flex">ของขวัญจากแม่หมอ</div>
 
         @if ($isRetry)
@@ -96,7 +96,7 @@
 
     @elseif ($code === 'in_flight')
       {{-- ── กำลังเปิดไพ่อยู่ (อีกแท็บ/กดซ้ำ) — รอแล้วรีเฟรชเอง ────── --}}
-      <div class="free-orb">🔮</div>
+      <div class="free-orb"><x-glyph name="crystal" :size="40" /></div>
       <div class="eyebrow" style="display:inline-flex">ของขวัญจากแม่หมอ</div>
       <h2 style="margin-bottom:10px">แม่หมอกำลัง <em>เปิดไพ่ให้อยู่</em></h2>
       <p class="free-note">รอสักครู่นะคะ หน้านี้จะพาไปที่คำทำนายให้เองเมื่อเสร็จ</p>
@@ -107,7 +107,7 @@
 
     @elseif ($code === 'no_token')
       {{-- ── เซสชันกับ Thaiprompt หมดอายุ — ยิงไปก็ล้ม ให้เข้าระบบใหม่ --}}
-      <div class="free-orb">🌙</div>
+      <div class="free-orb"><x-glyph name="moon" :size="40" /></div>
       <div class="eyebrow" style="display:inline-flex">ดูดวงฟรี 1 ใบ</div>
       <h2 style="margin-bottom:10px">เข้าสู่ระบบใหม่ <em>อีกครั้งนะคะ</em></h2>
       <p class="free-note">เซสชันของคุณหมดอายุแล้วค่ะ กดปุ่มด้านล่างเพื่อเข้าระบบใหม่ แล้วแม่หมอจะเปิดไพ่ให้ทันที</p>
@@ -119,7 +119,7 @@
 
     @elseif ($code === 'guest')
       {{-- ── ยังไม่ล็อกอิน (SSO หลุด) ─────────────────────────────── --}}
-      <div class="free-orb">🌙</div>
+      <div class="free-orb"><x-glyph name="moon" :size="40" /></div>
       <div class="eyebrow" style="display:inline-flex">ดูดวงฟรี 1 ใบ</div>
       <h2 style="margin-bottom:10px">เข้าสู่ระบบ <em>เพื่อรับคำทำนาย</em></h2>
       <p class="free-note">
@@ -134,7 +134,7 @@
 
     @else
       {{-- ── ใช้สิทธิ์แล้ว / เต็มโควตาวันนี้ / ปิดรอบ ─────────────── --}}
-      <div class="free-orb">✨</div>
+      <div class="free-orb"><x-glyph name="sparkle" :size="40" /></div>
       <div class="eyebrow" style="display:inline-flex">ดูดวงฟรี</div>
       <h2 style="margin-bottom:10px">{{ $gate['reason'] ?? 'ตอนนี้ยังเปิดไพ่ฟรีให้ไม่ได้ค่ะ' }}</h2>
       <p class="free-note">

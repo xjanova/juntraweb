@@ -1124,3 +1124,31 @@
      ให้ตัวอักษรบนพื้นมืดยังคอนทราสต์พอ */
   .auth-backdrop img { opacity: .2; }
 }
+
+/* ============================================================
+   ICON — ไอคอนเส้นจาก <x-icon> (ใช้ร่วมทุกธีม)
+
+   สืบสีจาก currentColor เสมอ จึงเปลี่ยนสีตามบริบทที่วางได้เลย
+   (เช่นในหน้าประวัติที่ให้สีประจำชนิดรายการผ่าน inline style)
+   ============================================================ */
+.ico {
+  display: inline-block;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+
+/* ไอคอนในวงกลมของการ์ดบริการ — เดิมช่องนี้ใส่อักขระ ✦☽☉♅ ขนาด 28px
+   พอเปลี่ยนเป็น svg ต้องกำหนดขนาดเอง ไม่งั้นจะกินความสูงเต็มวง */
+.svc-icon .ico,
+.service .icon .ico {
+  width: 30px; height: 30px;
+  color: var(--gold-2, #f4cf6a);
+}
+
+.free-orb .ico {
+  width: 40px; height: 40px;
+  color: var(--gold-2, #f4cf6a);
+  filter: drop-shadow(0 0 14px rgba(244, 207, 106, .45));
+}
+
+.chip .ico { width: 15px; height: 15px; }

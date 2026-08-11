@@ -630,3 +630,57 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
   .plan-video-meta { gap: 8px 12px; }
   .plan-chip { font-size: 12px; padding: 6px 12px; }
 }
+
+/* ============================================================
+   ชั้นพื้นหลังจริง + เครื่องประดับทอง (เพิ่มทับของเดิม ไม่รื้อ)
+
+   ของเดิมเป็น CSS ล้วน (gradient + ดาววิ่ง + ควัน) ซึ่งดีอยู่แล้ว
+   จึงไม่แทนที่ แค่ "รองพื้น" ด้วยเท็กซ์เจอร์เนบิวลาจริงไว้ชั้นล่างสุด
+   ให้ได้ความละเอียดแบบที่ gradient ทำไม่ได้ — คุมความจางไว้ที่ .55
+   เพราะพื้นหลังต้องไม่แย่งสายตาไปจากตัวอักษร
+   ============================================================ */
+.bg-fixed::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: url("/images/juntra/bg-nebula.webp") center / cover no-repeat;
+  opacity: .55;
+  pointer-events: none;
+}
+
+/* ลายกนกคั่นใต้หัวข้อแต่ละหมวด
+   ไฟล์ต้นฉบับเป็นลายทองบนพื้นดำสนิท — ใช้ mix-blend-mode: screen
+   พื้นดำจึงกลายเป็นโปร่งใสเอง ไม่ต้องมีไฟล์ alpha ให้หนักกว่าเดิม */
+.section-head::after {
+  content: "";
+  display: block;
+  width: min(330px, 60%); height: 52px;
+  margin: 20px auto 0;
+  background: url("/images/juntra/ornament-divider.webp") center / contain no-repeat;
+  mix-blend-mode: screen;
+  opacity: .9;
+}
+
+/* ============ ปุ่ม — แสงกวาดตอน hover ============ */
+.btn-primary { overflow: hidden; }
+.btn-primary::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 32%, rgba(255, 255, 255, .55) 48%, transparent 64%);
+  transform: translateX(-125%);
+  transition: transform .75s cubic-bezier(.2, .7, .3, 1);
+  pointer-events: none;
+}
+.btn-primary:hover::after { transform: translateX(125%); }
+
+/* ============ การ์ด — เส้นทองบางบนขอบบน + ไอคอนเรืองตอน hover ============ */
+.svc::before, .service::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(231, 201, 122, .6), transparent);
+  opacity: .75;
+}
+.svc:hover .svc-icon, .service:hover .icon {
+  border-color: rgba(231, 201, 122, .6);
+  box-shadow: inset 0 0 22px rgba(231, 201, 122, .22), 0 0 26px -6px rgba(231, 201, 122, .35);
+}
+.svc-icon, .service .icon { transition: border-color .4s, box-shadow .4s; }

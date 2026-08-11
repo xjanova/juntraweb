@@ -47,28 +47,28 @@
 
   <div class="services">
     <div class="svc reveal">
-      <div class="svc-icon">✦</div>
+      <div class="svc-icon"><x-glyph name="tarot" :size="30" /></div>
       <h3>ไพ่ยิปซี</h3>
       <div class="svc-en">Tarot Reading</div>
       <p>เปิดไพ่ 3 ใบ หรือ Celtic Cross 10 ใบ — อดีต ปัจจุบัน อนาคต พร้อมคำพยากรณ์ AI ที่ละเอียดอ่อน</p>
       <a href="{{ route('tarot.index') }}" class="svc-link">เปิดไพ่ตอนนี้ →</a>
     </div>
     <div class="svc reveal">
-      <div class="svc-icon">☽</div>
+      <div class="svc-icon"><x-glyph name="moon" :size="30" /></div>
       <h3>ดวงรายวัน</h3>
       <div class="svc-en">Moon Horoscope</div>
       <p>พยากรณ์ตามฤกษ์จันทรคติ ครอบคลุม ความรัก การเงิน การงาน และสุขภาพจิตวิญญาณ ทั้ง 12 ราศี</p>
       <a href="{{ route('horoscope.index') }}" class="svc-link">อ่านเพิ่มเติม →</a>
     </div>
     <div class="svc reveal">
-      <div class="svc-icon">☉</div>
+      <div class="svc-icon"><x-glyph name="calendar" :size="30" /></div>
       <h3>ฤกษ์มงคล</h3>
       <div class="svc-en">Auspicious Time</div>
       <p>หาฤกษ์เปิดร้าน แต่งงาน ขึ้นบ้านใหม่ ทำพิธี ตามดวงดาวและธาตุประจำตัวท่าน</p>
       <a href="{{ route('auspicious.index') }}" class="svc-link">ปรึกษาฤกษ์ →</a>
     </div>
     <div class="svc reveal">
-      <div class="svc-icon">♅</div>
+      <div class="svc-icon"><x-glyph name="numerology" :size="30" /></div>
       <h3>เลขศาสตร์ &amp; ลายมือ</h3>
       <div class="svc-en">Numerology &amp; Palmistry</div>
       <p>คำนวณเลขชะตา เลขนาม จากชื่อและวันเกิด พร้อมวิเคราะห์ลายมือผ่าน AI Vision</p>
