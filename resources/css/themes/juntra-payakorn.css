@@ -684,3 +684,84 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
   box-shadow: inset 0 0 22px rgba(231, 201, 122, .22), 0 0 26px -6px rgba(231, 201, 122, .35);
 }
 .svc-icon, .service .icon { transition: border-color .4s, box-shadow .4s; }
+
+/* ============================================================
+   ลายไทยบนโครงหน้า — เมนูบน / ฟุตเตอร์ / กรอบการ์ด
+
+   ไฟล์ลายทั้งสามคีย์พื้นดำออกเป็น alpha จริงแล้ว (lumakey → lossless webp)
+   ไม่ได้ใช้ mix-blend-mode เหมือนลายคั่นหัวข้อ เพราะ border-image
+   ใช้ร่วมกับ blend mode ไม่ได้ ต้องมีอัลฟาในไฟล์เท่านั้น
+   ============================================================ */
+
+/* ── ลายใต้แถบเมนูบน ────────────────────────────────────────
+   วางเป็น ::after ของ .nav เอง ไม่แทรก element ใหม่เข้าไปในเมนู
+   เพราะโครง Alpine ของเมนูมือถือแตะต้องไม่ได้ (ปุ่มแฮมเบอร์เกอร์ต้องอยู่
+   ใน x-data root เดิม ไม่งั้น click.outside จะปิดเมนูทันทีที่กดเปิด) */
+.nav::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -14px;
+  height: 28px;
+  background: url("/images/juntra/ornament-nav.webp") center / contain no-repeat;
+  opacity: .5;
+  pointer-events: none;
+}
+
+/* ── ยอดกนกเหนือฟุตเตอร์ ───────────────────────────────────── */
+.footer { position: relative; }
+.footer::before {
+  content: "";
+  position: absolute;
+  top: -30px; left: 50%;
+  transform: translateX(-50%);
+  width: min(400px, 68%); height: 72px;
+  background: url("/images/juntra/ornament-crest.webp") center / contain no-repeat;
+  opacity: .8;
+  pointer-events: none;
+}
+
+/* ── กรอบลายไทยรอบการ์ด ────────────────────────────────────
+   border-image คือเครื่องมือที่ถูกต้องสำหรับกรอบแบบนี้ — มันตัดภาพเป็น 9 ส่วน
+   เก็บ "มุม" ไว้ไม่ให้ยืด แล้วปูเฉพาะขอบตรง การ์ดสัดส่วนไหนมุมก็ไม่บิด
+   (ถ้าใช้ background-size:100% 100% มุมจะยืดตามการ์ดจนลายเบี้ยว)
+
+   วางบน ::after ที่ inset 5px ไม่ใช่บนตัวการ์ดเอง เพราะ
+   1. border-image ไม่เคารพ border-radius — ถ้าใส่บนการ์ดตรง ๆ มุมโค้งจะหายไป
+   2. ใส่ inset ไว้ทำให้ลายอยู่ในเขตการ์ดเสมอ ไม่ล้นออกไปทับพื้นหลัง
+   3. ไม่ไปแตะ box metrics ของการ์ด เลย์เอาต์เดิมไม่ขยับสักพิกเซล */
+.svc::after, .service::after,
+.t-card::after, .dl-feature::after, .dl-step::after,
+.spread-card::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 22px solid transparent;
+  border-image: url("/images/juntra/frame-thai.webp") 92 / 22px round;
+  opacity: .5;
+  pointer-events: none;
+}
+/* การ์ดสองตัวนี้ยังไม่มี containing block ของตัวเอง — ต้องมีก่อน ::after ถึงจะเกาะถูกที่
+   (.svc/.service/.dl-step มี position:relative อยู่แล้ว) */
+.t-card, .dl-feature { position: relative; }
+
+/* ── .panel ใช้ 61 จุดทั่วเว็บ รวมหน้าฟอร์มและหน้าผลลัพธ์ยาว ๆ ─────
+   จงใจ "ไม่" ใส่กรอบลายเต็มใบ เพราะต้องประกาศ position: relative ให้ทุกใบ
+   ซึ่งจะเปลี่ยนจุดยึดของลูกที่เป็น position:absolute ที่มีอยู่จริง
+   (แถบสีซ้ายใน ruek-day-card / หน้าประวัติ, ทูลทิปกับเส้นผังใน MLM)
+   ให้ขอบทองคมขึ้นกับไฮไลต์บนสุดแทน — ได้ทุกใบ ไม่มีอะไรขยับ */
+.panel {
+  border-color: rgba(231, 201, 122, .3);
+  box-shadow: inset 0 1px 0 rgba(246, 227, 168, .16);
+}
+
+@media (max-width: 720px) {
+  .svc::after, .service::after,
+  .t-card::after, .dl-feature::after, .dl-step::after,
+  .spread-card::after {
+    inset: 4px;
+    border-width: 15px;
+    border-image-width: 15px;
+  }
+  .nav::after { height: 20px; bottom: -10px; }
+  .footer::before { top: -22px; height: 52px; width: min(300px, 80%); }
+}
