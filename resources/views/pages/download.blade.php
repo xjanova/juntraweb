@@ -158,7 +158,7 @@
         <div class="dl-screen">
           <div class="dl-ps-status"><span>จันทรา</span><span>☾ ✦ ⚡</span></div>
           <div class="dl-ps-brand">
-            <img src="{{ asset('images/juntra/logo.png') }}" alt="">
+            <img src="{{ asset('images/juntra/logo.webp') }}" alt="">
             <div>จันทราพยากรณ์</div>
           </div>
           <div class="dl-ps-greet">สวัสดีค่ะ ✨ วันนี้อยากให้แม่หมอดูดวงเรื่องอะไรดีคะ — ความรัก การงาน หรือการเงิน?</div>

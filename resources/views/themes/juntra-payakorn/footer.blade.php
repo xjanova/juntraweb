@@ -2,7 +2,7 @@
   <div class="footer-grid">
     <div class="footer-col">
       <a class="brand" href="{{ route('home') }}" style="margin-bottom:18px">
-        <div class="brand-logo"><img src="{{ asset('images/juntra/logo.png') }}" alt=""></div>
+        <div class="brand-logo"><img src="{{ asset('images/juntra/logo.webp') }}" alt=""></div>
         <div class="brand-text">
           <span class="th">{{ config('app.name', 'จันทราพยากรณ์') }}</span>
           <span class="en">JUNTRA PAYAKORN</span>

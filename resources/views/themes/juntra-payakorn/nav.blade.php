@@ -1,6 +1,6 @@
 <header class="nav" x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape.window="open = false">
   <a class="brand" href="{{ route('home') }}">
-    <div class="brand-logo"><img src="{{ asset('images/juntra/logo.png') }}" alt="จันทราพยากรณ์"></div>
+    <div class="brand-logo"><img src="{{ asset('images/juntra/logo.webp') }}" alt="จันทราพยากรณ์"></div>
     <div class="brand-text">
       <span class="th">{{ config('app.name', 'จันทราพยากรณ์') }}</span>
       <span class="en">JUNTRA PAYAKORN</span>

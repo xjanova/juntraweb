@@ -1,6 +1,6 @@
 <nav class="top" x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape.window="open = false">
   <a href="{{ route('home') }}" class="brand">
-    <div class="brand-mark"><img src="{{ asset('images/logo.png') }}" alt=""></div>
+    <div class="brand-mark"><img src="{{ asset('images/logo.webp') }}" alt=""></div>
     <div class="brand-name">
       <b>MAE MOR CHANTRA</b>
       <span>{{ config('app.name', 'แม่หมอจันทรา') }}</span>

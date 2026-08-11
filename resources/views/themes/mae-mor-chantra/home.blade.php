@@ -44,10 +44,10 @@
       <div class="ring r1"></div>
       <div class="ring r3"></div>
     </div>
-    <img src="{{ asset('images/hero-chantra.png') }}" class="chantra-portrait" alt="แม่หมอจันทรา">
-    <div class="float-card fc1"><img src="{{ asset('images/card-magician.png') }}" alt=""></div>
-    <div class="float-card fc2"><img src="{{ asset('images/card-world.png') }}" alt=""></div>
-    <div class="float-card fc3"><img src="{{ asset('images/card-sun.png') }}" alt=""></div>
+    <img src="{{ asset('images/hero-chantra.webp') }}" class="chantra-portrait" alt="แม่หมอจันทรา">
+    <div class="float-card fc1"><img src="{{ asset('images/card-magician.webp') }}" alt=""></div>
+    <div class="float-card fc2"><img src="{{ asset('images/card-world.webp') }}" alt=""></div>
+    <div class="float-card fc3"><img src="{{ asset('images/card-sun.webp') }}" alt=""></div>
   </div>
 </section>
 
@@ -92,9 +92,9 @@
   <div class="reading-stage">
     @php
       $previewCards = [
-        ['name' => 'THE MAGICIAN · I', 'img' => 'images/card-magician.png', 'meaning' => 'พลังสร้างสรรค์และการเริ่มต้นใหม่ที่กำลังจะเกิดขึ้น'],
-        ['name' => 'THE SUN · XIX',     'img' => 'images/card-sun.png',      'meaning' => 'ความรุ่งโรจน์ ความสุข และพลังบวกที่ส่องสว่างชีวิตคุณ'],
-        ['name' => 'THE WORLD · XXI',   'img' => 'images/card-world.png',    'meaning' => 'ความสำเร็จที่สมบูรณ์ การปิดวงจรเก่าเพื่อก้าวสู่บทใหม่'],
+        ['name' => 'THE MAGICIAN · I', 'img' => 'images/card-magician.webp', 'meaning' => 'พลังสร้างสรรค์และการเริ่มต้นใหม่ที่กำลังจะเกิดขึ้น'],
+        ['name' => 'THE SUN · XIX',     'img' => 'images/card-sun.webp',      'meaning' => 'ความรุ่งโรจน์ ความสุข และพลังบวกที่ส่องสว่างชีวิตคุณ'],
+        ['name' => 'THE WORLD · XXI',   'img' => 'images/card-world.webp',    'meaning' => 'ความสำเร็จที่สมบูรณ์ การปิดวงจรเก่าเพื่อก้าวสู่บทใหม่'],
       ];
     @endphp
     @foreach ($previewCards as $card)

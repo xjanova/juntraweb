@@ -6,7 +6,7 @@
 
 <section class="hero" id="top">
   <div class="hero-bg">
-    <img src="{{ asset('images/juntra/hero-bg.png') }}" alt="">
+    <img src="{{ asset('images/juntra/hero-bg.webp') }}" alt="">
   </div>
   <div class="hero-orbit" aria-hidden="true">
     <div class="ring"></div>
@@ -121,7 +121,7 @@
       <div class="ring-deco"></div>
       <div class="ring-deco r2"></div>
       <div class="moon-frame"></div>
-      <img class="a1" src="{{ asset('images/juntra/ornament.png') }}" alt="ornament">
+      <img class="a1" src="{{ asset('images/juntra/ornament.webp') }}" alt="ornament">
     </div>
     <div class="featured-text reveal">
       <div class="section-eyebrow">Why Juntra Payakorn</div>

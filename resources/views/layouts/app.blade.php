@@ -27,7 +27,11 @@
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 
-<link rel="icon" href="{{ asset('images/logo.png') }}" type="image/png">
+{{-- favicon เดิมชี้ logo.png ขนาด 1 MB เต็ม ๆ (1024×1024) โหลดทุกหน้าเพื่อวาด 16px
+     ตอนนี้ย่อไว้ล่วงหน้าแล้ว: favicon 64px = 8 KB, apple-touch 180px = 36 KB
+     คง .png ไว้ทั้งคู่เพราะ Safari/หน้าจอโฮมของ iOS ยังไม่รับ .webp ทุกเวอร์ชัน --}}
+<link rel="icon" href="{{ asset('images/favicon.png') }}" sizes="64x64" type="image/png">
+<link rel="apple-touch-icon" href="{{ asset('images/apple-touch-icon.png') }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family={{ str_replace('|', '&family=', $themeConfig['fonts']) }}&display=swap" rel="stylesheet">

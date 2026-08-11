@@ -129,7 +129,7 @@
       {{-- ฝั่งซ้าย: ภาพแม่หมอ (เดสก์ท็อป) --}}
       <aside class="mor-portrait">
         <div class="mor-glow" aria-hidden="true"></div>
-        <img src="{{ asset('images/hero-chantra.png') }}" alt="แม่หมอจันทรา" loading="lazy" width="288" height="384">
+        <img src="{{ asset('images/hero-chantra.webp') }}" alt="แม่หมอจันทรา" loading="lazy" width="288" height="384">
         <div class="mor-plate">
           <div style="font-family:var(--display);letter-spacing:.22em;text-transform:uppercase;font-size:10px;color:var(--gold)">Oracle of the Moon</div>
           <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">แม่หมอจันทราพยากรณ์</div>
@@ -144,7 +144,7 @@
       <div class="panel chat-panel" style="position:relative">
 
         <div class="mor-mini">
-          <img src="{{ asset('images/hero-chantra.png') }}" alt="แม่หมอจันทรา" width="44" height="44">
+          <img src="{{ asset('images/hero-chantra.webp') }}" alt="แม่หมอจันทรา" width="44" height="44">
           <div style="min-width:0">
             <div style="font-family:var(--thai);font-weight:700;font-size:15px">แม่หมอจันทราพยากรณ์</div>
             <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-dim)">

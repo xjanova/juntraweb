@@ -2,7 +2,7 @@
   <div class="footer-inner">
     <div class="foot-col foot-brand">
       <div class="brand">
-        <div class="brand-mark"><img src="{{ asset('images/logo.png') }}" alt=""></div>
+        <div class="brand-mark"><img src="{{ asset('images/logo.webp') }}" alt=""></div>
         <div class="brand-name">
           <b>MAE MOR CHANTRA</b>
           <span>แม่หมอจันทรา</span>
