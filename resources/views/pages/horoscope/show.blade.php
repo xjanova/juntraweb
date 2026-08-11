@@ -8,15 +8,26 @@
     // declaration is NOT hoisted, so the call up here ran before it existed →
     // "Call to undefined function" → every zodiac page 500'd.
     $thaiElement = ['Fire' => 'ไฟ', 'Earth' => 'ดิน', 'Air' => 'ลม', 'Water' => 'น้ำ'][$zodiac->element] ?? $zodiac->element;
+    // ภาพประจำราศี — ถ้าราศีไหนยังไม่มีไฟล์ ให้ตกไปเป็นหัวข้อความล้วน
+    // ไม่ใช่ปล่อย <img> ชี้ไฟล์ที่ไม่มีจน 404 กลางหน้า
+    $zodiacArt = "images/juntra/art/zodiac/{$zodiac->slug}.webp";
+    $zodiacArt = file_exists(public_path($zodiacArt)) ? $zodiacArt : null;
+
+    // การ์ดแชร์ประจำราศี (1200×630) — เช็คไฟล์จริงเหมือนกัน เพราะ crawler
+    // ของ Facebook/LINE ไม่ลองใหม่ให้ ถ้ายิงไปเจอ 404 รอบเดียวก็จำเป็นการ์ดเปล่า
+    $zodiacOg = "images/juntra/og/{$zodiac->slug}.jpg";
+    $zodiacOg = file_exists(public_path($zodiacOg)) ? $zodiacOg : 'images/juntra/og-default.jpg';
 @endphp
+@section('og-image', asset($zodiacOg))
 <section class="canvas" style="padding-top:160px">
   <div style="max-width:880px;margin:0 auto">
-    <div class="eyebrow">ดวงประจำวันที่ {{ now()->format('d/m/Y') }}</div>
-    <h1 class="display" style="font-size:clamp(60px,7vw,108px);margin-bottom:8px;display:flex;align-items:center;gap:24px">
-      <span style="font-family:var(--display);color:var(--gold);font-size:.9em">{{ $zodiac->glyph }}</span>
-      <span><em>{{ $zodiac->name_th }}</em></span>
-    </h1>
-    <p style="color:var(--ink-dim);font-size:15px;letter-spacing:.04em">{{ $zodiac->name_en }} · {{ $zodiac->date_range }} · ธาตุ{{ $thaiElement }}</p>
+    <x-page-hero :art="$zodiacArt" eyebrow="ดวงประจำวันที่ {{ now()->format('d/m/Y') }}">
+      <x-slot:title>
+        <span style="font-family:var(--display);color:var(--gold)">{{ $zodiac->glyph }}</span>
+        <em>{{ $zodiac->name_th }}</em>
+      </x-slot:title>
+      <x-slot:lede>{{ $zodiac->name_en }} · {{ $zodiac->date_range }} · ธาตุ{{ $thaiElement }}</x-slot:lede>
+    </x-page-hero>
 
     <div class="panel" style="margin-top:40px">
       <div class="summary" style="font-family:var(--serif);font-style:italic;font-size:22px;line-height:1.5;color:var(--moon)">

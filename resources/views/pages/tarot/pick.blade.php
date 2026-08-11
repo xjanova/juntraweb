@@ -18,6 +18,8 @@
        x-init="init">
 
     <div style="text-align:center;margin-bottom:32px">
+      <x-page-hero art="images/juntra/art/tarot.webp" />
+
       <div class="eyebrow" style="display:inline-flex">เลือกไพ่ของคุณ</div>
       <h1 class="display" style="font-size:clamp(40px,5vw,72px);margin-bottom:16px">
         จับ <em>{{ $needed }} ใบ</em>

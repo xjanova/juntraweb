@@ -9,6 +9,24 @@
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <title>@yield('title', config('app.name', 'แม่หมอจันทรา')) — ทำนายดวงด้วย AI ศักดิ์สิทธิ์</title>
 <meta name="description" content="@yield('description', 'แม่หมอจันทรา / จันทราพยากรณ์ ผสานศาสตร์ดวงดาวโบราณกับปัญญาประดิษฐ์ — ดวงรายวัน ไพ่ยิปซี เลขศาสตร์ AI Chat ดูดวง')">
+
+{{-- ── Social preview ────────────────────────────────────────────────
+     ทั้งเว็บเคยไม่มี og:image เลยสักหน้า (มีหน้า /download หน้าเดียวที่
+     ประกาศเอง) ทั้งที่ช่องทางหลักคือแชร์ลิงก์ใน Facebook / LINE —
+     ลิงก์ที่แชร์จึงขึ้นเป็นการ์ดเปล่าไม่มีรูปมาตลอด
+     หน้าไหนอยากใช้รูปของตัวเองให้ประกาศ @section('og-image', asset(...))
+     แต่ต้องเป็นขนาด 1200×630 เท่านั้น ไม่งั้น width/height ข้างล่างจะโกหก --}}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{ config('app.name', 'จันทราพยากรณ์') }}">
+<meta property="og:locale" content="th_TH">
+<meta property="og:url" content="{{ url()->current() }}">
+<meta property="og:title" content="@yield('title', config('app.name', 'แม่หมอจันทรา'))">
+<meta property="og:description" content="@yield('description', 'แม่หมอจันทรา / จันทราพยากรณ์ ผสานศาสตร์ดวงดาวโบราณกับปัญญาประดิษฐ์ — ดวงรายวัน ไพ่ยิปซี เลขศาสตร์ AI Chat ดูดวง')">
+<meta property="og:image" content="@yield('og-image', asset('images/juntra/og-default.jpg'))">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
 <link rel="icon" href="{{ asset('images/logo.png') }}" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

@@ -8,6 +8,8 @@
     @include('partials.account-sidebar', ['active' => 'security'])
 
     <div class="account-content">
+      <x-page-hero art="images/juntra/art/account.webp" />
+
       <div class="eyebrow">SECURITY • DEVICES</div>
       <h1 style="font-family:var(--serif);font-size:clamp(32px,4vw,52px);font-weight:400;margin:8px 0 12px">
         ความปลอดภัย <em style="color:var(--gold)">& อุปกรณ์</em>

@@ -2,11 +2,9 @@
 @section('title', 'ดาวน์โหลดแอพ จันทราพยากรณ์')
 @section('description', 'โหลดแอพจันทราพยากรณ์ฟรีบน Google Play — เปิดไพ่ยิปซี 78 ใบ ดวงรายวัน เลขศาสตร์ ลายมือ แชทแม่หมอ AI พร้อมวอลเลตและผังสายงานในเครื่องเดียว')
 
+{{-- og:* ย้ายไปประกาศรวมที่ layouts/app.blade.php แล้ว — ถ้ายัง push ซ้ำตรงนี้
+     หน้านี้จะมี og:title/og:image อย่างละสองอันในหน้าเดียว --}}
 @push('head')
-<meta property="og:title" content="ดาวน์โหลดแอพ จันทราพยากรณ์ — พกหมอดูไว้ในมือถือ">
-<meta property="og:description" content="ไพ่ยิปซี ดวงรายวัน เลขศาสตร์ ลายมือ แชทแม่หมอ AI — บัญชีเดียวกับเว็บ เครดิตซิงก์กันอัตโนมัติ">
-<meta property="og:image" content="{{ asset('images/juntra/logo.png') }}">
-<meta property="og:type" content="website">
 <style>
 /* ── หน้าดาวน์โหลดแอพ — สีอิง CSS vars ของธีม + fallback โทน juntra ── */
 .dl-hero { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr); gap:48px; align-items:center; max-width:1080px; margin:0 auto 90px; }

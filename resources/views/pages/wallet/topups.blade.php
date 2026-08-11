@@ -8,6 +8,8 @@
     @include('partials.account-sidebar', ['active' => 'topups'])
 
     <div class="account-content">
+      <x-page-hero art="images/juntra/art/wallet.webp" />
+
       <div class="eyebrow">WALLET • TOP-UPS</div>
       <h1 style="font-family:var(--serif);font-size:clamp(32px,4vw,52px);font-weight:400;margin:8px 0 12px">
         แจ้ง <em style="color:var(--gold)">เติมเงิน</em>

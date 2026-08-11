@@ -5,6 +5,8 @@
 @section('content')
 <section class="canvas" style="padding-top:160px">
   <div style="max-width:680px;margin:0 auto">
+    <x-page-hero art="images/juntra/art/wallet.webp" />
+
     <div class="eyebrow">สถานะ</div>
     <h1 class="display" style="font-size:clamp(36px,4.5vw,60px);margin-bottom:16px">
       คำขอเติมเงิน <em style="color:var(--gold)">{{ $tx->reference_code }}</em>

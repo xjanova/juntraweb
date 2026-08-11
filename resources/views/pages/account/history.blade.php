@@ -25,6 +25,8 @@
     @include('partials.account-sidebar', ['active' => 'history'])
 
     <div class="account-content">
+    <x-page-hero art="images/juntra/art/account.webp" />
+
     <div class="eyebrow">ประวัติของฉัน</div>
     <h2 style="font-family:var(--serif);font-size:clamp(32px,4vw,52px);font-weight:400;margin:8px 0 12px"><em style="color:var(--gold)">บันทึก</em> ดวงชะตา</h2>
     <p class="lede" style="margin:0 0 22px;color:var(--ink-dim);max-width:640px">

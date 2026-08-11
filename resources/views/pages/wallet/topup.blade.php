@@ -4,6 +4,8 @@
 @section('content')
 <section class="canvas" style="padding-top:160px">
   <div style="max-width:880px;margin:0 auto">
+    <x-page-hero art="images/juntra/art/wallet.webp" />
+
     <div class="eyebrow">เติมเงิน</div>
     <h1 class="display" style="font-size:clamp(40px,5vw,68px);margin-bottom:16px">
       <em style="color:var(--gold)">เติมเครดิต</em> เข้าวอลเลต
