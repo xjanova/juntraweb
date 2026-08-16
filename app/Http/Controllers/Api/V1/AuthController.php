@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
@@ -145,14 +146,25 @@ class AuthController extends Controller
             64,
         );
 
-        $user = User::create([
+        $attributes = [
             'name'       => $data['name'],
             'email'      => $data['email'] ?? PhoneNumber::placeholderEmail($phone),
             'phone'      => $phone,
             'password'   => Hash::make($data['password']),
             'signup_via' => 'mobile',
-            'pending_referral_code' => $referral !== '' ? $referral : null,
-        ]);
+        ];
+
+        // ใส่คีย์นี้เฉพาะเมื่อมีโค้ดจริง **และคอลัมน์มีอยู่แล้ว**
+        //
+        // auto-deploy ของเซิร์ฟเวอร์ pull โค้ดให้ทันทีตอน push แต่ไม่ได้รัน
+        // migration ให้เสมอ ถ้าส่งคีย์นี้ไปตรง ๆ ในช่วงที่ยังไม่ได้ migrate
+        // การสมัครจากแอพจะ 500 ทุกราย — ยอมเสียการผูกสายงานชั่วคราว
+        // ดีกว่าปิดประตูสมัครทั้งบาน
+        if ($referral !== '' && Schema::hasColumn('users', 'pending_referral_code')) {
+            $attributes['pending_referral_code'] = $referral;
+        }
+
+        $user = User::create($attributes);
 
         // Pre-create wallet so the first GET /wallet doesn't lazy-create
         // mid-request and leak the latency to the user.
