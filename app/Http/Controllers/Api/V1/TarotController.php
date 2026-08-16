@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\TarotCard;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 /**
  * Public tarot card catalog for the juntra mobile app.
@@ -23,6 +26,64 @@ use Illuminate\Http\JsonResponse;
  */
 class TarotController extends Controller
 {
+    /**
+     * POST /v1/tarot/deal — สับไพ่หนึ่งกอง แล้วให้ไคลเอนต์เล่นซีนบนกองนี้
+     *
+     * 🔴 ทำไมต้องมี: สำรับในแอพเป็น `const` เรียง id 0–77 ตายตัว และซีน "สับไพ่"
+     * เป็นแอนิเมชันล้วน ไม่เคยแตะโครงสร้างกองเลย ผลคือช่องซ้ายบนสุดคือ The Fool
+     * ตลอดกาล ผู้ใช้ที่เปิดไพ่สองครั้งแล้วแตะตำแหน่งเดิมได้ไพ่ชุดเดิมเป๊ะ
+     * ขณะที่เว็บสับจริงด้วย `inRandomOrder()` ทุกครั้ง
+     *
+     * และหัวตั้ง/หัวกลับก็ถูกตัดสินที่เซิร์ฟเวอร์ตรงนี้ (`random_int(0,1)` =
+     * 50% เท่าเว็บ) ไม่ใช่ให้แอพสุ่มเอง 30% แล้วส่งค่าขึ้นมาให้เชื่อ
+     *
+     * กองถูกเก็บใน cache ตาม token 30 นาที — ตอนบันทึกผลผู้ใช้ส่งแค่
+     * "ตำแหน่งที่แตะ" เซิร์ฟเวอร์เป็นคนแปลงกลับเป็นไพ่เอง
+     */
+    public function deal(Request $request): JsonResponse
+    {
+        $cards = TarotCard::query()
+            ->where('active', true)
+            ->get(['id', 'slug', 'name_th', 'name_en'])
+            ->shuffle()
+            ->values();
+
+        if ($cards->isEmpty()) {
+            return response()->json([
+                'message'     => 'ยังไม่มีไพ่ในระบบ',
+                'reason_code' => 'empty_deck',
+            ], 503);
+        }
+
+        $deal = $cards->map(fn (TarotCard $c) => [
+            'slug'     => $c->slug,
+            'name_th'  => $c->name_th,
+            'name_en'  => $c->name_en,
+            'reversed' => (bool) random_int(0, 1),
+        ])->all();
+
+        $token = Str::random(40);
+        Cache::put(
+            self::dealCacheKey($request->user()->id, $token),
+            array_map(fn (array $c) => ['slug' => $c['slug'], 'reversed' => $c['reversed']], $deal),
+            now()->addMinutes(30),
+        );
+
+        return response()->json([
+            'data' => [
+                'deal_token' => $token,
+                'expires_in' => 1800,
+                'cards'      => $deal,
+            ],
+        ], 201);
+    }
+
+    /** คีย์แคชของกองไพ่ — ผูกกับ user ด้วย เพื่อไม่ให้ token ของคนอื่นใช้ข้ามกันได้ */
+    public static function dealCacheKey(int $userId, string $token): string
+    {
+        return 'tarot_deal:' . $userId . ':' . hash('sha256', $token);
+    }
+
     public function cards(): JsonResponse
     {
         // Canonical order: the seeder inserts Major 0–21 then the four suits,

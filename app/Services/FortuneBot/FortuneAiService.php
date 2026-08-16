@@ -28,6 +28,18 @@ class FortuneAiService
     ) {}
 
     /**
+     * ระบบทำนายจริงพร้อมใช้กับผู้ใช้คนนี้ไหม
+     *
+     * ผู้เรียกที่ **เก็บเงิน** ต้องถามก่อนตัดเครดิตเสมอ — ถ้าไม่พร้อม
+     * {@see interpretTarot()} จะตกไปคืนข้อความที่ประกอบจากคอลัมน์ความหมายไพ่
+     * (`source => 'local'`) ซึ่งไม่ใช่คำทำนาย และไม่ควรขายเต็มราคา
+     */
+    public function isAvailableFor(?User $user): bool
+    {
+        return $this->bot->isAvailable($user);
+    }
+
+    /**
      * Interpret a tarot spread.
      *
      * @return array{text: string, provider: string, model: string, source: 'thaiprompt'|'local'}

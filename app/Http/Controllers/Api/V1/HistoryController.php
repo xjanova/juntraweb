@@ -13,6 +13,7 @@ use App\Support\Pricing;
 use App\Support\TarotSpreads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -116,12 +117,49 @@ class HistoryController extends Controller
         $data = $request->validate([
             'type'           => ['required', Rule::in(array_map(fn ($k) => "tarot_{$k}", TarotSpreads::keys()))],
             'question'       => 'nullable|string|max:500',
-            'picks'          => 'required|array',
-            'picks.*.slug'   => 'required|string|max:64',
+            // เส้นทางใหม่: กองที่เซิร์ฟเวอร์สับให้ + ตำแหน่งที่ผู้ใช้แตะ
+            'deal_token'     => 'sometimes|string|max:64',
+            'slots'          => 'sometimes|array',
+            'slots.*'        => 'integer|min:0|max:200',
+            // เส้นทางเดิม: แอพส่ง slug + reversed มาเอง (คง compat ให้ APK รุ่นเก่า)
+            'picks'          => 'sometimes|array',
+            'picks.*.slug'   => 'required_with:picks|string|max:64',
             'picks.*.reversed' => 'sometimes|boolean',
         ]);
 
         $needed = TarotSpreads::cardCount(TarotSpreads::keyFromType($data['type']));
+
+        // แปลง (deal_token, slots) → picks โดยอ่านจากกองที่เซิร์ฟเวอร์สับไว้เอง
+        // ค่า reversed มาจากกองนี้เท่านั้น ไม่รับจากไคลเอนต์
+        if (!empty($data['deal_token']) && !empty($data['slots'])) {
+            $deal = Cache::get(TarotController::dealCacheKey($request->user()->id, $data['deal_token']));
+            if (!is_array($deal)) {
+                return response()->json([
+                    'message'     => 'กองไพ่หมดอายุแล้ว — กรุณาสับไพ่ใหม่อีกครั้งนะคะ',
+                    'reason_code' => 'deal_expired',
+                ], 422);
+            }
+
+            $picks = [];
+            foreach ($data['slots'] as $slot) {
+                if (!isset($deal[$slot])) {
+                    return response()->json([
+                        'message'     => 'ตำแหน่งไพ่ไม่ถูกต้อง — กรุณาสับไพ่ใหม่',
+                        'reason_code' => 'invalid_slot',
+                    ], 422);
+                }
+                $picks[] = $deal[$slot];
+            }
+            $data['picks'] = $picks;
+        }
+
+        if (empty($data['picks'])) {
+            return response()->json([
+                'message'     => 'ยังไม่ได้เลือกไพ่',
+                'reason_code' => 'no_picks',
+            ], 422);
+        }
+
         if (count($data['picks']) !== $needed) {
             return response()->json([
                 'message'     => sprintf('สเปรดนี้ต้องเลือก %d ใบ', $needed),
@@ -156,7 +194,10 @@ class HistoryController extends Controller
 
         $user = $request->user();
         // Idempotency — block a double-submit of this reading (Idempotency-Key header).
-        if ($this->guardCharge($request, 'reading') === false) {
+        // ล็อกถูกปล่อยอัตโนมัติเมื่อจบ request (ดู guardChargeAuto) — ของเดิม
+        // ปล่อยให้หมดอายุเอง 90 วิ ผู้ใช้ที่เจอ error แล้วกดลองใหม่จึงโดน 409
+        // ค้างทั้งที่ไม่มีอะไรกำลังประมวลผลจริง และเงินถูกคืนไปแล้ว
+        if (!$this->guardChargeAuto($request, 'reading')) {
             return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
         }
         $cost = Pricing::for($data['type']);
@@ -166,6 +207,7 @@ class HistoryController extends Controller
         // wallet bottom sheet without us having to differentiate "no
         // balance" from "race-lost debit" responses downstream.
         if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
+            $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
             return response()->json([
                 'message'     => sprintf(
                     'เครดิตไม่พอเปิดไพ่ (ต้องการ %s คงเหลือ %s) — กรุณาเติมเงินเข้าวอลเลต',
@@ -178,6 +220,20 @@ class HistoryController extends Controller
             ], 402);
         }
 
+        // อัปสตรีมพร้อมไหม — เช็คก่อนหักเงิน
+        //
+        // ถ้าผู้ใช้ยังไม่ผูก Thaiprompt (สมัครในแอพตรง ๆ) FortuneAiService จะ
+        // ตกไปประกอบข้อความจากคอลัมน์ความหมายไพ่แทนคำทำนายจริง การเก็บเงิน
+        // เต็มราคาแล้วส่งของแบบนั้นให้ = ขายของไม่ตรงปก จึงต้องหยุดตั้งแต่ยัง
+        // ไม่ตัดเงิน แล้วบอกทางแก้ (ผูกบัญชี) ให้แอพเด้ง sheet ได้
+        if (!$this->ai->isAvailableFor($user)) {
+            $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
+            return response()->json([
+                'message'     => 'ตอนนี้แม่หมอยังเชื่อมต่อระบบทำนายไม่ได้ — กรุณาเชื่อมบัญชี Thaiprompt ในหน้าโปรไฟล์ แล้วลองอีกครั้งนะคะ',
+                'reason_code' => 'thaiprompt_not_linked',
+            ], 409);
+        }
+
         // Debit BEFORE we touch the AI, so a failed AI call doesn't leak
         // server resources and a successful one always has a paired tx.
         try {
@@ -188,6 +244,7 @@ class HistoryController extends Controller
                 ])
                 : null;
         } catch (InsufficientFundsException $e) {
+            $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
             return response()->json([
                 'message'     => $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต',
                 'reason_code' => 'insufficient_funds',
@@ -195,6 +252,8 @@ class HistoryController extends Controller
                 'cost'        => $cost,
             ], 402);
         }
+
+        $reading = null;
 
         try {
             $reading = Reading::create([
@@ -221,6 +280,16 @@ class HistoryController extends Controller
 
             $reading->load('tarotCards.card');
             $aiResult = $this->ai->interpretTarot($reading, $user);
+
+            // 🔴 `source === 'local'` = อัปสตรีมใช้ไม่ได้ (ผู้ใช้ยังไม่ผูก
+            // Thaiprompt หรือพูลล่ม) แล้ว FortuneAiService ตกไปประกอบข้อความ
+            // จากคอลัมน์ความหมายไพ่ในดาต้าเบสแทน — มันไม่ใช่คำทำนาย
+            // เก็บเงินเต็มราคาสำหรับของแบบนี้ไม่ได้ ต้องคืนแล้วให้ลองใหม่
+            // เหมือนที่ FreeTarotController ทำ (ที่นั่นจงใจไม่มี fallback เลย)
+            if (($aiResult['source'] ?? null) === 'local') {
+                throw new \RuntimeException('upstream_unavailable');
+            }
+
             $reading->result      = $aiResult['text'];
             $reading->ai_provider = $aiResult['provider'];
             $reading->ai_model    = $aiResult['model'];
@@ -230,6 +299,8 @@ class HistoryController extends Controller
                 $tx->update(['reference_id' => $reading->id]);
             }
         } catch (\Throwable $e) {
+            // คืนเงินแล้ว = รายการนี้ไม่สำเร็จ ปล่อยล็อกให้ลองใหม่ได้ทันที
+            $this->releaseChargeLock();
             Log::error('Mobile tarot reading creation failed after debit — refunding', [
                 'user_id' => $user->id,
                 'tx_id'   => $tx?->id,
@@ -246,6 +317,17 @@ class HistoryController extends Controller
                     ]);
                 }
             }
+
+            // แถวที่ยังไม่มีคำทำนายต้องไม่ค้างอยู่ในประวัติ ไม่งั้นผู้ใช้เปิดเจอ
+            // รายการเปล่าที่ "จ่ายแล้วไม่ได้อะไร" ทั้งที่เงินถูกคืนไปแล้ว
+            if ($reading && blank($reading->result)) {
+                try {
+                    $reading->delete();
+                } catch (\Throwable) {
+                    // ปล่อยได้ — เงินคืนแล้วซึ่งเป็นส่วนที่สำคัญกว่า
+                }
+            }
+
             return response()->json([
                 'message'     => 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนเข้าวอลเลตแล้ว กรุณาลองใหม่อีกครั้ง',
                 'reason_code' => 'reading_failed',
@@ -296,10 +378,20 @@ class HistoryController extends Controller
             })->values();
         }
 
+        // รูปฝ่ามือที่ลูกค้าอัปโหลด — เก็บเป็น path สัมพัทธ์ใน payload
+        // แอพต่อ URL เองไม่ได้ (ไม่รู้โฮสต์ storage) จึงต้องแปลงให้เป็น
+        // absolute เหมือนที่ทำกับหน้าไพ่ ไม่งั้นลูกค้าไม่เห็นรูปที่ตัวเองส่งไป
+        $payload = (array) ($reading->payload ?? []);
+        $imageUrl = null;
+        if (!empty($payload['image_path'])) {
+            $imageUrl = asset('storage/' . ltrim((string) $payload['image_path'], '/'));
+        }
+
         return array_merge($this->readingSummary($reading), [
             'question'      => $reading->question,
             'result'        => $reading->result,
             'payload'       => $reading->payload,
+            'image_url'     => $imageUrl,
             'ai_provider'   => $reading->ai_provider,
             'ai_model'      => $reading->ai_model,
             'shared_public' => (bool) ($reading->shared_public ?? false),

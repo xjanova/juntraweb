@@ -34,6 +34,7 @@ class User extends Authenticatable implements FilamentUser
         'facebook_user_id',
         'line_user_id',
         'signup_via',
+        'pending_referral_code',
     ];
 
     protected $hidden = [

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\PhoneNumber;
 use App\Support\Turnstile;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
@@ -17,12 +18,6 @@ use Illuminate\View\View;
 
 class RegisteredUserController extends Controller
 {
-    /**
-     * โดเมนสำหรับอีเมลที่ระบบสร้างให้คนที่สมัครด้วยเบอร์
-     * ตั้งใจใช้โดเมนที่ส่งเมลไม่ได้จริง — เป็นแค่คีย์ในระบบ ไม่ใช่ช่องทางติดต่อ
-     */
-    private const PLACEHOLDER_EMAIL_DOMAIN = 'phone.juntra.local';
-
     public function create(): View
     {
         return view('auth.register');
@@ -59,7 +54,16 @@ class RegisteredUserController extends Controller
             ]);
         }
 
-        $phone = $this->normalisePhone($data['phone'] ?? null);
+        // ต้อง normalise ให้ผ่านก่อน ไม่งั้นเบอร์สั้น/ไม่ใช่เบอร์จะกลายเป็น
+        // บัญชีที่ล็อกอินกลับเข้ามาไม่ได้ (ฝั่งล็อกอินไม่รับเบอร์ที่หลักไม่พอ)
+        $rawPhone = $data['phone'] ?? null;
+        $phone    = PhoneNumber::normalise($rawPhone);
+        if ($rawPhone !== null && trim($rawPhone) !== '' && $phone === null) {
+            throw ValidationException::withMessages([
+                'phone' => 'เบอร์โทรศัพท์ไม่ถูกต้อง กรุณากรอกให้ครบ เช่น 0812345678',
+            ]);
+        }
+
         if ($phone !== null && User::where('phone', $phone)->exists()) {
             // เบอร์คือตัวตนของลูกค้ากลุ่มนี้ — ห้ามซ้ำ ไม่งั้นสองคนใช้บัญชีทับกัน
             throw ValidationException::withMessages([
@@ -68,13 +72,14 @@ class RegisteredUserController extends Controller
         }
 
         // ไม่มีอีเมล → สร้างให้จากเบอร์ (ไม่ซ้ำเพราะเบอร์ไม่ซ้ำ)
-        $email = $data['email'] ?? ('p'.$phone.'@'.self::PLACEHOLDER_EMAIL_DOMAIN);
+        $email = $data['email'] ?? PhoneNumber::placeholderEmail($phone);
 
         $user = User::create([
-            'name'     => $data['name'],
-            'email'    => $email,
-            'phone'    => $phone,
-            'password' => Hash::make($data['password']),
+            'name'       => $data['name'],
+            'email'      => $email,
+            'phone'      => $phone,
+            'password'   => Hash::make($data['password']),
+            'signup_via' => 'web',
         ]);
 
         event(new Registered($user));
@@ -84,19 +89,4 @@ class RegisteredUserController extends Controller
         return redirect(route('dashboard', absolute: false));
     }
 
-    /** เหลือเฉพาะตัวเลข + แปลง +66 ให้เป็นรูปเดียวกันเสมอ (08xxxxxxxx) */
-    private function normalisePhone(?string $raw): ?string
-    {
-        $digits = preg_replace('/\D/', '', (string) $raw) ?? '';
-        if ($digits === '') {
-            return null;
-        }
-
-        // +66 8xxxxxxxx / 668xxxxxxxx → 08xxxxxxxx
-        if (str_starts_with($digits, '66') && strlen($digits) >= 11) {
-            $digits = '0'.substr($digits, 2);
-        }
-
-        return substr($digits, 0, 32);
-    }
 }

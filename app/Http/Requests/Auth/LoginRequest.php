@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Support\PhoneNumber;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -53,7 +54,7 @@ class LoginRequest extends FormRequest
         $ok = Auth::attempt(['email' => $login, 'password' => $password], $remember);
 
         if (! $ok) {
-            $phone = self::normalisePhone($login);
+            $phone = PhoneNumber::normalise($login);
             if ($phone !== null) {
                 $ok = Auth::attempt(['phone' => $phone, 'password' => $password], $remember);
             }
@@ -102,25 +103,14 @@ class LoginRequest extends FormRequest
     }
 
     /**
-     * แปลงเบอร์ให้เป็นรูปเดียวกับที่เก็บตอนสมัคร (RegisteredUserController)
+     * แปลงเบอร์ให้เป็นรูปเดียวกับที่เก็บตอนสมัคร
      * คืน null เมื่อไม่ใช่เบอร์ (เช่นเป็นอีเมล) เพื่อไม่ให้ยิง attempt เปล่า ๆ
+     *
+     * @deprecated เรียก {@see PhoneNumber::normalise()} ตรง ๆ — เหลือไว้เพื่อ
+     *             ความเข้ากันได้ของโค้ดเดิม/เทสต์ที่อ้างชื่อนี้อยู่
      */
     public static function normalisePhone(?string $raw): ?string
     {
-        $raw = (string) $raw;
-        if ($raw === '' || str_contains($raw, '@')) {
-            return null;
-        }
-
-        $digits = preg_replace('/\D/', '', $raw) ?? '';
-        if (strlen($digits) < 9) {
-            return null;
-        }
-
-        if (str_starts_with($digits, '66') && strlen($digits) >= 11) {
-            $digits = '0'.substr($digits, 2);
-        }
-
-        return substr($digits, 0, 32);
+        return PhoneNumber::normalise($raw);
     }
 }

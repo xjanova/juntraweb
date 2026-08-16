@@ -48,10 +48,37 @@ class FortuneController extends Controller
                 'session_token' => Str::uuid()->toString(),
                 'type'          => 'numerology',
                 'question'      => $data['name'],
-                'payload'       => array_merge($data, ['source' => 'mobile']),
+                // เก็บเลขทั้งสามลง payload ด้วย — หน้าผลของเว็บโชว์เป็นตัวเลข
+                // ใหญ่สามช่อง (life_path / expression / birth_day) แต่ payload
+                // เดิมมีแค่ name+birth_date แอพจึงไม่มีทางแสดงเลขได้เลย
+                'payload'       => array_merge($data, [
+                    'source'             => 'mobile',
+                    'life_path'          => $result['life_path'],
+                    'life_path_meaning'  => $result['life_path_meaning'],
+                    'expression'         => $result['expression'],
+                    'expression_meaning' => $result['expression_meaning'],
+                    'birth_day'          => $result['birth_day'],
+                    'birth_day_reduced'  => $result['birth_day_reduced'],
+                    'birth_day_meaning'  => $result['birth_day_meaning'],
+                ]),
                 'result'        => $result['narrative'],
             ]);
         });
+    }
+
+    /**
+     * GET /v1/fortune/occasions — หมวดงานมงคลทั้ง 9 หมวด
+     *
+     * เว็บกาง `<select>` ให้เลือกหมวดตั้งแต่แรก แต่แอพมีแต่ช่องพิมพ์ข้อความ
+     * แล้วปล่อยให้เซิร์ฟเวอร์เดาหมวดจากคีย์เวิร์ด (`AuspiciousOccasions::detect`)
+     * พิมพ์ "ฤกษ์เข้าบ้าน" ตกหมวด general ทันทีเพราะคีย์เวิร์ดมีแต่ "ขึ้นบ้าน"
+     * — น้ำหนักคนละชุด ได้วันคนละชุดกับเว็บ ทั้งที่เป็นงานเดียวกัน
+     */
+    public function occasions(): JsonResponse
+    {
+        return response()->json([
+            'data' => AuspiciousOccasions::options(),
+        ])->header('Cache-Control', 'public, max-age=3600');
     }
 
     /**
@@ -153,15 +180,25 @@ class FortuneController extends Controller
      */
     private function withCharge(Request $request, string $feature, string $debitLabel, callable $build): JsonResponse
     {
-        $user = $request->user();
-
-        if ($this->guardCharge($request, 'reading') === false) {
+        // ล็อกกันกดซ้ำ — ต้อง release เมื่อจบงานไม่ว่าทางไหน ไม่งั้นผู้ใช้ที่เจอ
+        // error แล้วกดลองใหม่ทันทีจะโดน "รายการก่อนหน้ากำลังประมวลผล" ค้าง 90 วิ
+        // ทั้งที่ไม่มีอะไรกำลังประมวลผลจริง (และเงินถูกคืนไปแล้ว)
+        if (!$this->guardChargeAuto($request, 'reading')) {
             return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
         }
+
+        return $this->runCharge($request, $feature, $debitLabel, $build);
+    }
+
+    /** เนื้อในของ {@see withCharge()} — แยกออกมาเพื่อให้ finally ปล่อยล็อกได้เสมอ */
+    private function runCharge(Request $request, string $feature, string $debitLabel, callable $build): JsonResponse
+    {
+        $user = $request->user();
 
         $cost    = Pricing::for($feature);
         $balance = $this->wallet->balance($user);
         if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
+            $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน กดใหม่ได้ทันที
             return response()->json([
                 'message'     => sprintf('เครดิตไม่พอ (ต้องการ %s คงเหลือ %s) — กรุณาเติมเงิน', Pricing::format($cost), Pricing::format($balance)),
                 'reason_code' => 'insufficient_funds',
@@ -175,6 +212,7 @@ class FortuneController extends Controller
                 ? $this->wallet->debit($user, $cost, $debitLabel, ['reference_type' => 'reading'])
                 : null;
         } catch (InsufficientFundsException $e) {
+            $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน กดใหม่ได้ทันที
             return response()->json([
                 'message'     => $e->getMessage() . ' — กรุณาเติมเงิน',
                 'reason_code' => 'insufficient_funds',
@@ -190,6 +228,8 @@ class FortuneController extends Controller
                 $tx->update(['reference_id' => $reading->id]);
             }
         } catch (\Throwable $e) {
+            // คืนเงินแล้ว = รายการนี้ไม่สำเร็จ ปล่อยล็อกให้ลองใหม่ได้ทันที
+            $this->releaseChargeLock();
             Log::error("Mobile {$feature} reading failed after debit — refunding", [
                 'user_id' => $user->id, 'tx_id' => $tx?->id, 'err' => $e->getMessage(),
             ]);

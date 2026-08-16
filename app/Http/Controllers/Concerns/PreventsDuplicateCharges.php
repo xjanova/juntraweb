@@ -36,6 +36,46 @@ trait PreventsDuplicateCharges
         return $lock->get() ? $lock : false;
     }
 
+    /** ล็อกของคำขอปัจจุบัน — เก็บไว้เพื่อปล่อยคืนเมื่อรายการ "ไม่สำเร็จ" */
+    private Lock|null $heldChargeLock = null;
+
+    /**
+     * เหมือน {@see guardCharge()} แต่จำ Lock ไว้ให้ {@see releaseChargeLock()}
+     *
+     * @return bool  false = มีรายการเดียวกันกำลังทำอยู่ (ผู้เรียกควรตอบ 409)
+     */
+    protected function guardChargeAuto(Request $request, string $scope, int $ttl = 90): bool
+    {
+        $lock = $this->guardCharge($request, $scope, $ttl);
+        if ($lock === false) {
+            return false;
+        }
+
+        $this->heldChargeLock = $lock;
+
+        return true;
+    }
+
+    /**
+     * ปล่อยล็อกเมื่อรายการ **ไม่สำเร็จ** (ยังไม่ตัดเงิน หรือคืนเงินไปแล้ว)
+     *
+     * ห้ามเรียกตอนสำเร็จ — ล็อกต้องอยู่ครบ TTL เพื่อกันคำขอเดิมที่ dio retry
+     * ส่งซ้ำมาแล้วถูกคิดเงินรอบสอง (นั่นคือหน้าที่หลักของมัน)
+     *
+     * ที่ต้องมี: ของเดิมทิ้ง Lock ไปเฉย ๆ ล็อกจึงค้าง 90 วินาทีเสมอ ผู้ใช้ที่เจอ
+     * error แล้วกดลองใหม่ทันทีได้ "รายการก่อนหน้ากำลังประมวลผล" ซ้ำ ๆ ทั้งที่
+     * ไม่มีอะไรค้างจริงและเงินถูกคืนไปแล้ว — อ่านแล้วเหมือนเงินยังติดอยู่ในระบบ
+     */
+    protected function releaseChargeLock(): void
+    {
+        try {
+            $this->heldChargeLock?->release();
+        } catch (\Throwable) {
+            // ปล่อยไม่ได้ก็ไม่เป็นไร — TTL จะเก็บกวาดให้เอง
+        }
+        $this->heldChargeLock = null;
+    }
+
     protected function idempotencyToken(Request $request): ?string
     {
         $token = $request->header('Idempotency-Key') ?: $request->input('_idem');

@@ -34,8 +34,12 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->name('api.v1.')->group(function () {
 
     // ─── Public ───────────────────────────────────────────────
-    Route::post('auth/login',    [AuthController::class, 'login'])->name('auth.login');
-    Route::post('auth/register', [AuthController::class, 'register'])->name('auth.register');
+    // สองเส้นนี้เป็นประตูหน้าที่ไม่ต้องล็อกอิน — ต้องมี throttle เสมอ
+    // (Laravel 11 ไม่ใส่ throttle:api ให้เอง ดู AppServiceProvider)
+    Route::post('auth/login',    [AuthController::class, 'login'])
+        ->middleware('throttle:auth-login')->name('auth.login');
+    Route::post('auth/register', [AuthController::class, 'register'])
+        ->middleware('throttle:auth-register')->name('auth.register');
 
     Route::get('app/health', fn () => response()->json([
         'status'  => 'ok',
@@ -44,9 +48,21 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         'time'    => now()->toIso8601String(),
     ]))->name('app.health');
 
+    // ปฏิทินโหรของวันนี้ (ดิถี · ราศีที่จันทร์เสวย · ยาม) — คำนวณจาก ThaiAstro
+    // ตัวเดียวกับเว็บ ใช้แทนข้อความดวงจันทร์ที่เคย hardcode ไว้ในหน้าแรกของแอพ
+    Route::get('almanac/today', [\App\Http\Controllers\Api\V1\AlmanacController::class, 'today'])
+        ->name('almanac.today');
+
     // Daily horoscope — free + read-only (no auth, no debit).
     Route::get('horoscope',           [HoroscopeController::class, 'index'])->name('horoscope.index');
+    // ปีนักษัตร — เว็บมีหน้านี้มานาน แต่แอพเข้าถึงไม่ได้เพราะไม่มี endpoint
+    // (ต้องมาจากเซิร์ฟเวอร์ ห้ามให้แอพคำนวณปีนักษัตรเอง)
+    Route::get('horoscope/thai-zodiac', [HoroscopeController::class, 'thaiZodiac'])->name('horoscope.thai');
     Route::get('horoscope/{zodiac}',  [HoroscopeController::class, 'show'])->name('horoscope.show');
+
+    // หมวดงานมงคล — ข้อมูลอ้างอิงคงที่ ให้ฟอร์มฤกษ์ยามในแอพกาง dropdown
+    // ได้เหมือนเว็บ แทนที่จะปล่อยให้เซิร์ฟเวอร์เดาหมวดจากข้อความล้วน
+    Route::get('fortune/occasions', [FortuneController::class, 'occasions'])->name('fortune.occasions');
 
     // Tarot card catalog — public face-image URLs so the mobile app can pull
     // the real จันทรา.online art (and fall back to its own drawing per card).
@@ -54,6 +70,11 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 
     // ─── Authenticated (Sanctum bearer) ───────────────────────
     Route::middleware('auth:sanctum')->group(function () {
+
+        // สับไพ่หนึ่งกองต่อหนึ่งเกม — เซิร์ฟเวอร์เป็นคนสับและตัดสินหัวตั้ง/หัวกลับ
+        // (แอพเคยใช้สำรับ const เรียงเดิมตลอดกาล และสุ่มหัวกลับเอง 30% ต่างจากเว็บ 50%)
+        Route::post('tarot/deal', [TarotController::class, 'deal'])
+            ->middleware('throttle:reading')->name('tarot.deal');
 
         Route::get('auth/me',     [AuthController::class, 'me'])->name('auth.me');
         Route::post('auth/logout',[AuthController::class, 'logout'])->name('auth.logout');

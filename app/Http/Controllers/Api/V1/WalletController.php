@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Exceptions\DuplicateSlipException;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
 use App\Services\SmsPayment\SmsCheckerService;
@@ -27,6 +28,8 @@ use Illuminate\Support\Facades\Storage;
  */
 class WalletController extends Controller
 {
+    use PreventsDuplicateCharges;
+
     public function __construct(
         private WalletService $wallet,
         private SlipAutoVerifier $slips,
@@ -105,9 +108,63 @@ class WalletController extends Controller
                                   . '|max:' . config('pricing.max_topup', 50000),
         ]);
 
+        $base = (float) $data['amount'];
+
+        // กันรายการซ้ำจากการกดรัว ๆ / RetryInterceptor ของแอพยิงซ้ำเอง
+        // (เพดาน pending = 5 ใบ ถ้าปล่อยให้ซ้ำ ผู้ใช้จะสร้างใบใหม่ไม่ได้
+        //  และไม่รู้ว่าต้องโอนใบไหน เพราะแต่ละใบยอดสตางค์ไม่เท่ากัน)
+        if ($this->guardCharge($request, 'topup') === false) {
+            return response()->json([
+                'message'     => 'รายการก่อนหน้ากำลังดำเนินการ กรุณารอสักครู่นะคะ',
+                'reason_code' => 'in_flight',
+            ], 409);
+        }
+
+        // เพดาน pending ต้องมาก่อนการคืนใบเดิมเสมอ — คนที่ค้างครบเพดานแล้ว
+        // ควรได้ยินความจริงว่า "ค้างเยอะเกิน" เพื่อไปเคลียร์ ไม่ใช่ถูกกลืนเงียบ ๆ
+        $pendingCount = WalletTransaction::where('user_id', $request->user()->id)
+            ->where('type', 'topup')
+            ->where('status', 'pending')
+            ->count();
+
+        if ($pendingCount >= (int) config('pricing.max_pending_topups', 5)) {
+            return response()->json([
+                'message'     => 'มีรายการเติมเงินค้างอยู่หลายรายการ กรุณาชำระหรือยกเลิกก่อนนะคะ',
+                'reason_code' => 'too_many_pending',
+            ], 409);
+        }
+
+        // ด่านที่สอง: ใบ pending ยอดเดียวกันที่เพิ่งสร้าง "ไม่กี่นาทีนี้" = การกดซ้ำ
+        // → คืนใบเดิมแทนสร้างใหม่ (ครอบแอพรุ่นเก่าที่ไม่ส่ง Idempotency-Key)
+        //
+        // จำกัดด้วยเวลาโดยตั้งใจ: ใบ pending ค้างจากเมื่อวานไม่ใช่การกดซ้ำ
+        // ต้องปล่อยให้ไปชนเพดาน pending ตามเดิม ไม่ใช่กลืนแล้วคืนใบเก่าเงียบ ๆ
+        $existing = WalletTransaction::where('user_id', $request->user()->id)
+            ->where('type', 'topup')
+            ->where('status', 'pending')
+            ->where('created_at', '>=', now()->subMinutes(3))
+            ->get()
+            ->first(fn (WalletTransaction $t) => abs(abs((float) $t->amount) - $base) < 1.0
+                && abs((float) (((array) $t->meta)['base_amount'] ?? abs((float) $t->amount)) - $base) < 0.0001);
+
+        if ($existing) {
+            return response()->json([
+                'data' => [
+                    'transaction'    => $this->txPayload($existing),
+                    'id'             => $existing->id,
+                    'base_amount'    => $base,
+                    'payable_amount' => abs((float) $existing->amount),
+                    'auto_confirm'   => (bool) config('smschecker.enabled'),
+                    'promptpay'      => $this->promptpayBlock($request->user(), abs((float) $existing->amount)),
+                    'slip_upload_url' => url('/wallet/topup/' . $existing->id),
+                    'reused'         => true,
+                    'instructions'   => 'รายการนี้สร้างไว้แล้ว โอนตามยอดนี้ได้เลยค่ะ',
+                ],
+            ], 200);
+        }
+
         // When the SMS gateway is on, charge a UNIQUE amount (e.g. ฿100.37) so an
         // incoming bank SMS maps to exactly this top-up and auto-credits.
-        $base    = (float) $data['amount'];
         $payable = config('smschecker.enabled') ? $sms->uniqueAmountFor($base) : $base;
 
         try {
@@ -123,11 +180,6 @@ class WalletController extends Controller
             $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base])]);
         }
 
-        // บัญชีเดียวกับแม่หมอใน FB/LINE — ตกหล่นจากรอบที่แก้ฝั่งเว็บ ทำให้แอพ
-        // ยังสร้าง QR ด้วยบัญชีของเว็บ ซึ่งอาจคนละใบกับที่ SlipOK/SMS ผูกไว้
-        $payout      = PayoutAccount::resolve($request->user());
-        $promptpayId = $payout['promptpay_id'] ?? '';
-
         return response()->json([
             'data' => [
                 'transaction'    => $this->txPayload($tx),
@@ -137,14 +189,7 @@ class WalletController extends Controller
                 'base_amount'    => $base,
                 'payable_amount' => (float) $payable,
                 'auto_confirm'   => (bool) config('smschecker.enabled'),
-                'promptpay'      => [
-                    'id'   => $promptpayId,
-                    'name' => $payout['name'] ?? '',
-                    // EMVCo payload (render natively) + ready-made SVG data URI,
-                    // both carrying the EXACT payable amount so scan-to-pay matches.
-                    'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, (float) $payable) : null,
-                    'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, (float) $payable) : null,
-                ],
+                'promptpay'      => $this->promptpayBlock($request->user(), (float) $payable),
                 'slip_upload_url' => url('/wallet/topup/' . $tx->id),
                 'instructions'    => config('smschecker.enabled')
                     ? 'โอนยอดให้ตรงเป๊ะตาม QR/ยอดที่ระบุ — ระบบจะเครดิตอัตโนมัติเมื่อเงินเข้า (หรืออัปโหลดสลิปก็ได้)'
@@ -198,25 +243,48 @@ class WalletController extends Controller
             ->where('user_id', $request->user()->id)
             ->firstOrFail();
 
-        // Include the SAME promptpay block as topupPromptPay so the app's
-        // slip RE-upload sheet can render the QR + exact payable amount
-        // (previously it opened blank because this block was missing).
-        $payable     = abs((float) $row->amount);
-        $promptpayId = Setting::get('promptpay_id', config('pricing.promptpay_id'));
+        $payable = abs((float) $row->amount);
 
         return response()->json([
             'data' => array_merge($this->txPayload($row), [
                 'payable_amount'  => $payable,
-                'promptpay'       => [
-                    'id'         => $promptpayId,
-                    'name'       => Setting::get('promptpay_name', config('pricing.promptpay_name')),
-                    'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, $payable) : null,
-                    'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, $payable) : null,
-                ],
+                // ต้องเป็นบล็อกเดียวกับตอน initiate เป๊ะ ๆ ไม่งั้น QR ที่ลูกค้า
+                // สแกนตอนกลับมาอัปสลิปซ้ำจะชี้คนละบัญชี (หรือว่างเปล่า)
+                'promptpay'       => $this->promptpayBlock($request->user(), $payable),
                 'slip_upload_url' => url('/wallet/topup/' . $row->id),
                 'slip_uploaded'   => !empty($row->slip_path),
+                // ชีทเติมเงินในแชท poll เส้นนี้แล้วอ่าน balance เพื่อโชว์ยอดใหม่
+                // ตอนเครดิตเข้า — ก่อนหน้านี้ไม่มีคีย์นี้ หน้าจอ "สำเร็จ" จึงไม่มีตัวเลข
+                'balance'         => (float) $this->wallet->balance($request->user()),
             ]),
         ]);
+    }
+
+    /**
+     * บล็อก PromptPay ที่ใช้ร่วมกันระหว่าง initiate กับ show
+     *
+     * 🔴 เคยเป็นสองแหล่งที่ drift กัน: initiate ใช้ `PayoutAccount::resolve()`
+     * (บัญชีเดียวกับแม่หมอใน FB/LINE) แต่ show ไปอ่าน `Setting::get('promptpay_id')`
+     * ซึ่ง **ไม่เคยถูกเขียน** — PayoutAccount เก็บลงคีย์ `payout_account_snapshot`
+     * คนละคีย์กัน ผลคือ QR ตอนกลับมาอัปสลิปซ้ำว่างเปล่าเสมอ และถ้าแอดมินเผลอ
+     * พิมพ์เลขอื่นไว้ใน Setting ลูกค้าจะโอนเข้าบัญชีผิดแล้ว SlipOK ตีกลับ
+     * ทั้งที่โอนตามที่แอพบอกเป๊ะ
+     *
+     * @return array<string,mixed>
+     */
+    private function promptpayBlock($user, float $payable): array
+    {
+        $payout      = PayoutAccount::resolve($user);
+        $promptpayId = $payout['promptpay_id'] ?? '';
+
+        return [
+            'id'   => $promptpayId,
+            'name' => $payout['name'] ?? '',
+            // EMVCo payload (render natively) + ready-made SVG data URI,
+            // both carrying the EXACT payable amount so scan-to-pay matches.
+            'qr_payload' => $promptpayId ? PromptPayQr::payload($promptpayId, $payable) : null,
+            'qr_svg'     => $promptpayId ? PromptPayQr::svgDataUri($promptpayId, $payable) : null,
+        ];
     }
 
     /**

@@ -114,11 +114,44 @@ class ChatController extends Controller
         ], 201);
     }
 
+    /**
+     * เปิดห้องเดิมต่อ — ต้องส่งสถานะครบเท่าตอนเปิดห้องใหม่
+     *
+     * 🔴 เดิมคืนแค่ `convoPayload()` (id/title/messages) ไม่มี cost / daily_*
+     * / blocked / suggestions เลย และแอพเข้าทาง "เปิดห้องล่าสุดต่อ" เป็นค่า
+     * เริ่มต้น = ผู้ใช้เดิมแทบทุกคน ผลคือเปิดแชทแล้วไม่มีปุ่มคำถามลัด
+     * ไม่มีทางเข้าหมวดคำถาม และ **ไม่เห็นว่าข้อความถัดไปคิดเงินเท่าไร**
+     * ต่างจากเว็บที่ขึ้นป้ายราคาให้ก่อนเสมอ
+     */
     public function show(Request $request, ChatConversation $conversation): JsonResponse
     {
         $this->authorizeOwner($request, $conversation);
+        $conversation->load('messages');
+        $user = $request->user();
+
+        // ห้องที่ผู้ใช้ยังไม่เคยพิมพ์ = ชุดเริ่มต้น · เคยพิมพ์แล้ว = ชุดถามต่อ
+        // (ตรรกะเดียวกับเว็บ ChatController)
+        $hasUserMessage = $conversation->messages
+            ->contains(fn ($m) => $m->role === 'user');
+
+        $lastAssistant = $conversation->messages
+            ->last(fn ($m) => $m->role === 'assistant');
+        $awaiting = $lastAssistant
+            ? ChatSuggestions::isAwaitingAnswer((string) $lastAssistant->content)
+            : false;
+
         return response()->json([
-            'data' => $this->convoPayload($conversation->load('messages')),
+            'data' => array_merge($this->convoPayload($conversation), [
+                'balance'     => (float) $this->wallet->balance($user),
+                'cost'        => ChatPolicy::costFor($user),
+                'daily_limit' => ChatPolicy::dailyLimit(),
+                'daily_left'  => ChatPolicy::dailyLeft($user),
+                'blocked'     => ChatPolicy::exhausted($user),
+                'awaiting'    => $awaiting,
+                'suggestions' => $awaiting
+                    ? []
+                    : ($hasUserMessage ? ChatSuggestions::followUp() : ChatSuggestions::starter()),
+            ]),
         ]);
     }
 
@@ -151,7 +184,10 @@ class ChatController extends Controller
         }
 
         // Idempotency — block a double-send of the same message (Idempotency-Key header).
-        if ($this->guardCharge($request, 'chat') === false) {
+        // ล็อกถูกปล่อยอัตโนมัติเมื่อจบ request (ดู guardChargeAuto) — ของเดิม
+        // ปล่อยให้หมดอายุเอง 90 วิ ผู้ใช้ที่เจอ error แล้วกดลองใหม่จึงโดน 409
+        // ค้างทั้งที่ไม่มีอะไรกำลังประมวลผลจริง และเงินถูกคืนไปแล้ว
+        if (!$this->guardChargeAuto($request, 'chat')) {
             return response()->json(['message' => 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
         }
 

@@ -162,7 +162,12 @@ class ThaipromptController extends Controller
             $user = new User();
             $user->email = $email;
             $user->password = Hash::make(Str::random(40));
-            $user->role = 'user';
+            // ห้ามตั้ง role เอง — คอลัมน์เป็น enum('admin','editor','member')
+            // (2026_05_07_000003_add_role_to_users.php) และ default = 'member'
+            // อยู่แล้ว ค่าเดิมที่เคยเขียนไว้คือ 'user' ซึ่ง **ไม่มีในเอนัม**
+            // MySQL โหมด strict (config/database.php: 'strict' => true) จึงตีกลับ
+            // ตอน save() → ผู้ใช้ใหม่ทุกคนที่เข้ามาทาง SSO สมัครไม่ผ่านเลย
+            // ส่วนคนเก่าไม่เจอ เพราะ query ด้านบนหาเจอแล้วไม่แตะ role
         }
 
         $user->name = $name;
@@ -229,8 +234,16 @@ class ThaipromptController extends Controller
      */
     private function claimPendingReferral(Request $request, User $user): ?string
     {
-        $code = (string) $request->cookie('juntra_ref', '');
-        $code = substr(preg_replace('/[^A-Za-z0-9_-]/', '', $code), 0, 64);
+        // โค้ดที่ผู้ใช้กรอกตอนสมัครในแอพมาก่อน (เก็บฝั่งเซิร์ฟเวอร์ ไม่ผูกเบราว์เซอร์)
+        // แล้วค่อยตกไปที่คุกกี้ของเบราว์เซอร์ที่เปิดลิงก์เชิญ
+        //
+        // ลำดับนี้สำคัญ: คนที่กดลิงก์เชิญบนมือถือแล้วสมัครในแอพ จะไม่มีคุกกี้
+        // เลย เพราะคุกกี้อยู่ในเบราว์เซอร์คนละตัวกับ webview ที่ทำ SSO
+        $code = (string) ($user->pending_referral_code ?: '');
+        if ($code === '') {
+            $code = (string) $request->cookie('juntra_ref', '');
+        }
+        $code = substr(preg_replace('/[^A-Za-z0-9_-]/', '', $code) ?? '', 0, 64);
         if ($code === '') {
             return null;
         }
@@ -245,6 +258,12 @@ class ThaipromptController extends Controller
         // Any definitive upstream answer consumes the cookie — success,
         // invalid code, self-referral, or already enrolled in a network.
         Cookie::queue(Cookie::forget('juntra_ref'));
+
+        // เคลียร์โค้ดที่ค้างไว้ฝั่งเซิร์ฟเวอร์ด้วย ไม่งั้นจะพยายามเคลมซ้ำทุกครั้ง
+        // ที่ผู้ใช้ทำ SSO ใหม่ ทั้งที่อัปสตรีมตอบชัดเจนไปแล้ว
+        if ($user->pending_referral_code !== null) {
+            $user->forceFill(['pending_referral_code' => null])->save();
+        }
 
         if ($result['claimed']) {
             $sponsorName = $result['sponsor']['name'] ?? null;

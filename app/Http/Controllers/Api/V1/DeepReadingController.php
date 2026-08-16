@@ -68,7 +68,10 @@ class DeepReadingController extends Controller
         }
 
         // กดซ้ำจากเน็ตกระตุก ต้องไม่ถูกคิดเงินสองรอบ (Idempotency-Key header)
-        if ($this->guardCharge($request, 'reading') === false) {
+        // ล็อกถูกปล่อยอัตโนมัติเมื่อจบ request (ดู guardChargeAuto) — ของเดิม
+        // ปล่อยให้หมดอายุเอง 90 วิ ผู้ใช้ที่เจอ error แล้วกดลองใหม่จึงโดน 409
+        // ค้างทั้งที่ไม่มีอะไรกำลังประมวลผลจริง และเงินถูกคืนไปแล้ว
+        if (!$this->guardChargeAuto($request, 'reading')) {
             return response()->json([
                 'message'     => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่',
                 'reason_code' => 'in_flight',
@@ -85,6 +88,7 @@ class DeepReadingController extends Controller
                     'method'         => 'system',
                 ]);
             } catch (InsufficientFundsException $e) {
+                $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
                 return response()->json([
                     'message'     => $e->getMessage(),
                     'reason_code' => 'insufficient_funds',
@@ -146,6 +150,10 @@ class DeepReadingController extends Controller
 
     private function refundQuietly($tx, string $reason): void
     {
+        // คืนเงินแล้ว = รายการไม่สำเร็จ ต้องปล่อยล็อกกันกดซ้ำด้วย ไม่งั้นผู้ใช้
+        // กดลองใหม่ทันทีจะได้ 409 ค้างถึง 90 วินาที ทั้งที่เงินคืนไปแล้ว
+        $this->releaseChargeLock();
+
         if (! $tx) {
             return;
         }
