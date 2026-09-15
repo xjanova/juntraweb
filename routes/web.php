@@ -74,6 +74,8 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
     Route::post('/cast', 'cast')->middleware('throttle:reading')->name('cast'); // step 3 → any spread
     Route::get('/result/{reading}', 'show')->name('show');
+    // หน้าผลถามทุก ~3 วิ ระหว่างแม่หมออ่านไพ่เบื้องหลัง (60/นาที = พอสำหรับหน้าเดียวเปิดค้าง)
+    Route::get('/result/{reading}/status', 'status')->middleware('throttle:60,1')->name('status');
 });
 
 // 🎁 ดูดวงฟรี 1 ใบ — ปลายทางของปุ่ม "ดูดวงฟรี" จากบอท FB/LINE (magic link ?to=/tarot/free)

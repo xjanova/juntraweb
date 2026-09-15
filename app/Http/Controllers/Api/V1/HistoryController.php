@@ -56,7 +56,7 @@ class HistoryController extends Controller
         ]);
         $limit = (int) $request->input('limit', 20);
 
-        $q = Reading::where('user_id', $request->user()->id)
+        $q = Reading::where('user_id', $request->user()->id)->visibleInHistory()
             ->orderByDesc('created_at');
         if ($type = $request->input('type')) {
             $q->where('type', $type);
@@ -116,7 +116,7 @@ class HistoryController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'type'           => ['required', Rule::in(array_map(fn ($k) => "tarot_{$k}", TarotSpreads::keys()))],
+            'type'           => ['required', Rule::in(array_map(fn ($k) => "tarot_{$k}", TarotSpreads::appKeys()))],
             'question'       => 'nullable|string|max:500',
             // เส้นทางใหม่: กองที่เซิร์ฟเวอร์สับให้ + ตำแหน่งที่ผู้ใช้แตะ
             'deal_token'     => 'sometimes|string|max:64',
@@ -284,7 +284,9 @@ class HistoryController extends Controller
             }
 
             $reading->load('tarotCards.card');
-            $aiResult = $this->ai->interpretTarot($reading, $user);
+            // แอพรอผลในคำขอเดียว (ยังถามสถานะไม่ได้) → ทางเดิมที่ตอบเร็ว ไม่ใช่โปรไฟล์ต่อแพ็กเกจบนเลนทำนาย
+            // (Celtic/12 เดือนบนเลนทำนายใช้ 36-48 วิ เสี่ยงชนเพดานคำขอ) — ย้ายเมื่อแอพรองรับการรอผล
+            $aiResult = $this->ai->interpretTarot($reading, $user, 55, profile: false);
 
             // 🔴 `source === 'local'` = อัปสตรีมใช้ไม่ได้ (ผู้ใช้ยังไม่ผูก
             // Thaiprompt หรือพูลล่ม) แล้ว FortuneAiService ตกไปประกอบข้อความ

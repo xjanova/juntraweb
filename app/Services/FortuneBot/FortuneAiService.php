@@ -43,9 +43,13 @@ class FortuneAiService
     /**
      * Interpret a tarot spread.
      *
+     * @param  int  $timeout  seconds to wait for Thaiprompt — 55 while a customer's
+     *                        request is open, longer from the background job
+     * @param  bool  $profile  false = old generic path (fast chat lane) — for the app,
+     *                         which waits on one request and cannot poll yet
      * @return array{text: string, provider: string, model: string, source: 'thaiprompt'|'local'}
      */
-    public function interpretTarot(Reading $reading, ?User $user): array
+    public function interpretTarot(Reading $reading, ?User $user, int $timeout = 55, bool $profile = true): array
     {
         $key = TarotSpreads::keyFromType($reading->type);
 
@@ -56,7 +60,8 @@ class FortuneAiService
         $payload = array_filter([
             'spread' => $reading->type,
             // spread_key = ชื่อโปรไฟล์คำทำนายของแพ็กเกจฝั่ง Thaiprompt (JuntraSpreadProfiles)
-            'spread_key' => $key,
+            // ไม่ส่ง = ทางเดิม (system prompt กลางบนเลนแชท ตอบเร็ว)
+            'spread_key' => $profile ? $key : null,
             'spread_name' => $key ? (TarotSpreads::get($key)['name_th'] ?? null) : null,
             'question' => $reading->question,
             'cards' => TarotPromptBuilder::payloadCards($reading),
@@ -70,7 +75,7 @@ class FortuneAiService
         ], fn ($v) => $v !== null && $v !== '');
 
         if ($this->bot->canRead($user)) {
-            $remote = $this->bot->interpretTarot($user, $payload);
+            $remote = $this->bot->interpretTarot($user, $payload, $timeout);
             if ($remote && ! empty($remote['interpretation'])) {
                 return [
                     'text' => $remote['interpretation'],

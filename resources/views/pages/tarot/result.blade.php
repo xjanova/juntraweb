@@ -167,7 +167,52 @@
       </div>
     @endif
 
-    @if ($hasSections)
+    @if ($reading->isInProgress())
+      {{-- 🔮 แม่หมอกำลังอ่านไพ่เบื้องหลัง — ไพ่ที่เปิดได้อยู่ด้านบนแล้ว ถามสถานะทุก 3 วิ เสร็จ = โหลดหน้าใหม่ --}}
+      <div class="panel reading-wait" style="margin-top:44px;text-align:center" role="status" aria-live="polite"
+           data-status-url="{{ route('tarot.status', $reading) }}">
+        <div class="reading-wait-moon" aria-hidden="true"></div>
+        <div class="eyebrow" style="display:inline-flex;margin-top:18px">แม่หมอกำลังอ่านไพ่ของลูก</div>
+        <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:46ch;margin:10px auto 0">
+          แม่หมอกำลังเพ่งไพ่ทั้ง {{ $count }} ใบทีละตำแหน่ง ใช้เวลาประมาณ 15 วินาทีถึง 1 นาที
+          <span class="reading-wait-elapsed" style="color:var(--gold)"></span><br>
+          ปิดหน้านี้ได้ คำทำนายจะรออยู่ในประวัติการดูดวงของลูก
+        </p>
+      </div>
+      <script>
+        (function () {
+          var box = document.querySelector('.reading-wait');
+          if (!box) return;
+          var url = box.getAttribute('data-status-url'), started = Date.now(), el = box.querySelector('.reading-wait-elapsed');
+          var timer = setInterval(function () {
+            var s = Math.round((Date.now() - started) / 1000);
+            if (el) el.textContent = '· ผ่านไป ' + s + ' วินาที';
+            if (s > 240) {                       // เกิน 4 นาที — ตัวกวาดรายการค้างจะคืนเงินให้เอง
+              clearInterval(timer);
+              if (el) el.textContent = '· นานกว่าปกติ กดรีเฟรชหน้าอีกครั้งได้ค่ะ';
+              return;
+            }
+            if (s % 3 !== 0) return;
+            fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (j) { if (j && j.status !== 'reading') { clearInterval(timer); location.reload(); } })
+              .catch(function () { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ });
+          }, 1000);
+        })();
+      </script>
+    @elseif ($reading->isFailed())
+      <div class="panel" style="margin-top:44px;text-align:center">
+        <div class="eyebrow" style="display:inline-flex">อ่านไพ่ไม่สำเร็จ</div>
+        <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:48ch;margin:12px auto 20px">
+          ขออภัยค่ะ แม่หมออ่านไพ่ชุดนี้ไม่สำเร็จ
+          @if ((float) data_get($reading->payload, 'cost', 0) > 0)
+            — เครดิต ฿{{ number_format((float) data_get($reading->payload, 'cost'), 0) }} คืนเข้ากระเป๋าของลูกเรียบร้อยแล้ว
+          @endif
+          ลองเปิดไพ่ใหม่อีกครั้งได้เลยนะคะ
+        </p>
+        <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ใหม่</a>
+      </div>
+    @elseif ($hasSections)
       <div style="margin-top:40px">
         <x-reading-sections :parsed="$sections" :reading="$reading" />
       </div>
@@ -214,8 +259,9 @@
     @endif
 
     {{-- Follow-up: ask แม่หมอ about THIS spread. She's primed with the exact
-         cards drawn, so answers read those cards — not a blank-slate chat. --}}
-    @if ($canConsult)
+         cards drawn, so answers read those cards — not a blank-slate chat.
+         (ต้องรอคำทำนายเสร็จก่อน — primer ใช้เนื้อคำทำนาย) --}}
+    @if ($canConsult && ! $reading->isInProgress() && ! $reading->isFailed())
       <div class="followup-box">
         <div class="eyebrow" style="display:inline-flex">ถามแม่หมอต่อจากไพ่ชุดนี้</div>
         <p class="followup-hint">

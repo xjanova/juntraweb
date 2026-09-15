@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\InsufficientFundsException;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
+use App\Jobs\InterpretTarotReading;
 use App\Models\Reading;
 use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
@@ -228,24 +229,16 @@ class TarotController extends Controller
                 ]);
             }
 
-            $reading->load('tarotCards.card');
-            $aiResult = $this->ai->interpretTarot($reading, $user);
-
-            // 🔴 source 'local' = ไม่ได้คำทำนายจริง (Thaiprompt เงียบ/หมดเวลา) — เป็นข้อความที่ประกอบ
-            //    จากคอลัมน์ความหมายไพ่ เก็บเงินเต็มราคาสำหรับของแบบนี้ไม่ได้ → คืนเงิน (ตรงกับแอพ)
-            if ($tx && ($aiResult['source'] ?? null) === 'local') {
-                throw new \RuntimeException('upstream_unavailable');
-            }
-
-            $reading->result      = $aiResult['text'];
-            $reading->ai_provider = $aiResult['provider'];
-            $reading->ai_model    = $aiResult['model'];
-            $reading->save();
-
             // Link the wallet transaction back to the reading (audit trail).
             if ($tx) {
                 $tx->update(['reference_id' => $reading->id]);
             }
+
+            // 🔮 (2026-09-15) แม่หมออ่านไพ่ "หลังส่งหน้า" — แพ็กเกจยาวบนเลนทำนายใช้ 36-55 วิ ชนเพดาน
+            //    ~60 วิของคำขอหน้าเว็บ ลูกค้าเห็นไพ่ที่เปิดได้ทันที แล้วหน้าผลถามสถานะจนคำทำนายขึ้น
+            //    ไม่สำเร็จ (AI เงียบ / ได้แค่ข้อความประกอบจากความหมายไพ่) = คืนเงินที่ TarotReadingFinisher
+            $reading->update(['status' => Reading::STATUS_PENDING]);
+            InterpretTarotReading::dispatchAfterResponse($reading->id);
         } catch (\Throwable $e) {
             Log::error('Tarot reading creation failed after debit — refunding', [
                 'user_id' => $user->id,
@@ -301,5 +294,26 @@ class TarotController extends Controller
 
         $reading->load('tarotCards.card');
         return view('pages.tarot.result', compact('reading'));
+    }
+
+    /**
+     * หน้าผลถามว่าแม่หมออ่านเสร็จหรือยัง (รายการที่อ่านเบื้องหลัง) — สิทธิ์เดียวกับหน้าผล
+     * ไม่ส่งเนื้อคำทำนายมาทางนี้: เสร็จแล้วหน้าผลโหลดใหม่ทั้งหน้า (ได้การ์ด/ตารางจาก server)
+     */
+    public function status(Reading $reading)
+    {
+        if (! TarotSpreads::isTarotType($reading->type)) {
+            abort(404);
+        }
+        $user = request()->user();
+        $isOwner = $user && $reading->user_id === $user->id;
+        $isAdmin = $user && method_exists($user, 'isAdmin') && $user->isAdmin();
+        if (! $reading->shared_public && ! $isOwner && ! $isAdmin) {
+            abort(403);
+        }
+
+        return response()->json([
+            'status' => $reading->isInProgress() ? 'reading' : ($reading->isFailed() ? 'failed' : 'done'),
+        ])->header('Cache-Control', 'no-store');
     }
 }

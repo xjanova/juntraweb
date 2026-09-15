@@ -276,13 +276,16 @@ class MaeMorForEveryoneTest extends TestCase
         $user = $this->phoneMember();
         $this->fortuneDown = true;
 
-        $this->actingAs($user)
-            ->post(route('tarot.cast'), ['spread' => 'single', 'picked' => [$card->id]])
-            ->assertRedirect(route('tarot.index'))
-            ->assertSessionHas('status', fn ($s) => str_contains($s, 'เครดิตถูกคืน'));
+        // แม่หมออ่านเบื้องหลัง (หลังส่งหน้า) — ลูกค้าไปหน้าผล ซึ่งบอกว่าไม่สำเร็จและคืนเงินแล้ว
+        $res = $this->actingAs($user)->post(route('tarot.cast'), ['spread' => 'single', 'picked' => [$card->id]]);
+        $reading = Reading::sole();
+        $res->assertRedirect(route('tarot.show', $reading));
 
         $this->assertSame(100.0, $this->balance($user), 'ได้ข้อความประกอบจากความหมายไพ่ ≠ คำทำนาย — ต้องคืนเงิน');
-        $this->assertSame(0, Reading::count(), 'ห้ามมีรายการเปล่าค้างในประวัติ');
+        $this->assertTrue($reading->fresh()->isFailed());
+        $this->actingAs($user)->get(route('tarot.show', $reading))
+            ->assertOk()->assertSee('อ่านไพ่ไม่สำเร็จ')->assertSee('คืนเข้ากระเป๋า');
+        $this->actingAs($user)->get(route('account.history'))->assertOk()->assertDontSee(route('tarot.show', $reading), false);
     }
 
     public function test_a_phone_member_can_buy_a_deep_reading(): void

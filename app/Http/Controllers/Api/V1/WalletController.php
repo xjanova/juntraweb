@@ -50,7 +50,8 @@ class WalletController extends Controller
             'data' => [
                 'balance'             => (float) $balance,
                 'currency'            => config('pricing.currency', 'THB'),
-                'pricing'             => collect(\App\Support\TarotSpreads::keys())
+                // appKeys — แพ็กเกจที่แอพซื้อได้จริง (ไม่รวมที่ยังซ่อน/เว็บเท่านั้น)
+                'pricing'             => collect(\App\Support\TarotSpreads::appKeys())
                     ->mapWithKeys(fn ($k) => ["tarot_{$k}" => Pricing::for("tarot_{$k}")])
                     ->merge([
                         'numerology'   => Pricing::for('numerology'),

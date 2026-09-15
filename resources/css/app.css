@@ -508,6 +508,19 @@
   .pay-amount { font-size: 17px; padding: 13px 6px; }
 }
 
+/* แม่หมอกำลังอ่านไพ่ (หน้าผลระหว่างรอคำทำนายเบื้องหลัง) — จันทร์เสี้ยวค่อย ๆ เต็มดวง */
+.reading-wait-moon {
+  width: 64px; height: 64px; margin: 4px auto 0; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, var(--moon, #fff5d4), var(--gold, #f4cf6a) 60%, #c89a3c);
+  box-shadow: 0 0 36px rgba(244, 207, 106, .35);
+  animation: rwMoon 3.2s ease-in-out infinite;
+}
+@keyframes rwMoon {
+  0%, 100% { box-shadow: inset -26px 0 0 0 rgba(13, 8, 38, .92), 0 0 22px rgba(244, 207, 106, .25); }
+  50%      { box-shadow: inset -4px 0 0 0 rgba(13, 8, 38, .92), 0 0 44px rgba(244, 207, 106, .45); }
+}
+@media (prefers-reduced-motion: reduce) { .reading-wait-moon { animation: none; } }
+
 /* ============================================================
    🔮 คำทำนายไพ่แบบการ์ด/ตาราง (components/reading-sections)
    ตัวใหญ่อ่านง่าย (ลูกค้าหลักผู้สูงอายุ) · สีบอกความหมาย: เขียว=หนุน · แดง=ไม่ · อำพัน=ยังไม่

@@ -13,6 +13,8 @@ Artisan::command('inspire', function () {
 //  - reconcile every wallet balance against its ledger and log drift (nightly)
 Schedule::command('wallet:cleanup-expired-topups')->hourly();
 Schedule::command('wallet:reconcile')->dailyAt('00:30');
+// คำทำนายไพ่ที่อ่านเบื้องหลังแล้วค้าง (PHP ตายกลางงาน) → คืนเงินภายใน ~5-10 นาที
+Schedule::command('readings:sweep-stuck')->everyFiveMinutes()->withoutOverlapping();
 
 // Admin alerts on Telegram (inert until a bot is set up in /admin → แจ้งเตือน Telegram).
 //  - watchdog: cron heartbeat, slips waiting for an admin, silent SMS phone, Thaiprompt link, disk

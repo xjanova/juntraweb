@@ -34,6 +34,16 @@ class TarotSpreads
         return config('tarot_spreads', []);
     }
 
+    /**
+     * Keys the mobile app may buy — on sale and not `web_only`. The app waits on one
+     * request (no status polling yet), so packages that need the web's background
+     * reading (คุณไสย on the strong model, ~55 s) stay web-only until the app polls.
+     */
+    public static function appKeys(): array
+    {
+        return array_keys(array_filter(static::all(), fn (array $m) => empty($m['web_only'])));
+    }
+
     /** True when the pick page should offer the optional birth date for this spread. */
     public static function wantsBirthDate(string $key): bool
     {

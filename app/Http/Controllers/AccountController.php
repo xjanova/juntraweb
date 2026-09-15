@@ -23,7 +23,7 @@ class AccountController extends Controller
         $user = $request->user();
         return view('pages.account.dashboard', [
             'user'    => $user,
-            'recent'  => Reading::where('user_id', $user->id)->latest()->limit(10)->get(),
+            'recent'  => Reading::where('user_id', $user->id)->visibleInHistory()->latest()->limit(10)->get(),
             'chats'   => ChatConversation::where('user_id', $user->id)
                 ->withCount('messages')
                 ->latest()
@@ -36,7 +36,7 @@ class AccountController extends Controller
 
     public function history(Request $request)
     {
-        $query = Reading::where('user_id', $request->user()->id);
+        $query = Reading::where('user_id', $request->user()->id)->visibleInHistory();
 
         // ตัวกรองหมวด — 'tarot' ครอบทุกสเปรด (tarot_single, tarot_celtic, ...)
         // ไม่งั้นต้องมีปุ่มกรองแยกทีละสเปรดซึ่งยาวเกินหน้าจอมือถือ

@@ -213,18 +213,19 @@ class JuntraServerClient
      * คำทำนายที่ลูกค้าเว็บจ่ายแล้ว ด้วยตัวตนของเว็บ — ลูกค้าที่สมัครด้วยเบอร์/อีเมลก็ได้คำทำนายจริง
      * (ทาง token ของลูกค้าเดิมใช้ได้เฉพาะคนที่ล็อกอินผ่าน Thaiprompt)
      *
-     * รอได้ไม่เกิน 55 วิ: Apache ตัดที่ 60 วิ — ถ้ารอเกินกว่านั้น ลูกค้าเห็นหน้า error ทั้งที่
-     * PHP ยังทำงานต่อและเงินถูกหักไปแล้ว หมดเวลาตรงนี้ = ผู้เรียกคืนเงินได้ทันที
+     * $timeout: ผู้เรียกที่มีคนรอหน้าเว็บอยู่ใช้ 55 วิ (Apache ตัดที่ 60 วิ — รอเกินนั้นลูกค้าเห็นหน้า error
+     * ทั้งที่ PHP ยังทำงานต่อและเงินถูกหักไปแล้ว) · งานเบื้องหลังหลังส่งหน้าแล้ว (InterpretTarotReading)
+     * รอได้นานกว่า — แพ็กเกจยาวบนเลนทำนายใช้ ~36-55 วิ ชนเพดานของคำขอหน้าเว็บพอดี
      *
      * @param  'tarot/interpret'|'tarot/free'|'deep'  $kind
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function fortune(string $kind, array $payload): array
+    public function fortune(string $kind, array $payload, int $timeout = 55): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
         }
-        $resp = $this->send(fn (PendingRequest $http) => $http->timeout(55)->post($this->url('/fortune/' . $kind), $payload));
+        $resp = $this->send(fn (PendingRequest $http) => $http->timeout(max(10, $timeout))->post($this->url('/fortune/' . $kind), $payload));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {
             return ['status' => 'ok', 'data' => $resp->json('data')];

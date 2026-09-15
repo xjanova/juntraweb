@@ -64,9 +64,9 @@ class FortuneBotClient
      *
      * @return array{0:?array,1:bool}
      */
-    private function viaServer(string $kind, array $payload, string $mustHave): array
+    private function viaServer(string $kind, array $payload, string $mustHave, int $timeout = 55): array
     {
-        $res = $this->server()->fortune($kind, $payload);
+        $res = $this->server()->fortune($kind, $payload, $timeout);
         if ($res['status'] === 'ok' && ! empty($res['data'][$mustHave])) {
             return [$res['data'], false];
         }
@@ -131,9 +131,9 @@ class FortuneBotClient
      *
      * Returns ['interpretation' => str, 'ai_provider' => str, 'ai_model' => str] or null.
      */
-    public function interpretTarot(User $user, array $payload): ?array
+    public function interpretTarot(User $user, array $payload, int $timeout = 55): ?array
     {
-        [$data, $fallback] = $this->viaServer('tarot/interpret', $payload, 'interpretation');
+        [$data, $fallback] = $this->viaServer('tarot/interpret', $payload, 'interpretation', $timeout);
         if ($data !== null || ! $fallback || ! $this->isAvailable($user)) {
             return $data;
         }
