@@ -173,6 +173,25 @@ class SlipCrossCheckTest extends TestCase
         $this->assertSame(0.0, app(WalletService::class)->balance($this->user));
     }
 
+    public function test_web_form_with_slip_charges_the_typed_amount_and_auto_checks_it(): void
+    {
+        // Paid first with the static QR (typed ฿100), slip attached to the form: the top-up must be
+        // the plain ฿100 (not a unique 100.xx the customer never paid), kept out of SMS FIFO
+        // matching, and checked on the spot.
+        $this->fakeThaiprompt($this->slip(['amount' => 100.00]));
+
+        $this->actingAs($this->user)->post('/wallet/topup', [
+            'amount' => 100, 'method' => 'promptpay',
+            'slip' => \Illuminate\Http\UploadedFile::fake()->image('slip.jpg', 400, 800),
+        ])->assertRedirect();
+
+        $tx = WalletTransaction::where('user_id', $this->user->id)->where('method', 'promptpay_slip')->latest('id')->first();
+        $this->assertNotNull($tx);
+        $this->assertSame('100.00', (string) $tx->amount);
+        $this->assertSame('success', $tx->status);
+        $this->assertSame('approve', data_get($tx->meta, 'slip_check.decision'));
+    }
+
     public function test_client_refused_by_thaiprompt_falls_back_to_the_customers_token(): void
     {
         // Rolling deploy / client not yet allowed: the web's own identity is refused. Slips must keep

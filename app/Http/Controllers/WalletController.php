@@ -168,9 +168,21 @@ class WalletController extends Controller
             $tx->update(['meta' => array_merge((array) $tx->meta, $meta)]);
         }
 
+        // โอนแล้ว + แนบสลิปมาพร้อมฟอร์ม → ตรวจอัตโนมัติทันที (SlipOK + ทะเบียนสลิปของแม่หมอ)
+        // ตรวจไม่ได้/ไม่ผ่าน = รอแอดมินตามเดิม (แจ้ง Telegram แล้วใน SlipAutoVerifier)
+        if ($slipPath && $method === 'promptpay_slip') {
+            $result = app(\App\Services\Wallet\SlipAutoVerifier::class)->verify($tx->fresh(), $request->user(), $slipPath);
+
+            return redirect()
+                ->route('wallet.topup.show', $tx)
+                ->with('status', $result['message'] ?? 'ส่งคำขอเติมเงินเรียบร้อย — แอดมินกำลังตรวจสอบสลิป');
+        }
+
         return redirect()
             ->route('wallet.topup.show', $tx)
-            ->with('status', 'ส่งคำขอเติมเงินเรียบร้อย — แอดมินกำลังตรวจสอบสลิป');
+            ->with('status', $slipPath
+                ? 'ส่งคำขอเติมเงินเรียบร้อย — แอดมินกำลังตรวจสอบสลิป'
+                : 'สร้างรายการแล้ว — สแกน QR ด้านล่างโอนยอดให้ตรงเป๊ะ ระบบจะเครดิตให้อัตโนมัติเมื่อเงินเข้า');
     }
 
     /** Cancel one of the requester's own still-pending top-ups. */
