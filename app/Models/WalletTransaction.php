@@ -2,10 +2,14 @@
 
 namespace App\Models;
 
+use App\Observers\TopupReservationObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+// คืนยอดเศษสตางค์ที่จองกับ Thaiprompt เมื่อรายการเติมเงินพ้น pending (ดู observer)
+#[ObservedBy(TopupReservationObserver::class)]
 class WalletTransaction extends Model
 {
     use HasFactory;

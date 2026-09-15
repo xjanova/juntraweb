@@ -32,7 +32,7 @@ class SmsCheckerDeviceResource extends Resource
         return $form->schema([
             Forms\Components\TextInput::make('device_name')->label('ชื่ออุปกรณ์')->required()->default('SMS Checker'),
             Forms\Components\Select::make('approval_mode')->label('โหมดอนุมัติ')
-                ->options(['auto' => 'อัตโนมัติ (เครดิตทันทีเมื่อ SMS ตรง)', 'manual' => 'ตรวจเอง'])
+                ->options(['auto' => 'อัตโนมัติ (เครดิตทันทีเมื่อ SMS ตรง)', 'manual' => 'ตรวจเอง', 'smart' => 'อัจฉริยะ (จากแอพ — ทำงานเหมือนอัตโนมัติ)'])
                 ->default('auto')->required(),
             Forms\Components\Select::make('status')->label('สถานะ')
                 ->options(['active' => 'ใช้งาน', 'inactive' => 'ปิด', 'blocked' => 'บล็อก'])
@@ -50,7 +50,7 @@ class SmsCheckerDeviceResource extends Resource
                 Tables\Columns\BadgeColumn::make('status')->label('สถานะ')
                     ->colors(['success' => 'active', 'gray' => 'inactive', 'danger' => 'blocked']),
                 Tables\Columns\BadgeColumn::make('approval_mode')->label('โหมด')
-                    ->colors(['success' => 'auto', 'warning' => 'manual']),
+                    ->colors(['success' => fn ($state) => in_array($state, ['auto', 'smart'], true), 'warning' => 'manual']),
                 Tables\Columns\TextColumn::make('app_version')->label('เวอร์ชัน')->toggleable(),
                 Tables\Columns\TextColumn::make('last_active_at')->label('ใช้งานล่าสุด')->dateTime('d/m H:i')->placeholder('—'),
             ])

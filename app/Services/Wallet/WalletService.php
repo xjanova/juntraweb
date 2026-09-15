@@ -408,6 +408,40 @@ class WalletService
         });
     }
 
+    /**
+     * Reject a pending top-up on behalf of the SMS Checker device (encrypted,
+     * HMAC-verified /api/v1/sms-payment/notify-action from the admin's phone).
+     * That request has no Filament User, so unlike rejectTopup() the actor is
+     * recorded in meta (rejected_via / rejected_by_device) instead of
+     * approved_by. Moves NO money (pending → failed) and uses the same lock +
+     * status re-check as rejectTopup(). Only SmsCheckerService may call this,
+     * after the device has been authenticated — never expose it to end users.
+     */
+    public function rejectTopupFromDevice(WalletTransaction $tx, string $deviceId, ?string $reason = null): WalletTransaction
+    {
+        if ($tx->type !== 'topup') {
+            throw new \RuntimeException('Not a top-up');
+        }
+        $result = DB::transaction(function () use ($tx, $deviceId, $reason) {
+            $locked = WalletTransaction::where('id', $tx->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'pending') {
+                throw new \RuntimeException('Not a pending top-up');
+            }
+            $locked->update([
+                'status'      => 'failed',
+                'approved_at' => now(),
+                'meta'        => array_merge((array) $locked->meta, [
+                    'reject_reason'      => $reason,
+                    'rejected_via'       => 'smschecker_app',
+                    'rejected_by_device' => $deviceId,
+                ]),
+            ]);
+            return $locked->fresh();
+        });
+        Cache::forget('wallet:pending_topup_count');
+        return $result;
+    }
+
     /** Number of still-pending top-ups for a user. */
     public function pendingTopupCount(User $user): int
     {

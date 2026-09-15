@@ -8,47 +8,13 @@ use App\Models\User;
 use App\Services\SmsPayment\SmsCheckerService;
 use App\Services\Wallet\WalletService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Feature\Concerns\SmsCheckerDeviceRequests;
 use Tests\TestCase;
 
 class SmsCheckerApiTest extends TestCase
 {
     use RefreshDatabase;
-
-    private string $secret = 'b4f1c0de00112233445566778899aabbccddeeff00112233445566778899aabb';
-
-    private function device(string $mode = 'auto', string $status = 'active'): SmsCheckerDevice
-    {
-        return SmsCheckerDevice::create([
-            'device_id'     => 'SMSCHK-TESTONLY',
-            'device_name'   => 'Test device',
-            'api_key'       => 'apikey-' . bin2hex(random_bytes(8)),
-            'secret_key'    => $this->secret,
-            'platform'      => 'android',
-            'status'        => $status,
-            'approval_mode' => $mode,
-        ]);
-    }
-
-    /** Build the encrypted + signed /notify request the app would send. */
-    private function notifyRequest(SmsCheckerDevice $device, array $payload): array
-    {
-        $svc       = app(SmsCheckerService::class);
-        $encrypted = $svc->encryptPayload($payload, $this->secret);
-        $nonce     = base64_encode(random_bytes(16));
-        $timestamp = (string) (int) round(microtime(true) * 1000);
-        $signature = $svc->sign($encrypted . $nonce . $timestamp, $this->secret);
-
-        return [
-            'body'    => ['data' => $encrypted],
-            'headers' => [
-                'X-Api-Key'   => $device->api_key,
-                'X-Device-Id' => $device->device_id,
-                'X-Signature' => $signature,
-                'X-Nonce'     => $nonce,
-                'X-Timestamp' => $timestamp,
-            ],
-        ];
-    }
+    use SmsCheckerDeviceRequests;
 
     private function pendingTopup(User $user, float $amount)
     {

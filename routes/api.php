@@ -158,12 +158,21 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 // ─── SMS Checker payment gateway (thaiprompt-smschecker-v1) ──────────
 // Device-authenticated (X-Api-Key + AES-GCM/HMAC), NOT Sanctum. The juntra
 // SMS Checker Android app POSTs encrypted bank-SMS here; matches credit the
-// reserved wallet top-up automatically.
+// reserved wallet top-up automatically. Paths + shapes mirror Thaiprompt's
+// routes/sms_payment_api.php (one app serves both sites — contract D).
+// Money moves only on signed evidence: notify / notify-action (AES-GCM+HMAC),
+// or orders/match when a signed /notify record for that exact amount already
+// exists — never on X-Api-Key alone (see SmsCheckerService::matchForApp).
 Route::prefix('v1/sms-payment')->middleware(VerifySmsCheckerDevice::class)->name('api.v1.sms.')->group(function () {
     Route::post('notify',           [SmsPaymentController::class, 'notify'])->middleware('throttle:300,1')->name('notify');
+    Route::post('notify-action',    [SmsPaymentController::class, 'notifyAction'])->middleware('throttle:300,1')->name('action');
     Route::post('register-device',  [SmsPaymentController::class, 'registerDevice'])->middleware('throttle:300,1')->name('register');
     Route::post('register-fcm-token', [SmsPaymentController::class, 'registerFcmToken'])->middleware('throttle:300,1')->name('fcm');
     Route::get('status',            [SmsPaymentController::class, 'status'])->middleware('throttle:120,1')->name('status');
     Route::get('device-settings',   [SmsPaymentController::class, 'getDeviceSettings'])->middleware('throttle:120,1')->name('settings.get');
     Route::put('device-settings',   [SmsPaymentController::class, 'updateDeviceSettings'])->middleware('throttle:120,1')->name('settings.put');
+    Route::get('orders',            [SmsPaymentController::class, 'orders'])->middleware('throttle:120,1')->name('orders');
+    Route::get('orders/sync',       [SmsPaymentController::class, 'syncOrders'])->middleware('throttle:120,1')->name('orders.sync');
+    Route::get('orders/match',      [SmsPaymentController::class, 'matchOrder'])->middleware('throttle:120,1')->name('orders.match');
+    Route::get('dashboard-stats',   [SmsPaymentController::class, 'dashboardStats'])->middleware('throttle:120,1')->name('stats');
 });

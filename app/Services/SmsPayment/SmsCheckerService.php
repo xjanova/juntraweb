@@ -130,7 +130,7 @@ class SmsCheckerService
                 $topup = $this->findMatchingTopup($amount, $smsTs);
                 if ($topup) {
                     $matchedTxId = $topup->id;
-                    if ($device->getApprovalMode() === 'auto') {
+                    if ($device->autoConfirms()) {
                         $this->wallet->confirmTopupAuto($topup, [
                             'confirmed_via'       => 'sms',
                             'sms_notification_id' => $notification->id,
@@ -190,10 +190,228 @@ class SmsCheckerService
         return $q->first();
     }
 
+    /* ===================== APP-DRIVEN ACTIONS (orders) ===================== */
+
+    /**
+     * GET /orders/match — the app asks "is this SMS amount one of your bills?"
+     * BEFORE it forwards the SMS via /notify (SmsProcessingService.kt order).
+     *
+     * Thaiprompt's reference credits the bill right here on amount alone. We do
+     * NOT: this endpoint is authenticated by X-Api-Key only (no HMAC, no signed
+     * SMS), and an API key alone must never move money. We auto-confirm only
+     * when a signed /notify record for this exact amount already exists
+     * (claimableSmsFor) AND the device is in auto/smart mode; otherwise we just
+     * report the match and the signed /notify that follows does the crediting.
+     *
+     * @return array{state:'confirmed'|'pending'|'already'|'none', tx:?WalletTransaction, notification:?SmsPaymentNotification}
+     */
+    public function matchForApp(float $amount, SmsCheckerDevice $device): array
+    {
+        $tx = $this->findMatchingTopup($amount, null);
+
+        if ($tx) {
+            $sms = $this->claimableSmsFor($tx);
+            if ($sms && config('smschecker.enabled') && $device->autoConfirms()) {
+                try {
+                    $confirmed = $this->confirmWithEvidence($tx, $sms, [
+                        'confirmed_via' => 'sms',
+                        'via'           => 'orders_match',
+                        'device_id'     => $device->device_id,
+                    ]);
+                    if ($confirmed) {
+                        return ['state' => 'confirmed', 'tx' => $confirmed, 'notification' => $sms->fresh()];
+                    }
+                } catch (\RuntimeException) {
+                    // Raced with /notify, a slip or an admin — report what is true now.
+                    $tx = $tx->fresh();
+                    if ($tx->status === 'success') {
+                        return ['state' => 'already', 'tx' => $tx, 'notification' => null];
+                    }
+                }
+            }
+
+            // notification null → the presenter shows only an SMS actually stamped on this bill.
+            return ['state' => 'pending', 'tx' => $tx, 'notification' => null];
+        }
+
+        // Already credited a moment ago (by /notify or a slip) — still tell the app
+        // it is OURS so it attributes the SMS to this site. Unique (satang) PromptPay
+        // amounts only: a round ฿100.00 proves nothing about which site it paid.
+        $cents = (int) round($amount * 100) % 100;
+        if ($cents !== 0) {
+            $recent = WalletTransaction::where('type', 'topup')
+                ->where('status', 'success')
+                ->where('method', 'promptpay')
+                ->where('amount', number_format($amount, 2, '.', ''))
+                ->where('approved_at', '>=', now()->subHour())
+                ->orderByDesc('approved_at')
+                ->first();
+            if ($recent) {
+                return ['state' => 'already', 'tx' => $recent, 'notification' => null];
+            }
+        }
+
+        return ['state' => 'none', 'tx' => null, 'notification' => null];
+    }
+
+    /**
+     * notify-action "approve" from the phone. Mirrors Thaiprompt
+     * (executeTransactionApproveAction): a signed SMS for exactly this amount
+     * must exist, unless the admin explicitly forces it (logged loudly).
+     *
+     * @return array{result:'approved'|'already'|'not_pending'|'no_sms'|'disabled', tx:WalletTransaction, notification:?SmsPaymentNotification}
+     */
+    public function approveFromDevice(WalletTransaction $tx, SmsCheckerDevice $device, array $payload): array
+    {
+        if ($tx->status === 'success') {
+            return ['result' => 'already', 'tx' => $tx, 'notification' => null];
+        }
+        if ($tx->status !== 'pending') {
+            return ['result' => 'not_pending', 'tx' => $tx, 'notification' => null];
+        }
+        if (! config('smschecker.enabled')) {
+            return ['result' => 'disabled', 'tx' => $tx, 'notification' => null];
+        }
+
+        $sms   = $this->claimableSmsFor($tx);
+        $force = filter_var($payload['force'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if (! $sms && ! $force) {
+            return ['result' => 'no_sms', 'tx' => $tx, 'notification' => null];
+        }
+        if (! $sms) {
+            Log::warning('SmsChecker: FORCE approve without a matching SMS', [
+                'tx_id'     => $tx->id,
+                'reference' => $tx->reference_code,
+                'amount'    => (string) $tx->amount,
+                'device_id' => $device->device_id,
+            ]);
+        }
+
+        try {
+            $confirmed = $this->confirmWithEvidence($tx, $sms, array_filter([
+                'confirmed_via'  => 'smschecker_app',
+                'device_id'      => $device->device_id,
+                'bank'           => $payload['bank'] ?? null,
+                'sms_ref'        => $payload['sms_reference'] ?? null,
+                'force_approved' => $sms ? null : true,
+            ], fn ($v) => $v !== null));
+        } catch (\RuntimeException) {
+            $fresh = $tx->fresh();
+
+            return ['result' => $fresh->status === 'success' ? 'already' : 'not_pending', 'tx' => $fresh, 'notification' => null];
+        }
+
+        if ($confirmed === null) {
+            // The SMS we found was claimed by another bill in the meantime.
+            return ['result' => 'no_sms', 'tx' => $tx->fresh(), 'notification' => null];
+        }
+
+        return ['result' => 'approved', 'tx' => $confirmed, 'notification' => $sms?->fresh()];
+    }
+
+    /**
+     * notify-action "reject" from the phone. Moves no money.
+     *
+     * @return array{result:'rejected'|'already'|'not_pending', tx:WalletTransaction}
+     */
+    public function rejectFromDevice(WalletTransaction $tx, SmsCheckerDevice $device, ?string $reason): array
+    {
+        if ($tx->status === 'failed') {
+            return ['result' => 'already', 'tx' => $tx];
+        }
+        if ($tx->status !== 'pending') {
+            return ['result' => 'not_pending', 'tx' => $tx];
+        }
+
+        try {
+            $rejected = DB::transaction(function () use ($tx, $device, $reason) {
+                $row = $this->wallet->rejectTopupFromDevice($tx, $device->device_id, $reason ?: 'Rejected via SMS Checker');
+                // Same as Thaiprompt: an SMS stamped onto this bill (manual mode) is closed with it.
+                SmsPaymentNotification::where('matched_transaction_id', $tx->id)
+                    ->where('status', 'matched')
+                    ->update(['status' => 'rejected']);
+
+                return $row;
+            });
+        } catch (\RuntimeException) {
+            $fresh = $tx->fresh();
+
+            return ['result' => $fresh->status === 'failed' ? 'already' : 'not_pending', 'tx' => $fresh];
+        }
+
+        return ['result' => 'rejected', 'tx' => $rejected];
+    }
+
+    /**
+     * Positive evidence that money for THIS top-up arrived: a signed /notify
+     * record that is either already stamped onto it (manual mode) or an
+     * unclaimed credit of exactly its amount received after it was created.
+     */
+    public function claimableSmsFor(WalletTransaction $tx): ?SmsPaymentNotification
+    {
+        $stamped = SmsPaymentNotification::where('matched_transaction_id', $tx->id)
+            ->where('type', 'credit')
+            ->whereIn('status', ['pending', 'matched'])
+            ->orderBy('id')
+            ->first();
+        if ($stamped) {
+            return $stamped;
+        }
+
+        $created = $tx->created_at;
+
+        return SmsPaymentNotification::whereNull('matched_transaction_id')
+            ->where('type', 'credit')
+            ->where('status', 'pending')
+            ->where('amount', number_format(abs((float) $tx->amount), 2, '.', ''))
+            ->where(function ($q) use ($created) {
+                $q->where('sms_timestamp', '>=', $created)
+                    ->orWhere(function ($q2) use ($created) {
+                        $q2->whereNull('sms_timestamp')->where('created_at', '>=', $created);
+                    });
+            })
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * Credit a pending top-up via WalletService::confirmTopupAuto (its lock +
+     * pending re-check give idempotency) and bind the SMS to it, atomically.
+     * Returns null when the SMS was claimed by another bill meanwhile.
+     *
+     * @throws \RuntimeException when the top-up is no longer pending
+     */
+    private function confirmWithEvidence(WalletTransaction $tx, ?SmsPaymentNotification $sms, array $meta): ?WalletTransaction
+    {
+        return DB::transaction(function () use ($tx, $sms, $meta) {
+            $lockedSms = null;
+            if ($sms) {
+                $lockedSms = SmsPaymentNotification::whereKey($sms->id)->lockForUpdate()->first();
+                $takenElsewhere = $lockedSms === null
+                    || ($lockedSms->matched_transaction_id !== null && (int) $lockedSms->matched_transaction_id !== (int) $tx->id)
+                    || in_array($lockedSms->status, ['confirmed', 'rejected', 'expired'], true);
+                if ($takenElsewhere) {
+                    return null;
+                }
+                $meta['sms_notification_id'] = $lockedSms->id;
+            }
+
+            $confirmed = $this->wallet->confirmTopupAuto($tx, $meta);
+
+            $lockedSms?->update(['status' => 'confirmed', 'matched_transaction_id' => $tx->id]);
+
+            return $confirmed;
+        });
+    }
+
     /**
      * Pick a unique payable amount for a top-up of $base baht by appending a
      * satang suffix not currently used by another reserved (pending, unexpired)
      * top-up — so an incoming SMS of that exact amount maps to exactly one bill.
+     *
+     * Local only — callers creating a top-up must go through
+     * AmountReservation::createPendingTopup(), which reserves the amount at
+     * Thaiprompt (cross-site unique) and uses this only as the fallback.
      */
     public function uniqueAmountFor(float $base): float
     {

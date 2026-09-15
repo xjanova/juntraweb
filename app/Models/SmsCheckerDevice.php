@@ -34,6 +34,17 @@ class SmsCheckerDevice extends Model
         return $this->approval_mode ?: config('smschecker.default_approval_mode', 'auto');
     }
 
+    /**
+     * Does an exact SMS match auto-credit the wallet for this device?
+     * The app has a third mode, 'smart' (auto + fuzzy orphan matching done on
+     * the phone). We store it as-is so the app's setting round-trips, but on
+     * this server it behaves exactly like 'auto' — we have no fuzzy matching.
+     */
+    public function autoConfirms(): bool
+    {
+        return in_array($this->getApprovalMode(), ['auto', 'smart'], true);
+    }
+
     public static function findByApiKey(string $apiKey): ?self
     {
         return static::where('api_key', $apiKey)->first();

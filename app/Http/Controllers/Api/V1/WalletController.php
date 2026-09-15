@@ -7,7 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
-use App\Services\SmsPayment\SmsCheckerService;
+use App\Services\SmsPayment\AmountReservation;
 use App\Services\Wallet\SlipAutoVerifier;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
@@ -101,7 +101,7 @@ class WalletController extends Controller
      *   (b) Implement native slip upload + a future POST .../topup/{tx}/slip
      *       endpoint (not in scope this round).
      */
-    public function topupPromptPay(Request $request, SmsCheckerService $sms): JsonResponse
+    public function topupPromptPay(Request $request, AmountReservation $amounts): JsonResponse
     {
         $data = $request->validate([
             'amount' => 'required|numeric|min:' . config('pricing.min_topup', 20)
@@ -164,11 +164,11 @@ class WalletController extends Controller
         }
 
         // When the SMS gateway is on, charge a UNIQUE amount (e.g. ฿100.37) so an
-        // incoming bank SMS maps to exactly this top-up and auto-credits.
-        $payable = config('smschecker.enabled') ? $sms->uniqueAmountFor($base) : $base;
-
+        // incoming bank SMS maps to exactly this top-up and auto-credits. The
+        // amount is reserved cross-site at Thaiprompt AFTER the row exists, so
+        // the QR below must use the final $tx->amount, never a pre-computed one.
         try {
-            $tx = $this->wallet->recordPendingTopup($request->user(), $payable, null, 'promptpay');
+            $tx = $amounts->createPendingTopup($request->user(), $base);
         } catch (\RuntimeException $e) {
             // Pending-cap reached.
             return response()->json([
@@ -176,9 +176,7 @@ class WalletController extends Controller
                 'reason_code' => 'too_many_pending',
             ], 409);
         }
-        if (abs($payable - $base) > 0.0001) {
-            $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base])]);
-        }
+        $payable = (float) $tx->amount;
 
         return response()->json([
             'data' => [
