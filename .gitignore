@@ -48,3 +48,6 @@ database/database.sqlite
 
 # preview sandbox (sqlite) — ไม่ commit
 .env.preview
+
+# config:cache prefers .env.<APP_ENV> over .env — never ship one
+.env.production

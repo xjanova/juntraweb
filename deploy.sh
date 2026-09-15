@@ -92,6 +92,18 @@ php artisan event:cache 2>&1 | tee -a "$LOG" || warn "event:cache failed"
 # Filament components + Blade icons (heroicons) — without this every admin page re-discovers them.
 php artisan filament:optimize 2>&1 | tee -a "$LOG" || warn "filament:optimize failed"
 
+# Self-test the cached config before trusting it. 2026-09-15: a stale .env.production (tracked in
+# git, APP_KEY empty, template DB credentials) got cached instead of .env — config:cache reads
+# .env.<APP_ENV> when it exists — and every page answered 500 while /up still said 200.
+if [ -f ".env.production" ] && [ -f ".env" ]; then
+  warn ".env.production exists next to .env — config:cache would read it instead of .env"
+fi
+if ! php -r '$c = @include "bootstrap/cache/config.php"; exit(is_array($c) && ! empty($c["app"]["key"]) ? 0 : 1);' \
+   || ! php artisan migrate:status >/dev/null 2>&1; then
+  warn "Cached config failed its self-test (no APP_KEY or cannot reach the DB) — running uncached this deploy"
+  php artisan config:clear 2>&1 | tee -a "$LOG"
+fi
+
 # ---------- 10. Seed safe data (idempotent updateOrCreate) ----------
 log "🌱 Running idempotent seeders..."
 php artisan db:seed --class=ZodiacSeeder --force 2>&1 | tee -a "$LOG" || warn "ZodiacSeeder skipped"
@@ -117,6 +129,13 @@ php artisan up 2>&1 | tee -a "$LOG"
 APP_URL=$(grep -E "^APP_URL=" .env | cut -d= -f2- | tr -d '"')
 if [ -n "$APP_URL" ]; then
   CODE=$(curl -s -o /dev/null -w "%{http_code}" -L "$APP_URL" --max-time 15 || echo "000")
+  # The home page touches the database and settings — a broken cached config shows up here as a 5xx.
+  # Fall back to running uncached rather than leaving the site down until someone notices.
+  if [ "${CODE:0:1}" = "5" ] && [ -f bootstrap/cache/config.php ]; then
+    warn "Home page answered HTTP $CODE with cached config — clearing config cache and re-checking"
+    php artisan config:clear 2>&1 | tee -a "$LOG"
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -L "$APP_URL" --max-time 15 || echo "000")
+  fi
   if [ "$CODE" = "200" ] || [ "$CODE" = "302" ]; then
     log "✅ Health check OK (HTTP $CODE)"
   else
