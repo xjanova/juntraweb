@@ -367,6 +367,7 @@ class WalletController extends Controller
                 'slip_upload_url' => url('/wallet/topup/' . $row->id),
                 'auto_verified'   => $auto !== null,
                 'paid'            => (bool) ($auto['paid'] ?? false),
+                'decision'        => $auto['decision'] ?? 'review',
                 'message'         => $auto['message']
                     ?? 'ได้รับสลิปแล้วค่ะ ระบบกำลังตรวจสอบให้นะคะ',
                 'balance'         => (float) $this->wallet->balance($request->user()),

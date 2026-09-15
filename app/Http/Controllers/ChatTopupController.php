@@ -161,11 +161,13 @@ class ChatTopupController extends Controller
         }
 
         return [
-            'ok'      => true,
-            'status'  => $tx->fresh()->status,
-            'paid'    => $result['paid'],
-            'balance' => (float) $this->wallet->balance($user),
-            'message' => $result['message'],
+            'ok'       => true,
+            'status'   => $tx->fresh()->status,
+            'paid'     => $result['paid'],
+            // approve | duplicate | review — หน้าแชทจะได้บอกลูกค้าให้แนบสลิปใบใหม่เมื่อเป็น duplicate
+            'decision' => $result['decision'] ?? null,
+            'balance'  => (float) $this->wallet->balance($user),
+            'message'  => $result['message'],
         ];
     }
 
