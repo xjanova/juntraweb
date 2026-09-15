@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\ReadingResource;
+use App\Filament\Resources\ReadingResource\Widgets\ReadingBillStats;
 use App\Jobs\InterpretTarotReading;
 use App\Models\Reading;
 use App\Models\TarotCard;
@@ -11,6 +12,7 @@ use App\Services\Readings\ReadingBillActions;
 use App\Services\Wallet\WalletService;
 use App\Support\ReadingBill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -126,6 +128,33 @@ class ReadingBillAdminTest extends TestCase
         Reading::whereKey($r->id)->update(['status' => null, 'result' => 'คำทำนายใหม่']);
 
         $this->assertSame('refunded', ReadingBill::status($r->fresh()), 'a goodwill re-read is not revenue');
+    }
+
+    /**
+     * prod ตั้ง APP_TIMEZONE=Asia/Bangkok (ฐานเก็บเวลาไทย) ส่วนเทสต์ใช้ UTC — บั๊กจริงที่หลุดขึ้น prod:
+     * ขอบวันถูกแปลงเป็น UTC จึงเลื่อน 7 ชม. บิล 21:31 หายจาก "วันนี้" แต่บิล 20:00 เมื่อวานกลับถูกนับ
+     */
+    public function test_todays_revenue_follows_the_thai_day_when_the_database_stores_thai_time(): void
+    {
+        $previousTz = date_default_timezone_get();
+        config(['app.timezone' => 'Asia/Bangkok']);
+        date_default_timezone_set('Asia/Bangkok');
+
+        try {
+            $u = $this->member();
+            Carbon::setTestNow(Carbon::parse('2026-09-14 20:00', 'Asia/Bangkok'));
+            app(WalletService::class)->debit($u, 50, 'เปิดไพ่: เมื่อวานสองทุ่ม', ['reference_type' => 'reading']);
+            Carbon::setTestNow(Carbon::parse('2026-09-15 21:31', 'Asia/Bangkok'));
+            app(WalletService::class)->debit($u, 99, 'เปิดไพ่: คืนนี้สามทุ่ม', ['reference_type' => 'reading']);
+
+            $stats = (fn () => $this->getStats())->call(new ReadingBillStats);
+
+            $this->assertSame('฿99.00', $stats[0]->getValue(), 'today = 00:00–24:00 Thai time');
+            $this->assertSame('฿149.00', $stats[1]->getValue(), 'the 7-day tile still has both');
+        } finally {
+            Carbon::setTestNow();
+            date_default_timezone_set($previousTz);
+        }
     }
 
     public function test_members_cannot_open_the_bill_pages(): void

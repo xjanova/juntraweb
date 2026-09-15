@@ -32,14 +32,24 @@ class ReadingBillStats extends BaseWidget
         return abs((float) $q->sum('amount'));
     }
 
+    /**
+     * เที่ยงคืนเวลาไทยของ $daysAgo วันก่อน ในเขตเวลาเดียวกับที่ฐานข้อมูลเก็บ (config app.timezone)
+     *
+     * ห้าม ->utc(): prod ตั้ง APP_TIMEZONE=Asia/Bangkok และเก็บเวลาไทยลงฐาน ขอบวันแบบ UTC จึงเลื่อนไป 7 ชม.
+     * (เคยหลุดขึ้น prod — บิลหลัง 17:00 หายจาก "วันนี้" แต่บิล 17:00–24:00 ของเมื่อวานกลับถูกนับ)
+     */
+    private function bangkokMidnight(int $daysAgo = 0): Carbon
+    {
+        return Carbon::now('Asia/Bangkok')->subDays($daysAgo)->startOfDay()->setTimezone(config('app.timezone'));
+    }
+
     protected function getStats(): array
     {
-        $tz = 'Asia/Bangkok';
-        $today = Carbon::now($tz)->startOfDay()->utc();
+        $today = $this->bangkokMidnight();
 
         $daily = [];
         for ($i = 6; $i >= 0; $i--) {
-            $d = Carbon::now($tz)->subDays($i)->startOfDay()->utc();
+            $d = $this->bangkokMidnight($i);
             $daily[] = round($this->revenueSince($d, $d->copy()->addDay()), 2);
         }
 
