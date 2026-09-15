@@ -53,6 +53,16 @@ class AppServiceProvider extends ServiceProvider
             // DB unreachable — keep the .env default. Don't crash boot.
         }
 
+        // @serviceopen('palmistry') … @endserviceopen — ลิงก์/การ์ดของบริการที่แอดมินปิดไว้หายเองทั้งเว็บ
+        // (เมนู หน้าแรก ท้ายเว็บ แชท) และกลับมาเองเมื่อเปิดคืน ไม่ต้องแก้ view ทีละหน้า
+        \Illuminate\Support\Facades\Blade::if('serviceopen', function (string $service): bool {
+            try {
+                return ! \App\Support\ServiceGate::isClosed($service);
+            } catch (\Throwable) {
+                return true; // ก่อนติดตั้ง/DB ล่ม — แสดงตามปกติ
+            }
+        });
+
         // ─── ประตูหน้าของ API (ไม่ต้องล็อกอินก็ยิงได้) ─────────────────
         // Laravel 11 ไม่ใส่ `throttle:api` ให้อัตโนมัติ และ withRouting()
         // ใน bootstrap/app.php ก็ไม่ได้เรียก throttleApi() — แปลว่าก่อนหน้านี้

@@ -22,6 +22,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [\App\Http\Middleware\WatchScheduler::class]);
         $middleware->alias([
             'block.installed' => \App\Http\Middleware\BlockInstallerWhenInstalled::class,
+            // บริการที่แอดมินปิดไว้ (ServiceGate) — ใช้ไม่ได้ทั้งเว็บ/แอพในจุดเดียว
+            'service.open' => \App\Http\Middleware\EnsureServiceOpen::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

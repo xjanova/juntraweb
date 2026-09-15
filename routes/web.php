@@ -88,33 +88,36 @@ Route::prefix('tarot')->name('tarot.')->controller(FreeTarotController::class)->
 
 // ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับที่บอท FB/LINE ขาย (คำทำนายมาจาก Thaiprompt)
 // submit เป็นรายการที่ตัดเงิน จึง throttle ต่อผู้ใช้เหมือนโมดูลทำนายอื่น
+// 🔒 service.open:<x> — บริการที่แอดมินปิดไว้ (หลังบ้าน → ตั้งค่าวอลเลต → ปิดขายชั่วคราว)
+//    เจ้าของสั่ง 2026-09-15: เหลือไว้แต่ไพ่ — ลิงก์เดิมยังเปิดได้ (หน้าปิดปรับปรุง) ไม่เจอ error
 Route::prefix('deep')->name('deep.')->controller(DeepReadingController::class)->group(function () {
-    Route::get('/', 'index')->name('index');
-    Route::post('/', 'store')->middleware(['auth', 'throttle:reading'])->name('store');
+    Route::get('/', 'index')->middleware('service.open:deep')->name('index');
+    Route::post('/', 'store')->middleware(['service.open:deep', 'auth', 'throttle:reading'])->name('store');
+    // คำทำนายที่ซื้อไปแล้วต้องเปิดอ่านได้เสมอ แม้บริการปิด
     Route::get('/{reading}', 'show')->name('show');
 });
 
 // Horoscope
-Route::prefix('horoscope')->name('horoscope.')->controller(HoroscopeController::class)->group(function () {
+Route::prefix('horoscope')->name('horoscope.')->middleware('service.open:horoscope')->controller(HoroscopeController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::get('/thai-zodiac', 'thai')->name('thai');
     Route::get('/{zodiac:slug}', 'show')->name('show');
 });
 
 // Numerology — calculate is paid (debits wallet) so per-user throttle applies
-Route::prefix('numerology')->name('numerology.')->controller(NumerologyController::class)->group(function () {
+Route::prefix('numerology')->name('numerology.')->middleware('service.open:numerology')->controller(NumerologyController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::post('/calculate', 'calculate')->middleware('throttle:reading')->name('calculate');
 });
 
 // Palmistry — analyze is paid + AI image upload, throttled per user
-Route::prefix('palmistry')->name('palmistry.')->controller(PalmistryController::class)->group(function () {
+Route::prefix('palmistry')->name('palmistry.')->middleware('service.open:palmistry')->controller(PalmistryController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::post('/analyze', 'analyze')->middleware('throttle:reading')->name('analyze');
 });
 
 // Auspicious dates — find is paid + AI advice, throttled per user
-Route::prefix('auspicious')->name('auspicious.')->controller(AuspiciousController::class)->group(function () {
+Route::prefix('auspicious')->name('auspicious.')->middleware('service.open:auspicious')->controller(AuspiciousController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::post('/find', 'find')->middleware('throttle:reading')->name('find');
 });

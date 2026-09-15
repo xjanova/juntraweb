@@ -31,7 +31,7 @@
         <div class="panel" style="padding:18px 22px;margin-bottom:24px;border-color:var(--gold);background:linear-gradient(135deg,rgba(244,207,106,.08),rgba(176,122,255,.04));display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
           <div>
             <div style="font-weight:600;margin-bottom:4px">ยังไม่ได้ตั้งข้อมูลโหราศาสตร์</div>
-            <div style="font-size:13px;color:var(--ink-dim)">กรอกวันเกิดครั้งเดียว ใช้กับเลขศาสตร์ ฤกษ์ยาม ดวงรายวันได้เลยทันที</div>
+            <div style="font-size:13px;color:var(--ink-dim)">กรอกวันเกิดครั้งเดียว แม่หมอใช้ดูดวงดาวประกอบไพ่ Celtic Cross และพยากรณ์ 12 เดือนให้อัตโนมัติ</div>
           </div>
           <a href="{{ route('account.astrology') }}" class="btn btn-primary">ตั้งค่าตอนนี้ →</a>
         </div>
@@ -44,15 +44,24 @@
           <h3>เปิดไพ่</h3>
           <p>ลองเปิดไพ่ยิปซีอีกครั้ง วันนี้พลังของไพ่อาจเปลี่ยนไป</p>
         </a>
-        <a href="{{ route('horoscope.index') }}" class="service" style="text-decoration:none">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="10"/><path d="M12 7v5l3 3"/></svg></div>
-          <h3>ดวงรายวัน</h3>
-          <p>คำพยากรณ์ประจำวันของราศีคุณ — อัปเดตทุก 24 ชั่วโมง</p>
-        </a>
+        {{-- ดวงรายวันปิดอยู่ (ServiceGate) → ช่องนี้เป็นไพ่ฟรีแทน ไม่ปล่อยให้ตารางเหลือช่องว่าง --}}
+        @serviceopen('horoscope')
+          <a href="{{ route('horoscope.index') }}" class="service" style="text-decoration:none">
+            <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="10"/><path d="M12 7v5l3 3"/></svg></div>
+            <h3>ดวงรายวัน</h3>
+            <p>คำพยากรณ์ประจำวันของราศีคุณ — อัปเดตทุก 24 ชั่วโมง</p>
+          </a>
+        @else
+          <a href="{{ route('tarot.free') }}" class="service" style="text-decoration:none">
+            <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 2.7l1.85 5.45L19.3 10l-5.45 1.85L12 17.3l-1.85-5.45L4.7 10l5.45-1.85z"/></svg></div>
+            <h3>ดูดวงฟรี 1 ใบ</h3>
+            <p>ให้แม่หมอเปิดไพ่ 1 ใบ ทำนายสั้น ๆ ฟรี</p>
+          </a>
+        @endserviceopen
         <a href="{{ route('chat.index') }}" class="service" style="text-decoration:none">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M21 12c0 4.97-4.03 9-9 9-1.5 0-2.91-.37-4.15-1.02L3 21l1.02-4.85A8.96 8.96 0 0 1 3 12a9 9 0 1 1 18 0z"/></svg></div>
-          <h3>คุยกับ AI</h3>
-          <p>ถามแม่หมอ AI เรื่องที่อยากรู้ ตอบทันทีตลอด 24 ชม.</p>
+          <h3>คุยกับแม่หมอ</h3>
+          <p>เล่าเรื่องที่ค้างใจได้ฟรี ตอบทันทีตลอด 24 ชม.</p>
         </a>
       </div>
 

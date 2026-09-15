@@ -59,12 +59,13 @@
          topupStatusUrl: @js(route('chat.topup.status', ['tx' => '__ID__'])),
          topupSlipUrl: @js(route('chat.topup.slip', ['tx' => '__ID__'])),
          bundles: @js(array_slice((array) config('pricing.topup_bundles', [50, 100, 200, 500]), 0, 4)),
-         nextSteps: @js([
+         {{-- ปุ่มไปต่อหลังเติมเงิน — บริการที่แอดมินปิดไว้ (ServiceGate) ไม่แสดง --}}
+         nextSteps: @js(array_values(array_filter([
            ['icon' => '🔮', 'label' => 'เปิดไพ่ยิปซี', 'url' => route('tarot.index')],
-           ['icon' => '🌟', 'label' => 'ดูดวงเชิงลึก', 'url' => route('deep.index')],
-           ['icon' => '🔢', 'label' => 'เลขศาสตร์',   'url' => route('numerology.index')],
-           ['icon' => '📿', 'label' => 'ฤกษ์ยาม',     'url' => route('auspicious.index')],
-         ]),
+           \App\Support\ServiceGate::isClosed('deep') ? null : ['icon' => '🌟', 'label' => 'ดูดวงเชิงลึก', 'url' => route('deep.index')],
+           \App\Support\ServiceGate::isClosed('numerology') ? null : ['icon' => '🔢', 'label' => 'เลขศาสตร์', 'url' => route('numerology.index')],
+           \App\Support\ServiceGate::isClosed('auspicious') ? null : ['icon' => '📿', 'label' => 'ฤกษ์ยาม', 'url' => route('auspicious.index')],
+         ]))),
        })">
 
     <x-page-hero art="images/juntra/art/chat.webp" />
@@ -368,10 +369,11 @@
                 </div>
                 <div class="chip-row">
                   <a href="{{ route('tarot.index') }}" class="chip chip-strong"><span class="chip-icon">🔮</span> เปิดไพ่ยิปซี</a>
-                  <a href="{{ route('deep.index') }}" class="chip chip-strong"><span class="chip-icon">🌟</span> ดูดวงเชิงลึก</a>
-                  <a href="{{ route('horoscope.index') }}" class="chip"><span class="chip-icon">🌙</span> ดวงรายวัน</a>
-                  <a href="{{ route('numerology.index') }}" class="chip"><span class="chip-icon">🔢</span> เลขศาสตร์</a>
-                  <a href="{{ route('auspicious.index') }}" class="chip"><span class="chip-icon">📿</span> ฤกษ์ยาม</a>
+                  <a href="{{ route('tarot.free') }}" class="chip"><span class="chip-icon">✨</span> ดูดวงฟรี 1 ใบ</a>
+                  @serviceopen('deep')<a href="{{ route('deep.index') }}" class="chip chip-strong"><span class="chip-icon">🌟</span> ดูดวงเชิงลึก</a>@endserviceopen
+                  @serviceopen('horoscope')<a href="{{ route('horoscope.index') }}" class="chip"><span class="chip-icon">🌙</span> ดวงรายวัน</a>@endserviceopen
+                  @serviceopen('numerology')<a href="{{ route('numerology.index') }}" class="chip"><span class="chip-icon">🔢</span> เลขศาสตร์</a>@endserviceopen
+                  @serviceopen('auspicious')<a href="{{ route('auspicious.index') }}" class="chip"><span class="chip-icon">📿</span> ฤกษ์ยาม</a>@endserviceopen
                   {{-- เติมเงินจบในแชท ไม่พาออกไปหน้าอื่น (ถ้าเปิดการ์ดไม่ได้
                        ค่อยตกไปเป็นลิงก์หน้าเติมเงินตามเดิม) --}}
                   <button type="button" class="chip chip-strong" x-show="canTopupInChat" @click="openTopup()">

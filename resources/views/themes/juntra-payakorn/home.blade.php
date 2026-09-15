@@ -20,16 +20,15 @@
       ด้วยพลังแห่งดวงดาว
     </h1>
     <p class="hero-sub">
-      เราคือบ้านของหมอดูสายมู ผู้เชื่อมจิตวิญญาณกับจักรวาล —
-      อ่านดวง ไพ่ยิปซี ฤกษ์ยาม และพิธีเสริมดวง<br>
-      ในบรรยากาศ <em class="thai-italic">มีมนต์ขลัง</em> ที่คุณจะสัมผัสได้ตั้งแต่ก้าวแรก
+      เลือกไพ่ด้วยมือของท่านเองจากสำรับ 78 ใบ แล้วให้แม่หมอจันทราอ่านไพ่ × ตำแหน่ง<br>
+      ในบรรยากาศ <em class="thai-italic">มีมนต์ขลัง</em> — คุยกับแม่หมอได้ฟรี จ่ายเฉพาะตอนเปิดไพ่
     </p>
     <div class="hero-cta">
       <a href="{{ route('tarot.index') }}" class="btn btn-primary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M5 19l3-3M16 8l3-3"/><circle cx="12" cy="12" r="3"/></svg>
         เปิดไพ่ยิปซีออนไลน์
       </a>
-      <a href="#services" class="btn btn-ghost">ดูบริการทั้งหมด →</a>
+      <a href="#services" class="btn btn-ghost">ดูแพ็กเกจไพ่ทั้งหมด →</a>
     </div>
   </div>
   <div class="scroll-cue" aria-hidden="true">
@@ -38,42 +37,80 @@
   </div>
 </section>
 
+{{-- 🔮 (2026-09-15) เจ้าของสั่ง "เหลือไว้แต่ไพ่" — หน้าแรกขายแพ็กเกจไพ่ตรง ๆ ราคาจริงจากหลังบ้าน
+     (TarotSpreads::all() = เฉพาะที่เปิดขาย · Pricing::for = ราคา/สวิตช์ฟรีที่แอดมินตั้ง) กดแล้วไปหน้าไพ่
+     พร้อมเลือกแพ็กเกจนั้นไว้ให้ · บริการอื่นที่ปิดอยู่ (ServiceGate) ไม่แสดง กลับมาเองเมื่อเปิดคืน --}}
+@php
+  $homeSpreads = collect(\App\Support\TarotSpreads::all())->map(fn ($m, $k) => [
+      'key' => $k, 'name' => $m['name_th'], 'en' => $m['name_en'], 'eyebrow' => $m['eyebrow'],
+      'tagline' => $m['tagline'], 'count' => count($m['positions']),
+      'price' => \App\Support\Pricing::for(\App\Support\TarotSpreads::priceKey($k)),
+  ])->values();
+@endphp
 <section class="section" id="services">
   <div class="section-head reveal">
-    <div class="section-eyebrow">Our Divinations</div>
-    <h2 class="section-title" style="padding:30px 0 7px">ศาสตร์พยากรณ์ที่เปิดให้ท่าน</h2>
-    <p class="section-sub">ทุกคำตอบมีอยู่ในจักรวาลแล้ว — เราเพียงช่วยท่านอ่านสัญญาณ</p>
+    <div class="section-eyebrow">Tarot · {{ $homeSpreads->count() }} แพ็กเกจ</div>
+    <h2 class="section-title" style="padding:30px 0 7px">เลือกไพ่ที่ตรงกับคำถามของท่าน</h2>
+    <p class="section-sub">ทุกแพ็กเกจแม่หมออ่านไพ่ทีละตำแหน่ง ฟันธงให้ชัด และจัดคำทำนายเป็นการ์ดอ่านง่าย — หักเครดิตเมื่อเปิดไพ่เท่านั้น</p>
   </div>
 
   <div class="services">
-    <div class="svc reveal">
-      <div class="svc-icon"><x-glyph name="tarot" :size="30" /></div>
-      <h3>ไพ่ยิปซี</h3>
-      <div class="svc-en">Tarot Reading</div>
-      <p>เปิดไพ่ 3 ใบ หรือ Celtic Cross 10 ใบ — อดีต ปัจจุบัน อนาคต พร้อมคำพยากรณ์ AI ที่ละเอียดอ่อน</p>
-      <a href="{{ route('tarot.index') }}" class="svc-link">เปิดไพ่ตอนนี้ →</a>
+    @foreach ($homeSpreads as $s)
+      <div class="service reveal">
+        <span class="price-tag">{{ $s['price'] > 0 ? '฿'.number_format($s['price'], $s['price'] == intval($s['price']) ? 0 : 2) : 'ฟรี' }}</span>
+        <div class="icon"><x-glyph name="tarot" :size="30" /></div>
+        <h3>{{ $s['name'] }}</h3>
+        <div class="duration">{{ $s['count'] }} ใบ · {{ $s['en'] }}</div>
+        <p>{{ $s['tagline'] }}</p>
+        <a href="{{ route('tarot.index', ['spread' => $s['key']]) }}#pick" class="arrow">เปิดไพ่แบบนี้ →</a>
+      </div>
+    @endforeach
+
+    <div class="service reveal">
+      <span class="price-tag">ฟรี</span>
+      <div class="icon"><x-glyph name="sparkle" :size="30" /></div>
+      <h3>ดูดวงฟรี 1 ใบ</h3>
+      <div class="duration">Free Card · สมาชิกใหม่</div>
+      <p>ลองให้แม่หมอเปิดไพ่ 1 ใบ ทำนายสั้น ๆ ฟรี ก่อนตัดสินใจเปิดไพ่ชุดเต็ม</p>
+      <a href="{{ route('tarot.free') }}" class="arrow">รับคำทำนายฟรี →</a>
     </div>
-    <div class="svc reveal">
-      <div class="svc-icon"><x-glyph name="moon" :size="30" /></div>
-      <h3>ดวงรายวัน</h3>
-      <div class="svc-en">Moon Horoscope</div>
-      <p>พยากรณ์ตามฤกษ์จันทรคติ ครอบคลุม ความรัก การเงิน การงาน และสุขภาพจิตวิญญาณ ทั้ง 12 ราศี</p>
-      <a href="{{ route('horoscope.index') }}" class="svc-link">อ่านเพิ่มเติม →</a>
+    <div class="service reveal">
+      <span class="price-tag">ฟรี</span>
+      <div class="icon"><x-glyph name="moon" :size="30" /></div>
+      <h3>คุยกับแม่หมอ</h3>
+      <div class="duration">Chat · ระบบเดียวกับบอทแม่หมอ</div>
+      <p>เล่าเรื่องที่ค้างใจได้ฟรีเหมือนแชทกับแม่หมอในเฟซบุ๊ก/ไลน์ อยากให้ทำนายเมื่อไหร่ แม่หมอแนะนำแพ็กเกจให้</p>
+      <a href="{{ route('chat.index') }}" class="arrow">เริ่มคุย →</a>
     </div>
-    <div class="svc reveal">
-      <div class="svc-icon"><x-glyph name="calendar" :size="30" /></div>
-      <h3>ฤกษ์มงคล</h3>
-      <div class="svc-en">Auspicious Time</div>
-      <p>หาฤกษ์เปิดร้าน แต่งงาน ขึ้นบ้านใหม่ ทำพิธี ตามดวงดาวและธาตุประจำตัวท่าน</p>
-      <a href="{{ route('auspicious.index') }}" class="svc-link">ปรึกษาฤกษ์ →</a>
-    </div>
-    <div class="svc reveal">
-      <div class="svc-icon"><x-glyph name="numerology" :size="30" /></div>
-      <h3>เลขศาสตร์ &amp; ลายมือ</h3>
-      <div class="svc-en">Numerology &amp; Palmistry</div>
-      <p>คำนวณเลขชะตา เลขนาม จากชื่อและวันเกิด พร้อมวิเคราะห์ลายมือผ่าน AI Vision</p>
-      <a href="{{ route('numerology.index') }}" class="svc-link">วิเคราะห์ดวง →</a>
-    </div>
+
+    {{-- บริการอื่น — แสดงเฉพาะที่เปิดอยู่ --}}
+    @serviceopen('horoscope')
+      <div class="service reveal">
+        <div class="icon"><x-glyph name="moon" :size="30" /></div>
+        <h3>ดวงรายวัน</h3>
+        <div class="duration">Moon Horoscope</div>
+        <p>พยากรณ์ตามฤกษ์จันทรคติ ครอบคลุม ความรัก การเงิน การงาน และสุขภาพ ทั้ง 12 ราศี</p>
+        <a href="{{ route('horoscope.index') }}" class="arrow">อ่านเพิ่มเติม →</a>
+      </div>
+    @endserviceopen
+    @serviceopen('auspicious')
+      <div class="service reveal">
+        <div class="icon"><x-glyph name="calendar" :size="30" /></div>
+        <h3>ฤกษ์มงคล</h3>
+        <div class="duration">Auspicious Time</div>
+        <p>หาฤกษ์เปิดร้าน แต่งงาน ขึ้นบ้านใหม่ ตามตำแหน่งดวงจันทร์และยามอัฐกาล</p>
+        <a href="{{ route('auspicious.index') }}" class="arrow">ปรึกษาฤกษ์ →</a>
+      </div>
+    @endserviceopen
+    @serviceopen('numerology')
+      <div class="service reveal">
+        <div class="icon"><x-glyph name="numerology" :size="30" /></div>
+        <h3>เลขศาสตร์</h3>
+        <div class="duration">Numerology</div>
+        <p>คำนวณเลขชะตา เลขนาม จากชื่อและวันเกิด</p>
+        <a href="{{ route('numerology.index') }}" class="arrow">วิเคราะห์ดวง →</a>
+      </div>
+    @endserviceopen
   </div>
 </section>
 
@@ -138,6 +175,7 @@
   </div>
 </section>
 
+@serviceopen('horoscope')
 <section class="section" id="zodiac-quick">
   <div class="section-head reveal">
     <div class="section-eyebrow">Zodiac · 12 ราศี</div>
@@ -152,6 +190,7 @@
     @endforeach
   </div>
 </section>
+@endserviceopen
 
 <section class="section" id="voices">
   <div class="section-head reveal">
@@ -186,13 +225,14 @@
   <div class="cta-strip reveal">
     <div class="section-eyebrow">Open the Cards</div>
     <h2>พร้อมแล้วหรือยัง<br>ที่จะรู้คำตอบ</h2>
-    <p>{{ auth()->check() ? 'ยินดีต้อนรับ ' . auth()->user()->name . ' — เลือกศาสตร์ที่ใจคุณเรียกหา' : 'เปิดโต๊ะไพ่ยิปซี 3 ใบ — ฟรี ไม่ต้องสมัคร พร้อมคำพยากรณ์ละเอียดจาก AI โหรา' }}</p>
+    {{-- ข้อความเดิม "ไพ่ 3 ใบ ฟรี ไม่ต้องสมัคร" ไม่ตรงกับระบบ (3 ใบคิดเงิน · ฟรีคือ 1 ใบ และต้องล็อกอิน) --}}
+    <p>{{ auth()->check() ? 'ยินดีต้อนรับ ' . auth()->user()->name . ' — เลือกไพ่ที่ใจคุณเรียกหา' : 'สมัครสมาชิกฟรี แล้วรับคำทำนายไพ่ 1 ใบฟรี หรือคุยกับแม่หมอก่อนก็ได้' }}</p>
     @auth
-      <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ Celtic Cross
+      <a href="{{ route('tarot.index') }}" class="btn btn-primary">เลือกแพ็กเกจไพ่
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
       </a>
     @else
-      <a href="{{ route('tarot.index') }}" class="btn btn-primary">เริ่มเปิดไพ่ทันที
+      <a href="{{ route('tarot.free') }}" class="btn btn-primary">ดูดวงฟรี 1 ใบ
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
       </a>
     @endauth

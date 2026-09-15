@@ -11,13 +11,15 @@
        layout; on mobile this wrapper becomes the dropdown panel. --}}
   <div class="nav-collapse" :class="{ open: open }" x-on:click="open = false">
     <div class="nav-links">
+      {{-- บริการที่แอดมินปิดไว้ (ServiceGate) หายจากเมนูเอง --}}
       <a href="{{ route('tarot.index') }}">ไพ่ยิปซี</a>
-      <a href="{{ route('deep.index') }}">ดูดวงเชิงลึก</a>
-      <a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>
-      <a href="{{ route('numerology.index') }}">เลขศาสตร์</a>
-      <a href="{{ route('palmistry.index') }}">ลายมือ</a>
-      <a href="{{ route('auspicious.index') }}">ฤกษ์ยาม</a>
-      <a href="{{ route('chat.index') }}">AI ทำนาย</a>
+      <a href="{{ route('tarot.free') }}">ดูดวงฟรี</a>
+      @serviceopen('deep')<a href="{{ route('deep.index') }}">ดูดวงเชิงลึก</a>@endserviceopen
+      @serviceopen('horoscope')<a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>@endserviceopen
+      @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
+      @serviceopen('palmistry')<a href="{{ route('palmistry.index') }}">ลายมือ</a>@endserviceopen
+      @serviceopen('auspicious')<a href="{{ route('auspicious.index') }}">ฤกษ์ยาม</a>@endserviceopen
+      <a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a>
       <a href="{{ route('download') }}">แอพมือถือ</a>
     </div>
     @auth

@@ -69,6 +69,10 @@ final class ChatOffers
         $out = [];
         foreach (self::BY_TOPIC[ChatReadingIntent::normalizeTopic($topic)] as $key) {
             if ($key === 'deep') {
+                // ดูดวงเชิงลึกปิดอยู่ (ServiceGate) → ไม่ยื่นการ์ดที่กดไปแล้วเจอหน้าปิดปรับปรุง
+                if (\App\Support\ServiceGate::isClosed('deep')) {
+                    continue;
+                }
                 $out[] = [
                     'key'    => 'deep',
                     'kind'   => 'deep',

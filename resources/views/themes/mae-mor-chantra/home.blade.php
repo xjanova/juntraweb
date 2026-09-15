@@ -165,6 +165,7 @@
       <h2 class="section-title">ดวงดาวเขียนชะตา <em>ตั้งแต่</em> วันที่คุณเกิด</h2>
       <p class="lede" style="margin-top:24px">เลือกราศีของคุณเพื่ออ่านคำพยากรณ์ประจำเดือน — ความรัก การงาน การเงิน และสุขภาพ พร้อมเลขนำโชคและสีเสริมดวงเฉพาะวัน</p>
 
+      @serviceopen('horoscope')
       <div class="zodiac-list">
         @foreach (($zodiacs ?? collect()) as $z)
           <a href="{{ route('horoscope.show', $z->slug) }}" class="z" style="text-decoration:none">
@@ -173,6 +174,9 @@
           </a>
         @endforeach
       </div>
+      @else
+        <a href="{{ route('tarot.index') }}" class="btn btn-primary" style="margin-top:22px">เปิดไพ่ถามแม่หมอ →</a>
+      @endserviceopen
     </div>
   </div>
 </section>
@@ -184,6 +188,8 @@
   </div>
 
   <div class="services-grid">
+    {{-- บริการที่แอดมินปิดไว้ (ServiceGate) ไม่แสดง --}}
+    @serviceopen('horoscope')
     <div class="service">
       <div class="price-tag">฿ FREE</div>
       <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="10"/><path d="M12 7v5l3 3"/></svg></div>
@@ -192,6 +198,7 @@
       <p>คำพยากรณ์ประจำวัน พร้อมเลขนำโชค สีมงคล และไพ่ประจำวัน อ่านได้ทุกเช้าก่อนเริ่มวันใหม่</p>
       <a href="{{ route('horoscope.index') }}" class="arrow">เริ่มดูดวง →</a>
     </div>
+    @endserviceopen
 
     <div class="service" style="border-color:var(--gold);background:linear-gradient(180deg,rgba(244,207,106,.08),rgba(7,4,26,.4))">
       <div class="price-tag" style="background:var(--gold);color:#1a0d3d">POPULAR</div>
@@ -202,6 +209,7 @@
       <a href="{{ route('tarot.index') }}" class="arrow">เริ่มเปิดไพ่ →</a>
     </div>
 
+    @serviceopen('numerology')
     <div class="service">
       <div class="price-tag">฿ FREE</div>
       <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 12 12 3l9 9-9 9z"/><path d="M12 8v8"/></svg></div>
@@ -210,7 +218,9 @@
       <p>คำนวณเลขนาม เลขชะตา จากวัน-เดือน-ปีเกิดและชื่อจริง พร้อมวิเคราะห์ลายมือผ่าน AI</p>
       <a href="{{ route('numerology.index') }}" class="arrow">วิเคราะห์ดวง →</a>
     </div>
+    @endserviceopen
 
+    @serviceopen('auspicious')
     <div class="service">
       <div class="price-tag">฿ FREE</div>
       <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l5 3"/></svg></div>
@@ -219,6 +229,7 @@
       <p>หาฤกษ์ดี วันมงคล เวลามงคล สำหรับงานบุญ งานแต่ง เปิดร้าน หรือเริ่มต้นสิ่งสำคัญในชีวิต</p>
       <a href="{{ route('auspicious.index') }}" class="arrow">หาฤกษ์ →</a>
     </div>
+    @endserviceopen
 
     <div class="service" style="border-color:var(--orchid);background:linear-gradient(180deg,rgba(176,124,255,.1),rgba(7,4,26,.4))">
       <div class="price-tag" style="background:var(--orchid);color:#1a0d3d;border-color:var(--orchid)">AI</div>

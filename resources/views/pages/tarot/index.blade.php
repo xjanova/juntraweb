@@ -205,8 +205,12 @@
     <x-slot:lede>เลือกรูปแบบการวางไพ่ที่ตรงกับใจคุณ — ตั้งแต่ไพ่ใบเดียวฟันธงเร็ว ไปจนถึง Celtic Cross 10 ใบ และพยากรณ์รายปี 12 เดือน แม่หมอจันทรา AI จะอ่านไพ่ × ตำแหน่งให้คุณอย่างแม่นยำ</x-slot:lede>
   </x-page-hero>
 
-  <form action="{{ route('tarot.begin') }}" method="POST" style="max-width:1080px;margin:0 auto"
-        x-data="{ spread: 'three', meta: {{ $spreadJs->toJson() }} }">
+  {{-- ?spread=<key> จากการ์ดหน้าแรก/แชท → เลือกแพ็กเกจนั้นไว้ให้ (ค่าที่ไม่รู้จัก = 3 ใบตามเดิม) --}}
+  @php
+    $preset = collect($spreads)->pluck('key')->contains(request('spread')) ? request('spread') : 'three';
+  @endphp
+  <form action="{{ route('tarot.begin') }}" method="POST" style="max-width:1080px;margin:0 auto;scroll-margin-top:110px" id="pick"
+        x-data="{ spread: @js($preset), meta: {{ $spreadJs->toJson() }} }">
     @csrf
     <input type="hidden" name="spread" :value="spread">
 

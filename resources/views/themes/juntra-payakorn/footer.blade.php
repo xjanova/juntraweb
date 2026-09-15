@@ -13,16 +13,19 @@
     <div class="footer-col">
       <h4>บริการ</h4>
       <a href="{{ route('tarot.index') }}">ไพ่ยิปซีออนไลน์</a>
-      <a href="{{ route('horoscope.index') }}">ดวงรายวัน 12 ราศี</a>
-      <a href="{{ route('horoscope.thai') }}">ปีนักษัตรไทย</a>
-      <a href="{{ route('auspicious.index') }}">หาฤกษ์มงคล</a>
+      <a href="{{ route('tarot.free') }}">ดูดวงฟรี 1 ใบ</a>
+      @serviceopen('horoscope')
+        <a href="{{ route('horoscope.index') }}">ดวงรายวัน 12 ราศี</a>
+        <a href="{{ route('horoscope.thai') }}">ปีนักษัตรไทย</a>
+      @endserviceopen
+      @serviceopen('auspicious')<a href="{{ route('auspicious.index') }}">หาฤกษ์มงคล</a>@endserviceopen
       <a href="{{ route('download') }}"><x-glyph name="sparkle" :size="14" style="margin-right:6px" />ดาวน์โหลดแอพมือถือ</a>
     </div>
     <div class="footer-col">
       <h4>เกี่ยวกับ</h4>
-      <a href="{{ route('numerology.index') }}">เลขศาสตร์</a>
-      <a href="{{ route('palmistry.index') }}">ดูลายมือ</a>
-      <a href="{{ route('chat.index') }}">AI Chat ดูดวง</a>
+      @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
+      @serviceopen('palmistry')<a href="{{ route('palmistry.index') }}">ดูลายมือ</a>@endserviceopen
+      <a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a>
       @auth
         <a href="{{ route('account.history') }}">ประวัติของฉัน</a>
       @endauth

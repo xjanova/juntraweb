@@ -13,20 +13,23 @@
     <div class="foot-col">
       <h4>บริการ</h4>
       <ul>
-        <li><a href="{{ route('horoscope.index') }}">ดวงรายวัน</a></li>
+        @serviceopen('horoscope')<li><a href="{{ route('horoscope.index') }}">ดวงรายวัน</a></li>@endserviceopen
         <li><a href="{{ route('tarot.index') }}">ไพ่ยิปซี AI</a></li>
-        <li><a href="{{ route('numerology.index') }}">เลขศาสตร์</a></li>
-        <li><a href="{{ route('chat.index') }}">AI Chat ทำนาย</a></li>
+        <li><a href="{{ route('tarot.free') }}">ดูดวงฟรี 1 ใบ</a></li>
+        @serviceopen('numerology')<li><a href="{{ route('numerology.index') }}">เลขศาสตร์</a></li>@endserviceopen
+        <li><a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a></li>
         <li><a href="{{ route('download') }}"><x-glyph name="sparkle" :size="14" style="margin-right:6px" />ดาวน์โหลดแอพมือถือ</a></li>
       </ul>
     </div>
     <div class="foot-col">
       <h4>ศาสตร์</h4>
       <ul>
-        <li><a href="{{ route('horoscope.index') }}">โหราศาสตร์ตะวันตก</a></li>
-        <li><a href="{{ route('horoscope.thai') }}">ราศีไทย / ปีนักษัตร</a></li>
+        @serviceopen('horoscope')
+          <li><a href="{{ route('horoscope.index') }}">โหราศาสตร์ตะวันตก</a></li>
+          <li><a href="{{ route('horoscope.thai') }}">ราศีไทย / ปีนักษัตร</a></li>
+        @endserviceopen
         <li><a href="{{ route('tarot.index') }}">ไพ่ยิปซี Rider-Waite</a></li>
-        <li><a href="{{ route('palmistry.index') }}">ดูลายมือ</a></li>
+        @serviceopen('palmistry')<li><a href="{{ route('palmistry.index') }}">ดูลายมือ</a></li>@endserviceopen
       </ul>
     </div>
     <div class="foot-col">

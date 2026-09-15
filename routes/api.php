@@ -115,7 +115,7 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         });
 
         // ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับเว็บและบอท FB/LINE
-        Route::prefix('deep')->name('deep.')->group(function () {
+        Route::prefix('deep')->name('deep.')->middleware('service.open:deep')->group(function () {
             Route::get('/',  [\App\Http\Controllers\Api\V1\DeepReadingController::class, 'show'])->name('show');
             Route::post('/', [\App\Http\Controllers\Api\V1\DeepReadingController::class, 'store'])
                 ->middleware('throttle:reading')->name('store');
@@ -137,9 +137,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 
         // Paid non-tarot readings — same `reading` rate-limit + debit/refund.
         Route::prefix('fortune')->name('fortune.')->middleware('throttle:reading')->group(function () {
-            Route::post('numerology', [FortuneController::class, 'numerology'])->name('numerology');
-            Route::post('auspicious', [FortuneController::class, 'auspicious'])->name('auspicious');
-            Route::post('palmistry',  [FortuneController::class, 'palmistry'])->name('palmistry');
+            // 🔒 บริการที่ปิดไว้ตอบ 503 service_closed (ข้อความให้แอพโชว์) — ไม่คำนวณ ไม่หักเงิน
+            Route::post('numerology', [FortuneController::class, 'numerology'])->middleware('service.open:numerology')->name('numerology');
+            Route::post('auspicious', [FortuneController::class, 'auspicious'])->middleware('service.open:auspicious')->name('auspicious');
+            Route::post('palmistry',  [FortuneController::class, 'palmistry'])->middleware('service.open:palmistry')->name('palmistry');
         });
 
         // Reading history (tarot / numerology / palmistry / auspicious).
