@@ -20,9 +20,24 @@
       </div>
     @endif
 
+    @if (! empty($closed))
+      {{-- ปิดขายชั่วคราว — ซ่อนทั้งฟอร์มและแถบคะแนน 14 วัน (ใช้ตัวคิดคะแนนชุดเดียวกับที่ยังไม่ตรงตำรา)
+           ตารางยามอัฐกาลด้านล่างยังโชว์ได้ — ตรวจกับ GenLotto/5 แหล่งแล้วตรง 100% --}}
+      <div class="panel" style="text-align:center;padding:34px 28px;margin-bottom:34px">
+        <div class="eyebrow" style="display:inline-flex;margin-bottom:14px">ปิดปรับปรุงชั่วคราว</div>
+        <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:56ch;margin:0 auto 22px">
+          {{ \App\Support\ServiceGate::message('auspicious') }}
+        </p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ยิปซี</a>
+          <a href="{{ route('chat.index') }}" class="btn btn-ghost">คุยกับแม่หมอฟรี</a>
+        </div>
+      </div>
+    @endif
+
     {{-- แถบ 14 วันข้างหน้า: ให้เห็นก่อนจ่ายว่าระบบคำนวณจริง วันไม่ซ้ำกัน
          (หน้าเดิมมีแค่ฟอร์มลอย ๆ ลูกค้าไม่รู้เลยว่าจ่ายไปแล้วจะได้อะไร) --}}
-    @if (! empty($preview))
+    @if (! empty($preview) && empty($closed))
       <div style="margin-bottom:34px">
         <div class="eyebrow" style="display:inline-flex;margin-bottom:14px">ฤกษ์ 14 วันข้างหน้า (เกณฑ์กลาง)</div>
         <div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:10px">
@@ -71,6 +86,7 @@
          ตัวหน้าเปิดกว้าง 880px เพื่อให้แถบ 14 วันกับตารางฤกษ์บน 9 มีที่พอ แต่ถ้าปล่อยฟอร์ม
          กว้างตามไปด้วย ปุ่ม width:100% จะยืดเป็นแผ่นทองยาว 880px — กว้างกว่าปุ่มเดียวกัน
          ในหน้าอื่นของเว็บ 200px และดูใหญ่เกินเหตุ --}}
+    @if (empty($closed))
     <div style="max-width:680px;margin:0 auto">
     @if (isset($cost) && $cost > 0)
       <div style="text-align:center;margin-bottom:18px;font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase">
@@ -126,6 +142,7 @@
       </p>
     </form>
     </div>
+    @endif
 
     {{-- ตำราฤกษ์บน 9 — ทำให้ลูกค้าตรวจสอบผลที่ได้กับตำราได้เอง --}}
     @if (! empty($ruekList))

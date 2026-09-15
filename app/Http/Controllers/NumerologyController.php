@@ -21,12 +21,18 @@ class NumerologyController extends Controller
     public function index()
     {
         return view('pages.numerology.index', [
-            'cost' => Pricing::for('numerology'),
+            'cost'   => Pricing::for('numerology'),
+            'closed' => \App\Support\ServiceGate::isClosed('numerology'),
         ]);
     }
 
     public function calculate(Request $request, Numerology $numerology)
     {
+        // ปิดขายชั่วคราว (ผลยังไม่ตรงตำรา) — เช็คก่อนทุกอย่าง ไม่คำนวณ ไม่หักเงิน
+        if (\App\Support\ServiceGate::isClosed('numerology')) {
+            return redirect()->route('numerology.index')->with('status', \App\Support\ServiceGate::message('numerology'));
+        }
+
         $data = $request->validate([
             'name'       => 'required|string|max:128',
             // Reject impossible birthdates (future / absurd years) before we

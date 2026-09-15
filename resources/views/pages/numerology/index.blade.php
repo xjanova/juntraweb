@@ -9,6 +9,19 @@
       <x-slot:lede>คำนวณเลข Life Path, Expression, และ Birth Day จากชื่อและวันเกิดของคุณ พร้อมคำอธิบายความหมายเชิงลึก</x-slot:lede>
     </x-page-hero>
 
+    @if (! empty($closed))
+      {{-- ปิดขายชั่วคราว — ไม่โชว์ฟอร์ม (กดไม่ได้ให้เก้อ) บอกเหตุผลตรง ๆ แล้วพาไปบริการที่เปิดอยู่ --}}
+      <div class="panel" style="text-align:center;padding:34px 28px">
+        <div class="eyebrow" style="display:inline-flex;margin-bottom:14px">ปิดปรับปรุงชั่วคราว</div>
+        <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:52ch;margin:0 auto 22px">
+          {{ \App\Support\ServiceGate::message('numerology') }}
+        </p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ยิปซี</a>
+          <a href="{{ route('chat.index') }}" class="btn btn-ghost">คุยกับแม่หมอฟรี</a>
+        </div>
+      </div>
+    @else
     @if (isset($cost) && $cost > 0)
       <div style="text-align:center;margin-bottom:24px;font-family:var(--display);font-size:11px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase">
         ค่าบริการ ฿{{ number_format($cost, $cost == intval($cost) ? 0 : 2) }} / ครั้ง
@@ -32,6 +45,7 @@
         <svg x-show="!submitting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
       </button>
     </form>
+    @endif
   </div>
 </section>
 @endsection

@@ -40,6 +40,7 @@ class AuspiciousController extends Controller
         $nowYam = ThaiAstro::yamAt($now);
 
         return view('pages.auspicious.index', [
+            'closed'    => \App\Support\ServiceGate::isClosed('auspicious'),
             'upcoming'  => $upcoming,
             'cost'      => Pricing::for('auspicious'),
             'occasions' => AuspiciousOccasions::LIST,
@@ -55,6 +56,11 @@ class AuspiciousController extends Controller
 
     public function find(Request $request, AuspiciousAdvisor $advisor, AuspiciousScorer $scorer)
     {
+        // ปิดขายชั่วคราว (ดิถี/น้ำหนักวันยังไม่ตรงตำรา) — ไม่คำนวณ ไม่หักเงิน
+        if (\App\Support\ServiceGate::isClosed('auspicious')) {
+            return redirect()->route('auspicious.index')->with('status', \App\Support\ServiceGate::message('auspicious'));
+        }
+
         $data = $request->validate([
             'occasion'      => 'required|string|max:128',
             'occasion_type' => 'nullable|string|max:32',

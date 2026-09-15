@@ -34,8 +34,21 @@ class FortuneController extends Controller
 
     public function __construct(private WalletService $wallet) {}
 
+    /** บริการปิดขายชั่วคราว — 503 + reason_code ให้แอพโชว์ข้อความแทนการ error ดิบ */
+    private function closed(string $service): JsonResponse
+    {
+        return response()->json([
+            'message'     => \App\Support\ServiceGate::message($service),
+            'reason_code' => 'service_closed',
+        ], 503);
+    }
+
     public function numerology(Request $request, Numerology $numerology): JsonResponse
     {
+        if (\App\Support\ServiceGate::isClosed('numerology')) {
+            return $this->closed('numerology');
+        }
+
         $data = $request->validate([
             'name'       => 'required|string|max:128',
             'birth_date' => 'required|date|before_or_equal:today|after:1900-01-01',
@@ -87,6 +100,10 @@ class FortuneController extends Controller
      */
     public function auspicious(Request $request, AuspiciousAdvisor $advisor, AuspiciousScorer $scorer): JsonResponse
     {
+        if (\App\Support\ServiceGate::isClosed('auspicious')) {
+            return $this->closed('auspicious');
+        }
+
         $data = $request->validate([
             'occasion'      => 'required|string|max:128',
             'occasion_type' => 'nullable|string|max:32',

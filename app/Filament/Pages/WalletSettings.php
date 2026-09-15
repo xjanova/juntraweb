@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\Setting;
 use App\Support\FreeReadingPolicy;
+use App\Support\ServiceGate;
 use App\Support\TarotSpreads;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Section;
@@ -75,6 +76,11 @@ class WalletSettings extends Page implements HasForms
             $fill["charge_{$feature}"] = Setting::get("pricing_{$feature}_enabled", '1') === '1';
         }
 
+        // ปิดขายชั่วคราว (ต่างจากฟรี — ลูกค้าใช้ไม่ได้เลย)
+        foreach (array_keys(ServiceGate::SERVICES) as $svc) {
+            $fill["closed_{$svc}"] = ServiceGate::isClosed($svc);
+        }
+
         $this->form->fill($fill);
     }
 
@@ -105,6 +111,16 @@ class WalletSettings extends Page implements HasForms
             Section::make('บริการอื่น')
                 ->description('เลขศาสตร์ · ลายมือ · ฤกษ์ยาม · แชท — สวิตช์แยกแต่ละบริการ')
                 ->schema($otherRows),
+
+            Section::make('ปิดขายชั่วคราว')
+                ->description('ต่างจากสวิตช์เก็บเงิน: ปิดขาย = ลูกค้าใช้บริการนั้นไม่ได้เลยทั้งเว็บและแอพ (ไม่คำนวณ ไม่หักเงิน) หน้าเว็บบอกว่ากำลังปรับปรุง — ใช้ตอนผลลัพธ์ยังไม่ถูกต้อง ห้ามส่งถึงมือลูกค้าแม้จะฟรี')
+                ->schema(collect(ServiceGate::SERVICES)->map(fn ($label, $svc) => Toggle::make("closed_{$svc}")
+                    ->label("ปิดขาย: {$label}")
+                    ->helperText('เปิดสวิตช์ = ปิดขาย · ปิดสวิตช์ = ขายตามปกติ')
+                    ->inline(false)
+                    ->onColor('danger')->offColor('success')
+                )->values()->all())
+                ->columns(2),
 
             Section::make('เพดานคุยฟรีต่อวัน')
                 ->description('ใช้เฉพาะตอนที่แชทตั้งเป็นฟรี (ปิดสวิตช์เก็บเงินของ "แชทกับแม่หมอ") — โหมดคิดเงินมีวอลเลตเป็นเบรกอยู่แล้ว')
@@ -182,6 +198,11 @@ class WalletSettings extends Page implements HasForms
         foreach ($data as $key => $value) {
             if ($key === 'billing_enabled') {
                 Setting::put('billing_enabled', $value ? '1' : '0', 'pricing');
+            } elseif (str_starts_with($key, 'closed_')) {
+                $svc = substr($key, strlen('closed_'));
+                if (isset(ServiceGate::SERVICES[$svc])) {
+                    Setting::put("service_{$svc}_closed", $value ? '1' : '0', 'service');
+                }
             } elseif (str_starts_with($key, 'charge_')) {
                 // charge_<feature> → pricing_<feature>_enabled
                 $feature = substr($key, strlen('charge_'));
