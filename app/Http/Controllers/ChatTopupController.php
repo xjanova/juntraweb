@@ -6,7 +6,7 @@ use App\Exceptions\DuplicateSlipException;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
 use App\Services\FortuneBot\FortuneBotClient;
-use App\Services\SmsPayment\SmsCheckerService;
+use App\Services\SmsPayment\AmountReservation;
 use App\Services\Wallet\SlipAutoVerifier;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
@@ -35,7 +35,7 @@ class ChatTopupController extends Controller
 {
     public function __construct(
         private WalletService $wallet,
-        private SmsCheckerService $sms,
+        private AmountReservation $amounts,
         private FortuneBotClient $bot,
         private SlipAutoVerifier $slips,
     ) {}
@@ -67,22 +67,18 @@ class ChatTopupController extends Controller
             ], 503);
         }
 
-        // ยอดที่ต้องโอนจริงมีเศษสตางค์ไม่ซ้ำใคร เพื่อให้ SMS ธนาคารจับคู่กับ
-        // รายการนี้ได้แม่นยำโดยไม่ต้องให้แอดมินมานั่งดูสลิป
-        $base    = (float) $data['amount'];
-        $payable = config('smschecker.enabled') ? $this->sms->uniqueAmountFor($base) : $base;
+        // ยอดที่ต้องโอนจริงมีเศษสตางค์ไม่ซ้ำใคร (จองข้ามเว็บกับ Thaiprompt) เพื่อให้
+        // SMS ธนาคารจับคู่กับรายการนี้ได้แม่นยำโดยไม่ต้องให้แอดมินมานั่งดูสลิป
+        // ยอดสุดท้ายอยู่ใน $tx->amount (payload() อ่านจากตรงนั้น) — ห้ามคำนวณเองก่อน
+        $base = (float) $data['amount'];
 
         try {
-            $tx = $this->wallet->recordPendingTopup($user, $payable, null, 'promptpay');
+            $tx = $this->amounts->createPendingTopup($user, $base);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage(), 'reason_code' => 'pending_cap'], 422);
         }
 
-        if (abs($payable - $base) > 0.0001) {
-            $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base, 'source' => 'chat'])]);
-        } else {
-            $tx->update(['meta' => array_merge((array) $tx->meta, ['source' => 'chat'])]);
-        }
+        $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base, 'source' => 'chat'])]);
 
         return response()->json($this->payload($tx, $account));
     }

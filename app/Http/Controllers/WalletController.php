@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\DuplicateSlipException;
 use App\Models\Setting;
 use App\Models\WalletTransaction;
-use App\Services\SmsPayment\SmsCheckerService;
+use App\Services\SmsPayment\AmountReservation;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use App\Support\PayoutAccount;
@@ -97,7 +97,7 @@ class WalletController extends Controller
         ]);
     }
 
-    public function topupSubmit(Request $request, SmsCheckerService $sms)
+    public function topupSubmit(Request $request, AmountReservation $amounts)
     {
         $min = (int) config('pricing.min_topup', 20);
         $max = (int) config('pricing.max_topup', 50000);
@@ -109,12 +109,15 @@ class WalletController extends Controller
             'note'   => 'nullable|string|max:255',
         ]);
 
-        // When the SMS gateway is on, a PromptPay top-up is charged a UNIQUE
-        // amount so an incoming bank SMS maps to exactly this request.
-        $base    = (float) $data['amount'];
-        $payable = (config('smschecker.enabled') && $data['method'] === 'promptpay')
-            ? $sms->uniqueAmountFor($base)
-            : $base;
+        // A slip attached at submit time = the customer ALREADY paid the plain
+        // typed amount → charge it as-is under 'promptpay_slip', which SMS
+        // auto-matching (method='promptpay' only) can never FIFO-match to the
+        // wrong customer. Only a PromptPay top-up WITHOUT a slip gets a UNIQUE
+        // amount (reserved cross-site at Thaiprompt by AmountReservation).
+        $base   = (float) $data['amount'];
+        $method = ($data['method'] === 'promptpay' && $request->hasFile('slip'))
+            ? 'promptpay_slip'
+            : $data['method'];
 
         // Slips contain bank info — store on the PRIVATE 'local' disk, not 'public'.
         // The image is served back to the owner/admin via topupSlip() with auth.
@@ -135,13 +138,15 @@ class WalletController extends Controller
         }
 
         try {
-            $tx = $this->wallet->recordPendingTopup(
-                $request->user(),
-                $payable,
-                $slipPath,
-                $data['method'],
-                $slipHash,
-            );
+            $tx = $method === 'promptpay'
+                ? $amounts->createPendingTopup($request->user(), $base)
+                : $this->wallet->recordPendingTopup(
+                    $request->user(),
+                    $base,
+                    $slipPath,
+                    $method,
+                    $slipHash,
+                );
         } catch (DuplicateSlipException $e) {
             $this->discardSlip($slipPath);
             return back()->withInput()->withErrors(['slip' => $e->getMessage()]);
@@ -151,6 +156,7 @@ class WalletController extends Controller
             return back()->withInput()->withErrors(['amount' => $e->getMessage()]);
         }
 
+        $payable = (float) $tx->amount; // final amount — never one computed before the row existed
         $meta = [];
         if (abs($payable - $base) > 0.0001) {
             $meta['base_amount'] = $base;

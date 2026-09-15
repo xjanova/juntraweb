@@ -15,7 +15,16 @@ return [
 
     // 'auto'   → credit the wallet the moment an SMS matches a reserved top-up.
     // 'manual' → record the match but leave the top-up for admin approval.
+    // ('smart' from the app is stored as-is and treated like 'auto'.)
     'default_approval_mode' => env('SMSCHECKER_APPROVAL_MODE', 'auto'),
+
+    // Site name the SMS Checker app shows on every order from this server
+    // (server_name / order_details_json.website_name). Deliberately NOT the
+    // `site_name` Setting: that brand is "แม่หมอจันทรา" — the same persona as
+    // the Thaiprompt fortune bot sharing this bank account — so the phone
+    // could not tell the two sites apart. Must equal the `external_site`
+    // string Thaiprompt returns for our reservations (contract C3/E).
+    'site_label' => env('SMSCHECKER_SITE_LABEL', 'จันทรา.online'),
 
     // Reject a /notify whose X-Timestamp is older than this (replay/skew guard).
     'timestamp_window_seconds' => (int) env('SMSCHECKER_TS_WINDOW', 300), // 5 min
