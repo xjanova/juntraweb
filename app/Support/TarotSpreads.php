@@ -11,10 +11,33 @@ namespace App\Support;
  */
 class TarotSpreads
 {
-    /** All spreads keyed by spread key, in registry order. */
+    /**
+     * Spreads on sale, keyed by spread key, in registry order.
+     *
+     * A spread with `visible_setting` is left out until that Setting is '1' —
+     * a new package (คุณไสย) stays unsellable everywhere (landing page, pick,
+     * cast validation, chat offers, app) until the owner approves its sample
+     * readings, and one admin switch turns it on.
+     */
     public static function all(): array
     {
+        return array_filter(
+            static::registry(),
+            fn (array $meta) => empty($meta['visible_setting'])
+                || \App\Models\Setting::get($meta['visible_setting']) === '1',
+        );
+    }
+
+    /** Every registered spread, including ones not on sale yet (admin pricing, history pages). */
+    public static function registry(): array
+    {
         return config('tarot_spreads', []);
+    }
+
+    /** True when the pick page should offer the optional birth date for this spread. */
+    public static function wantsBirthDate(string $key): bool
+    {
+        return (bool) (static::get($key)['birth'] ?? false);
     }
 
     /** Spread keys only, e.g. ['single','three',...]. */
@@ -23,15 +46,20 @@ class TarotSpreads
         return array_keys(static::all());
     }
 
+    /**
+     * Known spread (on sale or not). Selling paths validate against keys()
+     * (on sale only); has()/get() also answer for hidden spreads so a reading
+     * bought while a package was on sale still renders after it is hidden.
+     */
     public static function has(string $key): bool
     {
-        return array_key_exists($key, static::all());
+        return array_key_exists($key, static::registry());
     }
 
-    /** Full meta array for one spread, or null. */
+    /** Full meta array for one spread (on sale or not), or null. */
     public static function get(string $key): ?array
     {
-        return static::all()[$key] ?? null;
+        return static::registry()[$key] ?? null;
     }
 
     /** Number of cards the spread needs (== number of positions). */

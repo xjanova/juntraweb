@@ -20,6 +20,8 @@ return [
     'tarot_decision' => env('PRICING_TAROT_DECISION', 39),
     'tarot_celtic'   => env('PRICING_TAROT_CELTIC', 99),
     'tarot_year'     => env('PRICING_TAROT_YEAR', 129),
+    // 🪬 (2026-09-15) เท่าบอท — บนเฟซบุ๊กโหมดคุณไสย์อยู่ในแพ็กเกจ 99
+    'tarot_kunsai'   => env('PRICING_TAROT_KUNSAI', 99),
 
     // Other readings
     'numerology' => env('PRICING_NUMEROLOGY', 9),

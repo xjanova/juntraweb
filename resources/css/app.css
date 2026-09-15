@@ -509,6 +509,94 @@
 }
 
 /* ============================================================
+   🔮 คำทำนายไพ่แบบการ์ด/ตาราง (components/reading-sections)
+   ตัวใหญ่อ่านง่าย (ลูกค้าหลักผู้สูงอายุ) · สีบอกความหมาย: เขียว=หนุน · แดง=ไม่ · อำพัน=ยังไม่
+   ============================================================ */
+.rs { display: grid; gap: 18px; text-align: left; }
+.rs-eyebrow {
+  font-family: var(--display, serif); font-size: 11px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--gold, #f4cf6a);
+}
+.rs-hero {
+  border-radius: 22px; padding: 26px 26px 22px;
+  border: 1px solid var(--line, rgba(244, 207, 106, .25));
+  background: radial-gradient(120% 120% at 0% 0%, rgba(244, 207, 106, .10), transparent 60%), rgba(7, 4, 26, .45);
+}
+.rs-hero-green { border-color: rgba(74, 222, 128, .45); background: radial-gradient(120% 120% at 0% 0%, rgba(74, 222, 128, .14), transparent 60%), rgba(7, 4, 26, .45); }
+.rs-hero-red   { border-color: rgba(248, 113, 113, .45); background: radial-gradient(120% 120% at 0% 0%, rgba(248, 113, 113, .13), transparent 60%), rgba(7, 4, 26, .45); }
+.rs-hero-amber { border-color: rgba(251, 191, 36, .45); background: radial-gradient(120% 120% at 0% 0%, rgba(251, 191, 36, .13), transparent 60%), rgba(7, 4, 26, .45); }
+.rs-verdict {
+  font-family: var(--thai, inherit); font-weight: 700; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.25;
+  margin: 8px 0 10px; color: var(--ink, #f6efe0);
+}
+.rs-hero-green .rs-verdict { color: #86efac; }
+.rs-hero-red .rs-verdict   { color: #fca5a5; }
+.rs-hero-amber .rs-verdict { color: #fcd34d; }
+.rs-card {
+  border-radius: 18px; padding: 20px 22px;
+  border: 1px solid var(--line-soft, rgba(244, 207, 106, .16));
+  background: rgba(7, 4, 26, .38);
+}
+.rs-card.rs-good { border-color: rgba(74, 222, 128, .30); }
+.rs-card.rs-warn { border-color: rgba(251, 191, 36, .35); }
+.rs-title { font-family: var(--thai, inherit); font-weight: 700; font-size: 17px; color: var(--gold-2, var(--gold, #f4cf6a)); margin-bottom: 10px; }
+.rs-prose { font-size: 15.5px; line-height: 1.85; color: var(--ink, #f6efe0); }
+.rs-prose p { margin: 0 0 .6em; }
+.rs-prose p:last-child { margin-bottom: 0; }
+.rs-sub { font-weight: 400; font-size: 12.5px; color: var(--ink-dim, rgba(246, 239, 224, .7)); margin-top: 4px; line-height: 1.5; }
+
+/* ตาราง (ผลวินิจฉัย / เทียบทางเลือก) — จอแคบเลื่อนแนวนอนในกรอบ ไม่ดันทั้งหน้า */
+.rs-table-wrap { overflow-x: auto; margin: 12px 0 4px; }
+.rs-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.rs-table th, .rs-table td { padding: 11px 12px; border-bottom: 1px solid var(--line-soft, rgba(244, 207, 106, .14)); vertical-align: top; text-align: left; }
+.rs-table tr > th:first-child { width: 30%; color: var(--ink-dim, rgba(246, 239, 224, .72)); font-weight: 600; white-space: nowrap; }
+.rs-compare thead th { color: var(--ink, #f6efe0); font-weight: 700; }
+.rs-compare .is-chosen { background: rgba(74, 222, 128, .09); }
+.rs-badge { display: inline-block; margin-left: 6px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; background: rgba(74, 222, 128, .18); color: #86efac; }
+
+/* ใจเรา-ใจเขา / เดือนทอง-ต้องระวัง */
+.rs-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.rs-duo-cell { border-radius: 14px; padding: 14px 16px; background: rgba(244, 207, 106, .06); border: 1px solid var(--line-soft, rgba(244, 207, 106, .14)); line-height: 1.7; }
+.rs-duo-k { font-size: 12px; letter-spacing: .08em; color: var(--gold, #f4cf6a); margin-bottom: 4px; }
+.rs-list { margin: 0; padding-left: 1.2em; line-height: 1.85; font-size: 15.5px; }
+.rs-check { list-style: none; padding-left: 0; }
+.rs-check li { position: relative; padding-left: 28px; margin-bottom: 6px; }
+.rs-check li::before { content: '✓'; position: absolute; left: 0; top: 0; color: #86efac; font-weight: 700; }
+.rs-check li p { margin: 0; display: inline; }
+
+/* คำทำนายรายใบ — รูปไพ่ + ตำแหน่ง + คำอ่าน */
+.rs-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.rs-cardread { display: flex; gap: 16px; align-items: flex-start; }
+.rs-thumb { flex: 0 0 74px; border-radius: 9px; overflow: hidden; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
+.rs-thumb img { width: 100%; display: block; }
+.rs-cardread-body { min-width: 0; }
+.rs-pos { font-size: 12.5px; letter-spacing: .06em; color: var(--gold, #f4cf6a); }
+.rs-cardname { font-family: var(--thai, inherit); font-weight: 700; font-size: 16px; margin: 2px 0 6px; }
+
+/* ตาราง 12 เดือน — การ์ดละเดือน สีตามโทน */
+.rs-months { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.rs-month { border-radius: 16px; padding: 16px 18px; background: rgba(7, 4, 26, .38); border: 1px solid var(--line-soft, rgba(244, 207, 106, .16)); border-top-width: 4px; }
+.rs-month.rs-tone-good { border-top-color: #4ade80; }
+.rs-month.rs-tone-mid  { border-top-color: var(--gold, #f4cf6a); }
+.rs-month.rs-tone-warn { border-top-color: #fbbf24; }
+.rs-month-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.rs-month-name { font-family: var(--thai, inherit); font-weight: 700; font-size: 18px; }
+.rs-tone { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: rgba(244, 207, 106, .12); color: var(--gold, #f4cf6a); white-space: nowrap; }
+.rs-tone-good .rs-tone { background: rgba(74, 222, 128, .16); color: #86efac; }
+.rs-tone-warn .rs-tone { background: rgba(251, 191, 36, .16); color: #fcd34d; }
+.rs-theme { font-weight: 600; margin: 6px 0 4px; color: var(--gold-2, var(--gold, #f4cf6a)); }
+.rs-month .rs-prose { font-size: 14.5px; line-height: 1.75; }
+.rs-month-card { margin-top: 8px; font-size: 12px; color: var(--ink-dim, rgba(246, 239, 224, .65)); }
+
+@media (max-width: 640px) {
+  .rs-duo { grid-template-columns: 1fr; }
+  .rs-cards { grid-template-columns: 1fr; }
+  .rs-hero { padding: 20px 18px 18px; }
+  .rs-card { padding: 16px 16px; }
+  .rs-thumb { flex-basis: 60px; }
+}
+
+/* ============================================================
    การ์ดแพ็กเกจเปิดไพ่ในแชท — จุดที่ "คุยฟรี" กลายเป็น "เปิดไพ่หักเครดิต"
    ไม่เกิน 3 ใบ ราคาเห็นชัดก่อนกด ปุ่มเดียวต่อใบ (ลูกค้าหลักเป็นผู้สูงอายุ)
    ============================================================ */

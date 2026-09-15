@@ -16,7 +16,12 @@ namespace App\Services\Chat;
  */
 final class ChatReadingIntent
 {
-    public const TOPICS = ['love', 'career', 'money', 'health', 'general'];
+    public const TOPICS = ['love', 'career', 'money', 'health', 'kunsai', 'general'];
+
+    /** เรื่องของ/คุณไสย์ — ถามว่า "โดนไหม/ช่วยดู" = ขอให้ดู (แพ็กเกจคุณไสย) ไม่ใช่แค่เล่า */
+    private const KUNSAI = '(โดนของ|ถูกของ|โดนทำของ|ของใส่|โดนคุณไสย|คุณไสย|ไสยศาสตร์|มนต์ดำ|ยาแฝด|โดนเสน่ห์|ถูกทำเสน่ห์|โดนทำเสน่ห์)';
+
+    private const KUNSAI_ASK = '(ไหม|มั้ย|หรือเปล่า|รึเปล่า|ช่วยดู|ดูให้|ดูหน่อย)';
 
     /** คำที่แปลว่า "ขอให้ดู/ทำนาย" ตรง ๆ */
     private const ASK = '(ดูดวง|ดูดวงให้|ทำนาย|พยากรณ์|เปิดไพ่|ดูไพ่|จับไพ่|สุ่มไพ่|ขอไพ่|ไพ่ยิปซี|ไพ่ทาโร|ทาโร่|ทาโรต์|tarot|ดวงชะตา|ดูหมอ|หมอดูให้)';
@@ -30,6 +35,11 @@ final class ChatReadingIntent
         $t = mb_strtolower(trim($text));
         if ($t === '' || mb_strlen($t) > 400) {
             return null;   // เรื่องยาว ๆ คือการเล่า ไม่ใช่การสั่ง — ให้แม่หมอฟังก่อน
+        }
+
+        // "โดนของไหม / ช่วยดูหน่อยว่าโดนคุณไสย์หรือเปล่า" — ขอให้ดูเรื่องของโดยตรง
+        if (preg_match('/' . self::KUNSAI . '/u', $t) === 1 && preg_match('/' . self::KUNSAI_ASK . '/u', $t) === 1) {
+            return 'kunsai';
         }
 
         $asked = preg_match('/' . self::ASK . '/u', $t) === 1 || preg_match('/' . self::DUANG . '/u', $t) === 1;
@@ -47,6 +57,7 @@ final class ChatReadingIntent
     public static function topicOf(string $t): string
     {
         return match (true) {
+            preg_match('/' . self::KUNSAI . '/u', $t) === 1 => 'kunsai',
             preg_match('/(รัก|แฟน|เนื้อคู่|คู่ครอง|คนรัก|แต่งงาน|สามี|ภรรยา|โสด|หัวใจ|คนคุย|ความสัมพันธ์)/u', $t) === 1 => 'love',
             preg_match('/(เงิน|หนี้|รวย|โชคลาภ|ลงทุน|หวย|ลาภ|ขาดทุน|กำไร)/u', $t) === 1 => 'money',
             preg_match('/(งาน|อาชีพ|เลื่อนตำแหน่ง|สัมภาษณ์|ธุรกิจ|ค้าขาย|เรียน|สอบ|หัวหน้า|ลาออก)/u', $t) === 1 => 'career',

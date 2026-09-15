@@ -85,6 +85,10 @@ class TarotController extends Controller
             'targetRoute' => 'tarot.cast',
             'cost'        => Pricing::for(TarotSpreads::priceKey($key)),
             'balance'     => $request->user() ? $this->wallet->balance($request->user()) : null,
+            // 🌠 (2026-09-15) Celtic / 12 เดือน / คุณไสย — วันเกิด (ไม่บังคับ) ให้แม่หมอผสานดวงดาวแบบ 99
+            //    เติมจากโปรไฟล์ดวงของลูกค้าให้เลย ถ้าเคยบันทึกไว้ (ไม่ต้องพิมพ์ซ้ำ)
+            'askBirth'    => TarotSpreads::wantsBirthDate($key),
+            'birthDate'   => optional($request->user()?->profile?->birth_date)->format('Y-m-d'),
         ]);
     }
 
@@ -105,6 +109,8 @@ class TarotController extends Controller
             'question' => 'nullable|string|max:500',
             'picked'   => 'nullable|array',
             'picked.*' => 'integer|exists:tarot_cards,id',
+            // วันเกิด (ไม่บังคับ) — ใช้เฉพาะแพ็กเกจที่ผสานดวงดาว (TarotSpreads::wantsBirthDate)
+            'birth_date' => 'nullable|date_format:Y-m-d|before:today|after:1900-01-01',
         ]);
 
         $key       = $data['spread'];
@@ -202,11 +208,14 @@ class TarotController extends Controller
                 'session_token' => Str::uuid()->toString(),
                 'type'          => $type,
                 'question'      => $request->input('question'),
-                'payload'       => [
+                'payload'       => array_filter([
                     'positions'    => $positions,
                     'cost'         => $cost,
                     'wallet_tx_id' => $tx?->id,
-                ],
+                    // เก็บไว้กับรายการ — แม่หมอใช้ตอนทำนาย และหลังบ้านเห็นว่าคำทำนายนี้มีดวงวันเกิดประกอบ
+                    'birth_date'   => TarotSpreads::wantsBirthDate(TarotSpreads::keyFromType($type) ?? '')
+                        ? $request->input('birth_date') : null,
+                ], fn ($v) => $v !== null),
             ]);
 
             foreach ($cards as $i => $card) {

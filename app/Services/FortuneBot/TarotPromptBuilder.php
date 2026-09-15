@@ -105,7 +105,9 @@ TXT;
             return [
                 'position'       => $pc->position,
                 'position_label' => $pc->position_label,
-                'position_asks'  => $asks[$pc->position - 1] ?? null,
+                // 🩹 (2026-09-15) ชื่อฟิลด์ต้องเป็น `asks` — เดิมส่ง `position_asks` ซึ่ง Thaiprompt ไม่ได้ validate
+                //    จึงหล่นหายก่อนถึงคลังความรู้ (ตำแหน่ง "ถามอะไร" ไม่เคยไปถึงแม่หมอทางนั้นเลย)
+                'asks'           => $asks[$pc->position - 1] ?? null,
                 'reversed'       => $reversed,
                 'name_th'        => $card?->name_th,
                 'name_en'        => $card?->name_en,

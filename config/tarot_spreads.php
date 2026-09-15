@@ -23,8 +23,15 @@
  *   depth      => AI length guidance fed into the prompt
  *   positions  => ordered list; each ['label' => shown to user,
  *                 'asks' => what this slot interrogates (fed to the AI)]
+ *   birth      => (optional) true = the pick page offers an OPTIONAL birth date,
+ *                 which แม่หมอ blends in like the bot's 99 (owner, 2026-09-15)
+ *   visible_setting => (optional) Setting key that must be '1' before the spread
+ *                 is sold — a new package stays hidden until the owner approves
+ *                 sample readings (TarotSpreads filters it out everywhere)
  *
  * Positions length == the number of cards the user must pick.
+ * The per-package reading itself (structure, rules, length) lives on Thaiprompt
+ * (App\Services\Fortune\JuntraSpreadProfiles) next to แม่หมอ's knowledge base.
  */
 
 $month = function (int $n, string $asks): array {
@@ -130,6 +137,7 @@ return [
         'tagline'   => 'ลึก ครบ 360° — อ่านทั้งภายในและภายนอก รากเหง้า ความหวัง-ความกลัว จนถึงผลลัพธ์',
         'price_key' => 'tarot_celtic',
         'layout'    => 'celtic',
+        'birth'     => true,
         'est'       => '10 นาที',
         'depth'     => '6-8 ย่อหน้า ลงลึกทีละตำแหน่งแล้วร้อยเป็นเรื่องเดียว',
         'positions' => [
@@ -154,6 +162,7 @@ return [
         'tagline'   => 'กางดวงล่วงหน้าทีละเดือน ตลอด 1 ปีข้างหน้า เห็นจังหวะขึ้น-ลงของทั้งปี',
         'price_key' => 'tarot_year',
         'layout'    => 'grid',
+        'birth'     => true,
         'est'       => '12 นาที',
         'depth'     => 'สรุปทีละเดือนสั้น ๆ ครบทั้ง 12 เดือน แล้วปิดด้วยภาพรวมทั้งปีและเดือนที่ต้องระวัง/เดือนทอง',
         'positions' => [
@@ -169,6 +178,35 @@ return [
             $month(10, 'แนวโน้มเด่นและเรื่องสำคัญของเดือนที่สิบ'),
             $month(11, 'แนวโน้มเด่นและเรื่องสำคัญของเดือนที่สิบเอ็ด'),
             $month(12, 'แนวโน้มเด่นและเรื่องสำคัญของเดือนที่สิบสอง (ทั้งปีปิดท้ายอย่างไร)'),
+        ],
+    ],
+
+    /* ───────────────────── 10 ใบ — ดูคุณไสย / โดนของ ───────────────────── */
+    // 🪬 (2026-09-15) โหมดคุณไสย์ของแม่หมอในเฟซบุ๊ก (อยู่ในแพ็กเกจ 99) ยกมาเป็นแพ็กเกจของเว็บ ราคาเท่ากัน
+    //    วางไพ่แบบ Celtic 10 ใบเหมือนบอท — แต่ละตำแหน่งอ่านผ่านเลนส์ของ/คุณไสย์เท่านั้น
+    //    ซ่อนไว้จนกว่าเจ้าของอนุมัติคำทำนายตัวอย่าง (Setting tarot_kunsai_visible = '1')
+    'kunsai' => [
+        'name_th'   => 'ไพ่ดูคุณไสย / โดนของ',
+        'name_en'   => 'Black Magic Reading',
+        'eyebrow'   => '10 ใบ · คุณไสย์ · สิ่งลี้ลับ',
+        'tagline'   => 'ไพ่ชี้ว่าโดนของจริงไหม ชนิดไหน ลักษณะผู้ทำ และทางแก้ที่ทำเองได้ ไม่ต้องเสียเงินทำพิธีแพง',
+        'price_key' => 'tarot_kunsai',
+        'layout'    => 'celtic',
+        'birth'     => true,
+        'visible_setting' => 'tarot_kunsai_visible',
+        'est'       => '10 นาที',
+        'depth'     => 'วินิจฉัยก่อน แล้วเจาะรายละเอียด ปิดด้วยทางแก้',
+        'positions' => [
+            ['label' => 'พลังที่ครอบคุณอยู่',       'asks' => 'สภาพพลังรอบตัวตอนนี้ — มีสิ่งแปลกปลอม ของ หรือพลังลบกำลังเกาะอยู่หรือไม่'],
+            ['label' => 'สิ่งที่มากระทบ',           'asks' => 'แรงที่ถูกส่งมาหรือเข้ามากระทบ (อ่านเป็นพลังขวางเสมอ) — ถ้ามีของ ของชนิดไหน'],
+            ['label' => 'ต้นตอในอดีต',              'asks' => 'มูลเหตุหรือเรื่องเก่าที่เป็นต้นตอ — ความขัดแย้ง อิจฉา ชู้สาว ผลประโยชน์'],
+            ['label' => 'สิ่งที่เพิ่งผ่านมา',        'asks' => 'เหตุการณ์ช่วงที่ผ่านมาที่ทำให้ลูกรู้สึกว่าผิดปกติ'],
+            ['label' => 'สิ่งที่ลูกกลัว/สงสัย',      'asks' => 'สิ่งที่ลูกคิดหรือกลัวอยู่ในใจ เทียบกับความจริงตามไพ่'],
+            ['label' => 'สิ่งที่กำลังจะเกิด',        'asks' => 'แนวโน้มระยะใกล้ — หนักขึ้น คลายลง หรือหายไปเอง'],
+            ['label' => 'ตัวลูกเอง',                'asks' => 'จิตใจ ร่างกาย และเกราะของตัวลูกเองต่อเรื่องนี้'],
+            ['label' => 'คนรอบตัว',                'asks' => 'ลักษณะของผู้เกี่ยวข้อง/ผู้น่าสงสัย (บอกได้แค่ลักษณะ ห้ามเดาชื่อ)'],
+            ['label' => 'สิ่งคุ้มครอง',             'asks' => 'เกราะป้องกันหรือสิ่งศักดิ์สิทธิ์ที่คุ้มครองลูกอยู่ (พูดเฉพาะเมื่อไพ่ชี้)'],
+            ['label' => 'บทสรุปและทางออก',          'asks' => 'บทสรุปของเรื่องนี้ และทิศทางการแก้ไขที่ไพ่ชี้'],
         ],
     ],
 

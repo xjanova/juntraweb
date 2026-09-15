@@ -64,10 +64,14 @@ class WalletSettings extends Page implements HasForms
         ];
 
         // Tarot: one price + one charge-toggle per registered spread.
-        foreach (TarotSpreads::keys() as $k) {
+        // registry = รวมแพ็กเกจที่ยังไม่เปิดขาย — แอดมินตั้งราคาไว้ก่อนเปิดได้
+        foreach (TarotSpreads::registry() as $k => $meta) {
             $feature = "tarot_{$k}";
             $fill["pricing_{$feature}"] = Setting::get("pricing_{$feature}", $cfg[$feature] ?? 0);
             $fill["charge_{$feature}"] = Setting::get("pricing_{$feature}_enabled", '1') === '1';
+            if (! empty($meta['visible_setting'])) {
+                $fill["visible_{$k}"] = Setting::get($meta['visible_setting']) === '1';
+            }
         }
 
         // Other services.
@@ -87,8 +91,16 @@ class WalletSettings extends Page implements HasForms
     public function form(Form $form): Form
     {
         // Tarot rows: toggle + price for every spread in the registry.
-        $tarotRows = collect(TarotSpreads::all())->map(fn ($meta, $k) => $this->chargeRow("tarot_{$k}", $meta['name_th'].' ('.count($meta['positions']).' ใบ)', (float) config("pricing.tarot_{$k}", 0))
-        )->values()->all();
+        $tarotRows = collect(TarotSpreads::registry())->flatMap(fn ($meta, $k) => array_filter([
+            $this->chargeRow("tarot_{$k}", $meta['name_th'].' ('.count($meta['positions']).' ใบ)', (float) config("pricing.tarot_{$k}", 0)),
+            // แพ็กเกจใหม่ซ่อนไว้จนเจ้าของอนุมัติคำทำนายตัวอย่าง — สวิตช์เดียวเปิดขายทั้งเว็บ แชท และแอพ
+            ! empty($meta['visible_setting'])
+                ? Toggle::make("visible_{$k}")
+                    ->label('เปิดขาย: '.$meta['name_th'])
+                    ->helperText('ปิด = ลูกค้าไม่เห็นแพ็กเกจนี้ทุกช่องทาง (ประวัติของคนที่ซื้อไปแล้วยังเปิดดูได้)')
+                    ->inline(false)->onColor('success')
+                : null,
+        ]))->values()->all();
 
         $otherRows = collect(self::OTHER_SERVICES)->map(fn ($def, $feature) => $this->chargeRow($feature, $def[0], (float) config("pricing.$feature", $def[1]))
         )->values()->all();
@@ -198,6 +210,11 @@ class WalletSettings extends Page implements HasForms
         foreach ($data as $key => $value) {
             if ($key === 'billing_enabled') {
                 Setting::put('billing_enabled', $value ? '1' : '0', 'pricing');
+            } elseif (str_starts_with($key, 'visible_')) {
+                $spread = TarotSpreads::get(substr($key, strlen('visible_')));
+                if (! empty($spread['visible_setting'])) {
+                    Setting::put($spread['visible_setting'], $value ? '1' : '0', 'pricing');
+                }
             } elseif (str_starts_with($key, 'closed_')) {
                 $svc = substr($key, strlen('closed_'));
                 if (isset(ServiceGate::SERVICES[$svc])) {

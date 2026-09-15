@@ -47,7 +47,8 @@ class HistoryController extends Controller
             'limit'  => 'sometimes|integer|min:1|max:100',
             'cursor' => 'sometimes|nullable|string',
             'type'   => ['sometimes', 'string', Rule::in([
-                ...array_map(fn ($k) => "tarot_{$k}", TarotSpreads::keys()),
+                // registry ไม่ใช่ keys — แพ็กเกจที่ปิดขายไปแล้วลูกค้าที่ซื้อไว้ต้องกรองประวัติได้
+                ...array_map(fn ($k) => "tarot_{$k}", array_keys(TarotSpreads::registry())),
                 // 'deep' ตกหล่นมาตั้งแต่เปิดขายดูดวงเชิงลึก 39฿ — แอพกรองหมวดนี้
                 // ไม่ได้เลย ส่ง type=deep แล้วโดน 422 ทั้งที่รายการถูกบันทึกไว้ครบ
                 'numerology', 'palmistry', 'auspicious', 'deep', 'chat',
@@ -125,6 +126,8 @@ class HistoryController extends Controller
             'picks'          => 'sometimes|array',
             'picks.*.slug'   => 'required_with:picks|string|max:64',
             'picks.*.reversed' => 'sometimes|boolean',
+            // 🌠 (2026-09-15) วันเกิด (ไม่บังคับ) — Celtic / 12 เดือน / คุณไสย ผสานดวงดาวแบบเว็บ
+            'birth_date'     => 'nullable|date_format:Y-m-d|before:today|after:1900-01-01',
         ]);
 
         $needed = TarotSpreads::cardCount(TarotSpreads::keyFromType($data['type']));
@@ -261,12 +264,14 @@ class HistoryController extends Controller
                 'session_token' => Str::uuid()->toString(),
                 'type'          => $data['type'],
                 'question'      => $data['question'] ?? null,
-                'payload'       => [
+                'payload'       => array_filter([
                     'positions'    => $positions,
                     'cost'         => $cost,
                     'wallet_tx_id' => $tx?->id,
                     'source'       => 'mobile',
-                ],
+                    'birth_date'   => TarotSpreads::wantsBirthDate(TarotSpreads::keyFromType($data['type']) ?? '')
+                        ? ($data['birth_date'] ?? null) : null,
+                ], fn ($v) => $v !== null),
             ]);
 
             foreach ($orderedPicks as $pick) {

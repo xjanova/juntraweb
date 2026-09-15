@@ -26,6 +26,11 @@
   // 🎁 ไพ่ฟรี 1 ใบ — ตัวแยกคือธงใน payload (ห้ามใช้ราคาเป็นตัวแยก แอดมินปรับได้ตลอด)
   $isFreeReading = (bool) data_get($reading->payload, 'free', false);
   $nextQuestions = array_filter((array) data_get($reading->payload, 'next_questions', []));
+
+  // 🔮 (2026-09-15) คำทำนายแบบการ์ด/ตาราง — แยกได้เมื่อแม่หมอตอบตามหัวข้อของแพ็กเกจ
+  //    (คำทำนายเก่า/ตอบผิดรูปแบบ → แสดงเป็นข้อความสวยแบบเดิม)
+  $sections    = \App\Support\ReadingSections::parse($reading->result);
+  $hasSections = $sections['ok'];
 @endphp
 
 @push('head')
@@ -153,16 +158,25 @@
               <img src="{{ $rc->card->imageUrl() }}" alt="{{ $rc->card->name_th }}">
             </div>
             <div class="card-name">{{ $rc->card->name_th }} {{ $rc->reversed ? '(กลับหัว)' : '' }}</div>
-            <div class="card-meaning">{{ $rc->reversed ? $rc->card->reversed_meaning_th : $rc->card->upright_meaning_th }}</div>
+            {{-- มีคำทำนายรายใบของแม่หมอด้านล่างแล้ว — ไม่ต้องโชว์ความหมายตำราซ้ำ --}}
+            @unless ($hasSections)
+              <div class="card-meaning">{{ $rc->reversed ? $rc->card->reversed_meaning_th : $rc->card->upright_meaning_th }}</div>
+            @endunless
           </div>
         @endforeach
       </div>
     @endif
 
-    <div class="panel" style="margin-top:48px">
-      <div class="eyebrow" style="display:inline-flex">บทวิเคราะห์รวม</div>
-      <x-reading-prose :text="$reading->result" />
-    </div>
+    @if ($hasSections)
+      <div style="margin-top:40px">
+        <x-reading-sections :parsed="$sections" :reading="$reading" />
+      </div>
+    @else
+      <div class="panel" style="margin-top:48px">
+        <div class="eyebrow" style="display:inline-flex">บทวิเคราะห์รวม</div>
+        <x-reading-prose :text="$reading->result" />
+      </div>
+    @endif
 
     {{-- 🎁 ไพ่ฟรี: คำถามที่ควรถามต่อ + ชวนเปิดไพ่ชุดเต็ม
          คำทำนายฟรีตอบครบแล้ว ตรงนี้คือ "ปลายเปิด" — ประเด็นที่ไพ่ใบเดียวตอบไม่ได้ --}}
@@ -224,21 +238,6 @@
           </button>
         </form>
         <a href="{{ route('tarot.index') }}" class="followup-again">↺ เปิดไพ่ใหม่อีกครั้ง</a>
-      </div>
-    @elseif ($isOwner)
-      {{-- Owner, but not FB/LINE-linked yet → chat is gated, so guide them to link. --}}
-      <div class="followup-box">
-        <div class="eyebrow" style="display:inline-flex">ถามแม่หมอต่อจากไพ่ชุดนี้</div>
-        <p class="followup-hint">
-          เชื่อมบัญชี Facebook หรือ LINE ผ่าน Thaiprompt เพื่อปรึกษาแม่หมอต่อจากไพ่ชุดนี้แบบเจาะจง —
-          แม่หมอจะจดจำไพ่ที่คุณเปิดและตอบคำถามเพิ่มเติมได้
-        </p>
-        <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:6px">
-          <a href="{{ route('thaiprompt.redirect') }}" class="btn btn-primary">เชื่อม Facebook / LINE
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-          </a>
-          <a href="{{ route('tarot.index') }}" class="btn btn-ghost">เปิดอีกครั้ง</a>
-        </div>
       </div>
     @else
       {{-- Non-owner (public share / admin view) → just the basics. --}}

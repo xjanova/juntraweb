@@ -20,6 +20,8 @@ final class ChatOffers
         'career'  => ['career', 'decision', 'deep'],
         'money'   => ['career', 'three', 'deep'],
         'health'  => ['three', 'single', 'deep'],
+        // 🪬 แพ็กเกจคุณไสยยังไม่เปิดขาย → ข้ามไปเอง เหลือ Celtic + เชิงลึก (ดู for())
+        'kunsai'  => ['kunsai', 'celtic', 'deep'],
         'general' => ['three', 'celtic', 'deep'],
     ];
 
@@ -28,6 +30,7 @@ final class ChatOffers
         'career'  => 'เรื่องการงาน',
         'money'   => 'เรื่องการเงิน',
         'health'  => 'เรื่องสุขภาพกายใจ',
+        'kunsai'  => 'เรื่องของ-คุณไสย์',
         'general' => 'ดวงชะตา',
     ];
 
@@ -79,7 +82,8 @@ final class ChatOffers
 
                 continue;
             }
-            $meta = TarotSpreads::get($key);
+            // all() = เฉพาะที่เปิดขาย — แพ็กเกจที่ซ่อนอยู่ห้ามโผล่เป็นการ์ด (กดไปก็ซื้อไม่ได้)
+            $meta = TarotSpreads::all()[$key] ?? null;
             if ($meta === null) {
                 continue;
             }

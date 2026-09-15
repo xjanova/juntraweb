@@ -53,14 +53,21 @@ class FortuneAiService
         // `cards` carry each position's `asks` (TarotPromptBuilder::payloadCards)
         // and `prompt` is the full Card-First Mandate text so the chat-pipe
         // fallback reads card × position exactly like the local path.
-        $payload = [
+        $payload = array_filter([
             'spread' => $reading->type,
+            // spread_key = ชื่อโปรไฟล์คำทำนายของแพ็กเกจฝั่ง Thaiprompt (JuntraSpreadProfiles)
             'spread_key' => $key,
             'spread_name' => $key ? (TarotSpreads::get($key)['name_th'] ?? null) : null,
             'question' => $reading->question,
             'cards' => TarotPromptBuilder::payloadCards($reading),
+            // ทางเดิม (แพ็กเกจที่ไม่มีโปรไฟล์ / Thaiprompt รุ่นเก่า) ยังใช้ prompt นี้
             'prompt' => TarotPromptBuilder::userPrompt($reading),
-        ];
+            // 12 เดือน: ชื่อเดือนจริง ให้แม่หมอพูดเป็น "ต.ค. 2569" ไม่ใช่ "เดือนที่ 2"
+            'months' => $key === 'year' ? self::yearMonths($reading) : null,
+            // วันเกิด (ไม่บังคับ) ที่ลูกค้ากรอกตอนเลือกไพ่ — เฉพาะแพ็กเกจที่ใช้ดวงดาวประกอบ
+            'birth_date' => $key && TarotSpreads::wantsBirthDate($key) ? data_get($reading->payload, 'birth_date') : null,
+            'customer_name' => $this->addressableName($user?->name) ?: null,
+        ], fn ($v) => $v !== null && $v !== '');
 
         if ($this->bot->canRead($user)) {
             $remote = $this->bot->interpretTarot($user, $payload);
@@ -139,6 +146,33 @@ class FortuneAiService
             'model' => (string) ($remote['ai_model'] ?? 'pool'),
             'next_questions' => is_array($remote['next_questions'] ?? null) ? $remote['next_questions'] : [],
         ];
+    }
+
+    /** ชื่อย่อเดือนไทย (ม.ค. … ธ.ค.) */
+    private const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+    /**
+     * ชื่อเดือนจริง 12 เดือนของแพ็กเกจ "พยากรณ์ 12 เดือน" นับจากวันที่เปิดไพ่
+     *
+     * เดือนแรก = เดือนนี้ ถ้าเปิดไพ่ไม่เกินวันที่ 20 · ถ้าเลยวันที่ 20 เริ่มที่เดือนหน้า — ไม่งั้นคนที่
+     * เปิดไพ่วันที่ 28 จะได้ "เดือนแรก" เหลือแค่ 2-3 วัน (เป็นการตั้งชื่อช่วงเวลา ไม่ใช่ค่าทางโหร)
+     *
+     * @return array<int,string>
+     */
+    public static function yearMonths(Reading $reading): array
+    {
+        $at = ($reading->created_at ?? now())->copy()->timezone('Asia/Bangkok')->startOfMonth();
+        if (($reading->created_at ?? now())->copy()->timezone('Asia/Bangkok')->day > 20) {
+            $at->addMonth();
+        }
+
+        $out = [];
+        for ($i = 0; $i < 12; $i++) {
+            $m = $at->copy()->addMonths($i);
+            $out[] = self::TH_MONTHS[$m->month - 1].' '.($m->year + 543);
+        }
+
+        return $out;
     }
 
     /**

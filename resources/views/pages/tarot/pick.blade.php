@@ -106,6 +106,14 @@
         <template x-for="id in picked" :key="id">
           <input type="hidden" name="picked[]" :value="id">
         </template>
+        @if (! empty($askBirth))
+          {{-- 🌠 ไม่บังคับ — ใส่แล้วแม่หมอผสานดวงดาววันเกิดเข้ากับไพ่ (แบบแพ็กเกจ 99 ของแม่หมอในเฟซบุ๊ก) --}}
+          <div class="field" style="max-width:320px;margin:0 auto 18px;text-align:left">
+            <label for="birth_date" style="font-size:13px">วันเกิดของคุณ <span style="color:var(--ink-faint)">(ไม่บังคับ — ใส่แล้วแม่หมอดูดวงดาวประกอบไพ่ให้)</span></label>
+            <input type="date" id="birth_date" name="birth_date" value="{{ old('birth_date', $birthDate ?? '') }}"
+                   max="{{ now()->subDay()->toDateString() }}" min="1900-01-02">
+          </div>
+        @endif
         <button type="submit" class="btn btn-primary" style="font-size:14px;padding:20px 44px"
                 :disabled="submitting">
           <span x-show="!submitting">เปิดไพ่ทั้ง {{ $needed }} ใบ</span>

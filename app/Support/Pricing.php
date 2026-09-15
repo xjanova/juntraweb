@@ -84,6 +84,7 @@ class Pricing
             'tarot_decision' => 'เปิดไพ่ทางแยก 5 ใบ',
             'tarot_celtic'   => 'เปิดไพ่ Celtic Cross 10 ใบ',
             'tarot_year'     => 'เปิดไพ่พยากรณ์ 12 เดือน',
+            'tarot_kunsai'   => 'เปิดไพ่ดูคุณไสย / โดนของ 10 ใบ',
             'numerology'     => 'ดวงเลขศาสตร์',
             'palmistry'    => 'ดูลายมือ',
             'auspicious'   => 'หาฤกษ์ยาม',
