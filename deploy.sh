@@ -72,17 +72,25 @@ fi
 log "🗄️ Running migrations..."
 php artisan migrate --force 2>&1 | tee -a "$LOG" || warn "migration warnings"
 
-# ---------- 8. Cache regeneration ----------
+# ---------- 8. Filament asset publish ----------
+# MUST come before the caches below: filament:upgrade finishes with config:clear, route:clear and
+# view:clear. It used to run AFTER them, silently throwing every cache away — production then ran
+# with no config/route/event cache and Filament rescanning its components + icon sets on every
+# request (~1s for any page, even a redirect). Found 2026-09-15.
+php artisan filament:upgrade 2>&1 | tee -a "$LOG" || true
+
+# ---------- 9. Cache regeneration ----------
 log "♻️ Regenerating caches..."
 php artisan config:clear 2>&1 | tee -a "$LOG"
 php artisan route:clear 2>&1 | tee -a "$LOG"
 php artisan view:clear 2>&1 | tee -a "$LOG"
+php artisan event:clear 2>&1 | tee -a "$LOG" || true
 php artisan config:cache 2>&1 | tee -a "$LOG"
 php artisan route:cache 2>&1 | tee -a "$LOG"
 php artisan view:cache 2>&1 | tee -a "$LOG"
-
-# ---------- 9. Filament asset publish ----------
-php artisan filament:upgrade 2>&1 | tee -a "$LOG" || true
+php artisan event:cache 2>&1 | tee -a "$LOG" || warn "event:cache failed"
+# Filament components + Blade icons (heroicons) — without this every admin page re-discovers them.
+php artisan filament:optimize 2>&1 | tee -a "$LOG" || warn "filament:optimize failed"
 
 # ---------- 10. Seed safe data (idempotent updateOrCreate) ----------
 log "🌱 Running idempotent seeders..."

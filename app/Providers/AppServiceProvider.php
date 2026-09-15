@@ -38,7 +38,12 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         try {
-            if (\Schema::hasTable('settings')) {
+            // The installed flag is a file check. It used to be Schema::hasTable('settings') — a
+            // query against information_schema on EVERY request (web, API, every cron tick),
+            // which on a shared MySQL host with many databases is one of the slowest queries
+            // there is. After installation the table exists; before it, Setting::get throws and
+            // the catch below keeps the .env default.
+            if (\App\Support\Installation::isInstalled()) {
                 $brand = \App\Models\Setting::get('site_name');
                 if (is_string($brand) && $brand !== '') {
                     config(['app.name' => $brand]);

@@ -3,15 +3,19 @@
 namespace App\Services;
 
 use App\Models\Setting;
-use Illuminate\Support\Facades\Cache;
 
 class ThemeManager
 {
+    /**
+     * Resolved once per request. This is a singleton that the view composer asks for every Blade
+     * view rendered — including each cell of a Filament table — so the answer must be free.
+     */
+    private ?string $active = null;
+
     /** Active theme slug (cached). */
     public function active(): string
     {
-        $slug = Setting::get('theme', config('themes.default'));
-        return $this->resolve($slug);
+        return $this->active ??= $this->resolve(Setting::get('theme', config('themes.default')));
     }
 
     /** Active theme config array. */
@@ -33,8 +37,8 @@ class ThemeManager
         if (!array_key_exists($slug, $this->all())) {
             return false;
         }
-        Setting::put('theme', $slug, 'theme', false);
-        Cache::forget('setting:theme');
+        Setting::put('theme', $slug, 'theme', false);   // also drops the cached value
+        $this->active = null;
         return true;
     }
 
