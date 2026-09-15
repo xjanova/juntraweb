@@ -8,7 +8,9 @@ use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\Reading;
 use App\Services\AiOracle;
-use App\Services\FortuneBot\FortuneBotClient;
+use App\Services\Chat\ChatOffers;
+use App\Services\Chat\ChatReadingIntent;
+use App\Services\Chat\MaeMorUpstream;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\ChatSuggestions;
@@ -20,17 +22,17 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * "แม่หมอจันทรา" AI chat — proxies to Thaiprompt's Fortune Bot API so the
- * conversation behaves identically to the Facebook Messenger / LINE bot,
- * and uses Thaiprompt's API key pool (juntra holds NO AI keys in prod).
+ * "แม่หมอจันทรา" AI chat — proxies to Thaiprompt's Fortune Bot so the
+ * conversation behaves like the Facebook Messenger / LINE bot, and uses
+ * Thaiprompt's API key pool (juntra holds NO AI keys in prod).
  *
- * Access rule (per operator request 2026-05-08):
- *   - Must be logged in via Thaiprompt SSO
- *   - Membership must originate from Facebook or LINE (signup_via)
- *   - Must have enough wallet credit for the per-message price
+ * Access rule (owner, 2026-09-15 — replaces the 2026-05-08 FB/LINE rule):
+ *   - Anyone logged in may chat (phone / email / SSO alike) — see ChatPolicy::gate
+ *   - Chatting is free (pricing_chat_message_enabled=0); the credit is spent
+ *     when a reading starts. A request to be read ("ดูดวงให้หน่อย") gets the
+ *     reading packages as cards (ChatOffers) — never a free reading in chat.
  *
- * If those aren't met we render the chat shell with a CTA pointing the
- * user at the SSO redirect / wallet top-up. If Thaiprompt is unreachable
+ * Guests get the chat shell with a login CTA. If Thaiprompt is unreachable
  * we fall back to the local AiOracle so the page never crashes.
  */
 class ChatController extends Controller
@@ -38,15 +40,21 @@ class ChatController extends Controller
     use PreventsDuplicateCharges;
 
     public function __construct(
-        private FortuneBotClient $bot,
         private AiOracle $oracle,
         private WalletService $wallet,
+        private MaeMorUpstream $upstream,
     ) {}
 
     public function index(Request $request)
     {
         $user = $request->user();
         $gate = $this->gate($user);
+
+        // ปุ่ม "เข้าสู่ระบบด้วยเบอร์โทร/อีเมล" ในหน้านี้ — ล็อกอินเสร็จให้กลับมาห้องแชท ไม่ใช่แดชบอร์ด
+        // (ไม่ทับปลายทางที่หน้าอื่นตั้งไว้ก่อน)
+        if (! $user && ! $request->session()->has('url.intended')) {
+            $request->session()->put('url.intended', route('chat.index'));
+        }
 
         // Even when the gate denies access, render the shell — the user
         // sees the bot UI with an inline CTA + greeting placeholder. Less
@@ -55,10 +63,10 @@ class ChatController extends Controller
 
         // First-time greeting via upstream so persona matches FB/LINE bot exactly.
         if ($gate['allowed'] && $conversation->messages()->doesntExist()) {
-            $start = $this->bot->start($user);
+            $start = $this->upstream->start($user);
             $greeting = $start['greeting'] ?? 'สวัสดีค่ะลูก แม่หมอจันทราอยู่ตรงนี้แล้ว · อยากปรึกษาเรื่องอะไรเป็นพิเศษวันนี้คะ?';
-            if (!empty($start['session_id'])) {
-                $request->session()->put('thaiprompt_chat_session', $start['session_id']);
+            if (!empty($start['session'])) {
+                $request->session()->put('thaiprompt_chat_session', $start['session']);
             }
             ChatMessage::create([
                 'chat_conversation_id' => $conversation->id,
@@ -217,13 +225,17 @@ class ChatController extends Controller
         $dispatch = $this->dispatchToUpstream($request, $user, $data['message']);
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
+        $kind     = $dispatch['kind'] ?? 'reply';
+        $offers   = $kind === 'offer' ? ChatOffers::for((string) ($dispatch['offer_topic'] ?? 'general')) : [];
 
         // Debit only AFTER a successful reply — fairer to the user when upstream
         // blips. And NEVER charge for a degraded placeholder (no AI key AND
         // upstream unreachable): the user gets the "not ready" note for free.
+        // Nor for an invitation to open cards (kind=offer): that is the shop
+        // counter, not an answer — the reading itself is what gets paid for.
         // Race-safe because debit() locks the wallet row.
         $debitTx = null;
-        if ($cost > 0 && !$degraded) {
+        if ($cost > 0 && !$degraded && $kind !== 'offer') {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'AI chat message', [
                     'reference_type' => 'chat_message',
@@ -243,8 +255,9 @@ class ChatController extends Controller
         try {
             ChatMessage::create([
                 'chat_conversation_id' => $conversation->id,
-                'role'    => 'assistant',
-                'content' => $reply,
+                'role'        => 'assistant',
+                'content'     => $reply,
+                'offer_topic' => $offers !== [] ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null,
             ]);
         } catch (\Throwable $e) {
             if ($debitTx) {
@@ -275,7 +288,7 @@ class ChatController extends Controller
                 'reply'       => $reply,
                 'reply_html'  => Markdown::safe($reply),
                 'balance'     => $this->wallet->balance($user),
-                'cost'        => $cost,
+                'cost'        => $kind === 'offer' ? 0.0 : $cost,
                 'degraded'    => $degraded,
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => ChatPolicy::dailyLeft($user),
@@ -285,7 +298,11 @@ class ChatController extends Controller
                 'blocked'     => ChatPolicy::exhausted($user),
                 'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
-                'suggestions' => $awaiting ? [] : ChatSuggestions::followUp(),
+                'suggestions' => $awaiting || $offers !== [] ? [] : ChatSuggestions::followUp(),
+                // 🌙 (2026-09-15) ลูกค้าขอให้ทำนาย → การ์ดแพ็กเกจเปิดไพ่ (หักเครดิตตอนเปิดไพ่จริง)
+                'kind'        => $kind,
+                'offers'      => $offers,
+                'question'    => $offers !== [] ? mb_substr($data['message'], 0, 300) : null,
             ]);
         }
         return redirect()->route('chat.index')->with('status', 'แม่หมอตอบกลับแล้ว');
@@ -314,7 +331,7 @@ class ChatController extends Controller
             abort(403);
         }
 
-        // Same eligibility as any chat message (login + FB/LINE link + token).
+        // Same eligibility as any chat message (ChatPolicy::gate).
         $gate = $this->gate($user);
         if (! $gate['allowed']) {
             // /chat renders the connect CTA — send them there to link up first.
@@ -396,8 +413,11 @@ class ChatController extends Controller
      */
     private function dispatchToUpstream(Request $request, $user, string $message): array
     {
-        if (!$this->bot->isAvailable($user)) {
-            return $this->degradedFallback($message);
+        // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย
+        //    ไม่ส่งไปให้ AI ทำนายฟรี · ยกเว้นห้องที่เพิ่งเปิดไพ่มา (ถามต่อจากไพ่ที่จ่ายแล้ว = คุยได้)
+        $grounded = $this->groundedOnReading($request);
+        if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
+            return ['reply' => ChatOffers::invite($topic), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
         // Re-use the upstream session id across messages for context continuity.
@@ -406,36 +426,35 @@ class ChatController extends Controller
             $sessionId = $this->openUpstreamSession($request, $user);
         }
 
-        if (!$sessionId) {
-            return $this->degradedFallback($message);
-        }
+        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message, $grounded) : null;
 
-        $resp  = $this->bot->send($user, $sessionId, $message);
-        $reply = $resp['reply'] ?? null;
-
-        if (!$reply || trim($reply) === '') {
+        if ($out === null && $sessionId) {
             // Possible stale upstream session (6h cache TTL on Thaiprompt) —
             // forget our cached id, start fresh, retry once. After that, fall back.
-            Log::info('Thaiprompt bot returned empty reply — refreshing session and retrying once', [
+            Log::info('แม่หมอ upstream gave no reply — refreshing session and retrying once', [
                 'user_id' => $user->id,
-                'session' => $sessionId,
             ]);
             $request->session()->forget('thaiprompt_chat_session');
             $newSession = $this->openUpstreamSession($request, $user);
-            if ($newSession) {
-                $resp2 = $this->bot->send($user, $newSession, $message);
-                $reply = $resp2['reply'] ?? null;
-            }
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded) : null;
         }
 
-        if (!$reply || trim($reply) === '') {
-            Log::warning('Thaiprompt bot still empty after retry — falling back to AiOracle', [
+        if ($out === null) {
+            Log::warning('แม่หมอ upstream still silent after retry — falling back to AiOracle', [
                 'user_id' => $user->id,
             ]);
             return $this->degradedFallback($message);
         }
 
-        return ['reply' => $reply, 'degraded' => false];
+        return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
+    }
+
+    /** ห้องนี้เพิ่งเปิดไพ่มา (ภายใน 24 ชม.) — คำถามต่อจากไพ่ที่จ่ายแล้วคุยได้ ไม่ต้องยื่นแพ็กเกจซ้ำ */
+    private function groundedOnReading(Request $request): bool
+    {
+        $at = (int) $request->session()->get('chat_reading_primer_at', 0);
+
+        return $request->session()->get('chat_primed_reading') !== null && $at > 0 && (time() - $at) < 86400;
     }
 
     /**
@@ -449,8 +468,8 @@ class ChatController extends Controller
      */
     private function openUpstreamSession(Request $request, $user): ?string
     {
-        $start     = $this->bot->start($user);
-        $sessionId = $start['session_id'] ?? null;
+        $start     = $this->upstream->start($user);
+        $sessionId = $start['session'] ?? null;
         if (! $sessionId) {
             return null;
         }
@@ -465,7 +484,7 @@ class ChatController extends Controller
         // ที่เขาไม่ได้เปิดวันนี้ (บริบทที่ควรช่วย กลายเป็นบริบทที่หลอน)
         if (is_string($primer) && $primer !== '' && $primedAt > 0 && (time() - $primedAt) < 86400) {
             // ป้อนบริบทไพ่เงียบ ๆ — คำตอบของ primer ไม่ถูกแสดงและไม่คิดเงิน
-            $this->bot->send($user, $sessionId, $primer);
+            $this->upstream->send($user, $sessionId, $primer, true);
         } elseif ($primer !== null) {
             $request->session()->forget(['chat_reading_primer', 'chat_reading_primer_at', 'chat_primed_reading']);
         }
@@ -487,16 +506,13 @@ class ChatController extends Controller
         $request->session()->put('chat_reading_primer', $primer);
         $request->session()->put('chat_reading_primer_at', time());
 
-        if ($this->bot->isAvailable($user)) {
-            $start     = $this->bot->start($user);
-            $sessionId = $start['session_id'] ?? null;
-            if ($sessionId) {
-                $request->session()->put('thaiprompt_chat_session', $sessionId);
-                $resp  = $this->bot->send($user, $sessionId, $primer);
-                $reply = $resp['reply'] ?? null;
-                if ($reply && trim($reply) !== '') {
-                    return $reply;
-                }
+        $start     = $this->upstream->start($user);
+        $sessionId = $start['session'] ?? null;
+        if ($sessionId) {
+            $request->session()->put('thaiprompt_chat_session', $sessionId);
+            $out = $this->upstream->send($user, $sessionId, $primer, true);
+            if ($out !== null) {
+                return $out['reply'];
             }
         }
 
@@ -572,7 +588,7 @@ class ChatController extends Controller
 
     /**
      * Decides whether the current user may chat. Returns:
-     *   ['allowed' => bool, 'code' => 'guest'|'no_link'|'no_token'|null, 'reason' => str|null]
+     *   ['allowed' => bool, 'code' => 'guest'|null, 'reason' => str|null]
      *
      * กติกาจริงอยู่ใน ChatPolicy เพื่อให้เว็บกับ API มือถือใช้ชุดเดียวกัน
      */

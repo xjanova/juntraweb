@@ -41,7 +41,7 @@
         <label>เรื่องที่อยากให้แม่หมอดู <span style="color:var(--ink-faint);font-size:11px">(ถามได้ถึง {{ $maxQ }} ข้อ)</span></label>
         @for ($i = 0; $i < $maxQ; $i++)
           <input type="text" name="questions[]" maxlength="500"
-                 value="{{ old('questions.' . $i) }}"
+                 value="{{ old('questions.' . $i) }}" @if($i === 0) data-chat-prefill @endif
                  placeholder="{{ $i === 0 ? 'เช่น ปีนี้การงานจะเป็นอย่างไร ควรย้ายงานไหม' : 'ข้อที่ ' . ($i + 1) . ' (ไม่บังคับ)' }}"
                  style="margin-bottom:10px" @if($i === 0) required @endif>
         @endfor
@@ -67,4 +67,17 @@
     </div>
   </div>
 </section>
+
+{{-- คำถามที่ลูกค้าเพิ่งพิมพ์ในแชท (กดการ์ด "ดูดวงเชิงลึก" ของแม่หมอ) — ไม่ต้องพิมพ์ซ้ำ
+     ส่งผ่าน sessionStorage ไม่ใช่ query string: คำถามดูดวงเป็นเรื่องส่วนตัว ห้ามไปค้างใน log/ประวัติเบราว์เซอร์ --}}
+<script>
+  (function () {
+    try {
+      var q = sessionStorage.getItem('juntra:deep_prefill');
+      sessionStorage.removeItem('juntra:deep_prefill');
+      var input = document.querySelector('[data-chat-prefill]');
+      if (q && input && !input.value) input.value = q.slice(0, 500);
+    } catch (_) { /* เบราว์เซอร์ปิด storage — ลูกค้าพิมพ์เองได้ตามปกติ */ }
+  })();
+</script>
 @endsection

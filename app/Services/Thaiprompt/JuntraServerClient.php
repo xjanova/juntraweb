@@ -157,6 +157,83 @@ class JuntraServerClient
         return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
     }
 
+    /* ============================ CHAT ============================ */
+
+    /**
+     * เปิดห้องแชทแม่หมอด้วยตัวตนของเว็บ — ลูกค้าทุกคนคุยได้ ไม่ต้องมีบัญชี Thaiprompt
+     *
+     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
+     */
+    public function chatStart(int|string $userRef): array
+    {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'data' => null];
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/chat/start'), ['user_ref' => (string) $userRef]));
+        if ($resp?->successful() && is_array($resp->json('data'))) {
+            return ['status' => 'ok', 'data' => $resp->json('data')];
+        }
+        $this->logMiss('chatStart', $resp);
+
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
+    }
+
+    /**
+     * ส่งข้อความถึงแม่หมอ — คืน reply + kind ('reply'|'guard'|'offer') + offer_topic
+     *
+     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
+     */
+    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false): array
+    {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'data' => null];
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http
+            ->timeout(45) // AI ตอบช้าได้
+            ->post($this->url('/chat/send'), array_filter([
+                'user_ref'   => (string) $userRef,
+                'name'       => $name !== null ? mb_substr($name, 0, 80) : null,
+                'session_id' => $sessionId,
+                'text'       => mb_substr($text, 0, 1000),
+                // ห้องที่เพิ่งเปิดไพ่ (จ่ายแล้ว) — แม่หมอคุยต่อจากไพ่ได้เต็มที่ ไม่ชวนเปิดไพ่ซ้ำ
+                'grounded'   => $grounded ? 1 : null,
+            ], fn ($v) => $v !== null && $v !== '')));
+
+        if ($resp?->successful() && is_array($resp->json('data'))) {
+            return ['status' => 'ok', 'data' => $resp->json('data')];
+        }
+        $this->logMiss('chatSend', $resp);
+
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
+    }
+
+    /* ============================ FORTUNE ============================ */
+
+    /**
+     * คำทำนายที่ลูกค้าเว็บจ่ายแล้ว ด้วยตัวตนของเว็บ — ลูกค้าที่สมัครด้วยเบอร์/อีเมลก็ได้คำทำนายจริง
+     * (ทาง token ของลูกค้าเดิมใช้ได้เฉพาะคนที่ล็อกอินผ่าน Thaiprompt)
+     *
+     * รอได้ไม่เกิน 55 วิ: Apache ตัดที่ 60 วิ — ถ้ารอเกินกว่านั้น ลูกค้าเห็นหน้า error ทั้งที่
+     * PHP ยังทำงานต่อและเงินถูกหักไปแล้ว หมดเวลาตรงนี้ = ผู้เรียกคืนเงินได้ทันที
+     *
+     * @param  'tarot/interpret'|'tarot/free'|'deep'  $kind
+     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
+     */
+    public function fortune(string $kind, array $payload): array
+    {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'data' => null];
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->timeout(55)->post($this->url('/fortune/' . $kind), $payload));
+
+        if ($resp?->successful() && is_array($resp->json('data'))) {
+            return ['status' => 'ok', 'data' => $resp->json('data')];
+        }
+        $this->logMiss('fortune:' . $kind, $resp);
+
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
+    }
+
     /* ======================= UNIQUE AMOUNTS ======================= */
 
     /**

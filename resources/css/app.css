@@ -508,6 +508,53 @@
   .pay-amount { font-size: 17px; padding: 13px 6px; }
 }
 
+/* ============================================================
+   การ์ดแพ็กเกจเปิดไพ่ในแชท — จุดที่ "คุยฟรี" กลายเป็น "เปิดไพ่หักเครดิต"
+   ไม่เกิน 3 ใบ ราคาเห็นชัดก่อนกด ปุ่มเดียวต่อใบ (ลูกค้าหลักเป็นผู้สูงอายุ)
+   ============================================================ */
+
+.offer-cards { display: grid; gap: 10px; margin-top: 12px; max-width: 420px; }
+.offer-card {
+  border: 1px solid var(--line, rgba(244, 207, 106, .25));
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(244, 207, 106, .08), rgba(244, 207, 106, .02));
+  padding: 14px 16px;
+  transition: border-color .2s, background .2s;
+}
+.offer-card:hover { border-color: var(--gold, #f4cf6a); }
+.offer-card.is-deep {
+  border-color: rgba(196, 164, 255, .45);
+  background: linear-gradient(180deg, rgba(196, 164, 255, .12), rgba(196, 164, 255, .03));
+}
+.offer-top { display: flex; align-items: center; gap: 10px; }
+.offer-icon { font-size: 22px; line-height: 1; }
+.offer-name {
+  font-family: var(--thai, inherit);
+  font-weight: 700; font-size: 16px;
+  color: var(--gold-2, var(--gold, #f4cf6a));
+  flex: 1 1 auto; min-width: 0;
+}
+.offer-meta {
+  font-size: 12px; color: var(--ink-dim, rgba(246, 239, 224, .7));
+  border: 1px solid var(--line, rgba(244, 207, 106, .25));
+  border-radius: 999px; padding: 2px 10px; white-space: nowrap;
+}
+.offer-blurb { font-size: 13px; line-height: 1.6; color: var(--ink-dim, rgba(246, 239, 224, .7)); margin-top: 6px; }
+.offer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.offer-price {
+  font-family: var(--display, serif);
+  font-size: 22px; font-weight: 700; line-height: 1;
+  color: var(--ink, #f6efe0);
+}
+.offer-go { padding: 10px 18px; font-size: 14px; min-height: 44px; }
+.offer-foot { font-size: 12px; color: var(--ink-dim, rgba(246, 239, 224, .7)); line-height: 1.6; padding: 2px 4px; }
+.offer-foot strong { color: var(--gold-2, var(--gold, #f4cf6a)); }
+
+@media (max-width: 480px) {
+  .offer-cards { max-width: 100%; }
+  .offer-go { padding: 10px 14px; }
+}
+
 /* ป้ายโควตา / เครดิต */
 .quota-bar {
   display: flex; justify-content: center; align-items: center;

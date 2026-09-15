@@ -14,13 +14,27 @@
   // ข้อความเริ่มต้นถูก render markdown ฝั่งเซิร์ฟเวอร์แล้วส่งเป็น HTML ที่ผ่าน
   // การ strip HTML ดิบทิ้ง (Markdown::safe) — ฝั่ง client จึงไม่ต้องมีตัวแปลง
   // markdown ของตัวเอง และข้อความเดียวกันหน้าตาเหมือนกันทั้งก่อน/หลังรีเฟรช
-  $initialMessages = $conversation->messages->map(fn ($m) => [
-      'role'  => $m->role === 'assistant' ? 'assistant' : 'user',
-      'html'  => \App\Support\Markdown::safe($m->content),
-      'text'  => $m->content,
-      'time'  => optional($m->created_at)->format('H:i'),
-      'state' => 'ok',
-  ])->values();
+  // การ์ดแพ็กเกจเปิดไพ่ที่แม่หมอยื่นไว้ (offer_topic) ต้องยังอยู่หลังรีเฟรช — ราคาอ่านสด ณ ตอนนี้
+  // คำถามของการ์ด = ข้อความล่าสุดของลูกค้าก่อนหน้านั้น (ส่งต่อไปหน้าเลือกไพ่ ไม่ต้องพิมพ์ซ้ำ)
+  $lastAsked = null;
+  $initialMessages = $conversation->messages->map(function ($m) use (&$lastAsked, $readonly) {
+      if ($m->role === 'user') {
+          $lastAsked = $m->content;
+      }
+      $offers = (! $readonly && $m->role === 'assistant' && $m->offer_topic)
+          ? \App\Services\Chat\ChatOffers::for($m->offer_topic)
+          : [];
+
+      return [
+          'role'     => $m->role === 'assistant' ? 'assistant' : 'user',
+          'html'     => \App\Support\Markdown::safe($m->content),
+          'text'     => $m->content,
+          'time'     => optional($m->created_at)->format('H:i'),
+          'state'    => 'ok',
+          'offers'   => $offers,
+          'question' => $offers !== [] ? mb_substr((string) $lastAsked, 0, 300) : null,
+      ];
+  })->values();
 @endphp
 
 @section('title', $isFree ? 'คุยกับแม่หมอจันทรา · ฟรี' : 'คุยกับแม่หมอจันทรา')
@@ -38,6 +52,7 @@
          blocked: @js((bool) $exhausted),
          autosend: @js($autosend ?? null),
          sendUrl: @js(route('chat.send')),
+         tarotBeginUrl: @js(route('tarot.begin')),
          topupUrl: @js(route('wallet.topup')),
          canTopupInChat: @js((bool) ($gate['allowed'] ?? false) && !($readonly ?? false)),
          topupCreateUrl: @js(route('chat.topup.store')),
@@ -105,7 +120,6 @@
       <div class="flash" style="text-align:center;padding:28px 32px;margin-bottom:24px">
         <div class="eyebrow" style="margin-bottom:14px">
           @if ($gate['code'] === 'guest') ต้องเข้าสู่ระบบก่อน
-          @elseif ($gate['code'] === 'no_link') เชื่อม FACEBOOK หรือ LINE ก่อน
           @else ต่อสายแม่หมอใหม่ @endif
         </div>
         <p style="font-family:var(--thai);font-size:15px;color:var(--ink-dim);max-width:520px;margin:0 auto 20px;line-height:1.7">
@@ -115,12 +129,18 @@
             {{ $gate['reason'] }}
           @endif
         </p>
-        <a href="{{ route('thaiprompt.redirect', ['to' => '/chat']) }}" class="btn btn-primary">
-          @if ($gate['code'] === 'guest') เข้าสู่ระบบ / เชื่อมบัญชี
-          @else เข้าสู่ระบบใหม่ผ่าน Thaiprompt
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <a href="{{ route('thaiprompt.redirect', ['to' => '/chat']) }}" class="btn btn-primary">
+            @if ($gate['code'] === 'guest') เข้าสู่ระบบด้วย Facebook / LINE
+            @else เข้าสู่ระบบใหม่ผ่าน Thaiprompt
+            @endif
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </a>
+          {{-- 🌙 (2026-09-15) ทุกคนที่ล็อกอินคุยได้ — สมาชิกเบอร์โทร/อีเมลก็คุยได้ ไม่ต้องผ่าน FB/LINE --}}
+          @if ($gate['code'] === 'guest')
+            <a href="{{ route('login') }}" class="btn btn-ghost">เข้าสู่ระบบด้วยเบอร์โทร / อีเมล</a>
           @endif
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-        </a>
+        </div>
       </div>
     @endunless
 
@@ -162,6 +182,38 @@
             <div class="msg" :class="'is-' + (m.state === 'system' ? 'system' : (m.role === 'user' ? 'user' : 'ai'))">
               <div class="msg-head" x-show="m.role === 'assistant' && m.state !== 'system'">แม่หมอจันทรา</div>
               <div class="msg-body" x-show="m.kind !== 'topup'" x-html="m.html"></div>
+
+              {{-- ═══ การ์ดแพ็กเกจเปิดไพ่ ═══════════════════════════════
+                   ลูกค้าขอให้ทำนาย → แม่หมอยื่นแพ็กเกจ (คุยฟรี · หักเครดิตตอนเปิดไพ่จริงเท่านั้น)
+                   ไพ่ยิปซี: POST ไปขั้นเลือกไพ่พร้อมคำถามที่เพิ่งพิมพ์ · เครดิตไม่พอ: เติมในแชทได้เลย --}}
+              <template x-if="m.offers && m.offers.length">
+                <div class="offer-cards">
+                  <template x-for="o in m.offers" :key="o.key">
+                    <div class="offer-card" :class="o.kind === 'deep' && 'is-deep'">
+                      <div class="offer-top">
+                        <span class="offer-icon" aria-hidden="true" x-text="o.kind === 'deep' ? '🌟' : '🔮'"></span>
+                        <div class="offer-name" x-text="o.label"></div>
+                        <span class="offer-meta" x-show="o.cards" x-text="o.cards + ' ใบ'"></span>
+                      </div>
+                      <div class="offer-blurb" x-show="o.blurb" x-text="o.blurb"></div>
+                      <div class="offer-bottom">
+                        <span class="offer-price" x-text="priceLabel(o.price)"></span>
+                        <button type="button" class="btn btn-primary offer-go" x-show="canAfford(o)"
+                                :disabled="m.offerBusy" @click="startOffer(m, o)"
+                                x-text="m.offerBusy === o.key ? 'กำลังพาไป...' : (o.kind === 'deep' ? 'เริ่มดูดวง' : 'เลือกไพ่เลย')"></button>
+                        <button type="button" class="btn btn-ghost offer-go" x-show="!canAfford(o)"
+                                @click="canTopupInChat ? openTopup() : (window.location.href = topupUrl)">
+                          เติมเครดิต
+                        </button>
+                      </div>
+                    </div>
+                  </template>
+                  <div class="offer-foot">
+                    เครดิตคงเหลือ <strong x-text="'฿' + Number(balance).toFixed(2)"></strong>
+                    @if ($isFree) · คุยกับแม่หมอฟรี หักเครดิตเฉพาะตอนเปิดไพ่ @endif
+                  </div>
+                </div>
+              </template>
 
               {{-- ═══ การ์ดเติมเงินในแชท ═══════════════════════════════
                    จบในบทสนทนาเดียว ไม่พาลูกค้าออกไปหน้าอื่นแล้วหลงทาง
@@ -457,6 +509,7 @@ document.addEventListener('alpine:init', () => {
     bundles: cfg.bundles || [50, 100, 200, 500],
     nextSteps: cfg.nextSteps || [],
     canTopupInChat: !!cfg.canTopupInChat,
+    topupUrl: cfg.topupUrl,
     payTimer: null,
 
     destroy() {
@@ -468,6 +521,10 @@ document.addEventListener('alpine:init', () => {
       // ลบ/เพิ่มข้อความ (ปุ่มคัดลอกจะไม่กระพริบและ scroll ไม่กระตุก)
       this.messages.forEach((m) => { m.id = ++this.seq; });
       this.scrollToBottom();
+      // กดการ์ดแพ็กเกจแล้วกด "ย้อนกลับ" — เบราว์เซอร์คืนหน้าจาก bfcache พร้อมปุ่มที่ค้าง "กำลังพาไป..."
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted) this.messages.forEach((m) => { if (m.offerBusy) m.offerBusy = false; });
+      });
       // คำถามที่ติดมาจากหน้าผลไพ่ — ยิงครั้งเดียวให้คำตอบขึ้นเลยโดยไม่ต้องพิมพ์ซ้ำ
       // (เซิร์ฟเวอร์ pull() ออกจาก session แล้ว รีเฟรชจึงไม่ยิงซ้ำ/ไม่คิดเงินซ้ำ)
       if (cfg.autosend && String(cfg.autosend).trim()) {
@@ -518,11 +575,47 @@ document.addEventListener('alpine:init', () => {
     escape(s) {
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     },
-    push(role, html, state = 'ok', text = '') {
-      const m = { id: ++this.seq, role, html, text, time: this.now(), state };
+    push(role, html, state = 'ok', text = '', extra = null) {
+      // extra (เช่น offers) ต้องใส่ก่อน push — ใส่ทีหลังบนอ็อบเจกต์ดิบจะไม่ผ่าน proxy ของ Alpine
+      const m = Object.assign({ id: ++this.seq, role, html, text, time: this.now(), state }, extra || {});
       this.messages.push(m);
       this.scrollToBottom(role === 'user');
       return m;
+    },
+
+    /* ---------- การ์ดแพ็กเกจเปิดไพ่ ---------- */
+    priceLabel(p) {
+      const n = Number(p) || 0;
+      if (n <= 0) return 'ฟรี';
+      return '฿' + (Number.isInteger(n) ? n.toLocaleString('th-TH') : n.toFixed(2));
+    },
+    canAfford(o) {
+      // เทียบเป็นสตางค์ — float ตรง ๆ (19.99 vs 19.990000001) ทำให้คนที่เงินพอดีเห็นปุ่มเติมเงิน
+      return Number(o.price) <= 0 || Math.round(Number(this.balance) * 100) >= Math.round(Number(o.price) * 100);
+    },
+    startOffer(m, o) {
+      if (m.offerBusy) return;      // กดซ้ำ = ส่งฟอร์มซ้ำ (ยังไม่หักเงิน แต่พาไปหน้าเดิมสองรอบ)
+      m.offerBusy = o.key;
+      if (o.kind === 'deep') {
+        // คำถามส่งผ่าน sessionStorage ไม่ใส่ใน URL — เรื่องดูดวงเป็นเรื่องส่วนตัว ห้ามค้างใน log
+        try { sessionStorage.setItem('juntra:deep_prefill', m.question || ''); } catch (_) {}
+        window.location.href = o.url;
+        return;
+      }
+      // ไพ่ยิปซี: POST ไปขั้นเลือกไพ่ (tarot.begin) — เงินถูกหักตอนเปิดไพ่ในหน้านั้น ไม่ใช่ตอนนี้
+      const f = document.createElement('form');
+      f.method = 'POST';
+      f.action = cfg.tarotBeginUrl;
+      const add = (name, value) => {
+        const i = document.createElement('input');
+        i.type = 'hidden'; i.name = name; i.value = value;
+        f.appendChild(i);
+      };
+      add('_token', document.querySelector('meta[name="csrf-token"]').content);
+      add('spread', o.spread);
+      if (m.question) add('question', String(m.question).slice(0, 500));
+      document.body.appendChild(f);
+      f.submit();
     },
     say(text) {                 // ข้อความจาก "ระบบ" ไม่ใช่คำพูดของแม่หมอ
       return this.push('assistant', this.escape(text).replace(/\n/g, '<br>'), 'system');
@@ -762,7 +855,11 @@ document.addEventListener('alpine:init', () => {
         this.suggestOpen = false;
         if (Array.isArray(j.suggestions) && j.suggestions.length) this.suggestions = j.suggestions;
 
-        this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '');
+        // ลูกค้าขอให้ทำนาย → แนบการ์ดแพ็กเกจไปกับคำชวนของแม่หมอ (ยังไม่หักเงิน)
+        const offers = Array.isArray(j.offers) && j.offers.length
+          ? { offers: j.offers, question: j.question || text }
+          : null;
+        this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '', offers);
 
         // 🎁 (2026-07-28) "โควตาฟรีหมด" ไม่ได้แปลว่าคุยต่อไม่ได้เสมอไป
         //    ถ้าตั้งราคาต่อข้อความไว้ ลูกค้าจ่ายเครดิตคุยต่อได้ — ปิดช่องพิมพ์ตรงนี้

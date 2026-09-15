@@ -176,28 +176,21 @@ class ChatFreeThenPaidTest extends TestCase
     }
 
     /**
-     * บัญชีที่ไม่ได้มาจาก FB/LINE ยังคุยฟรีในโควตาได้ (ไม่ถูกกันตั้งแต่ประตู)
-     * แต่พอถึงข้อความที่ต้องจ่ายจะถูกขอให้ยืนยันตัวตนก่อน — กติกาเดิมของยุคคิดเงิน
-     *
-     * ล็อกไว้ให้เห็นชัดว่า **ตั้งใจ** ไม่ใช่หลุด: ถ้าวันหนึ่งอยากให้ทุกคนจ่ายได้
-     * โดยไม่ต้องเชื่อมช่องทาง ให้ลบเงื่อนไข isLinkedViaFbOrLine ใน ChatPolicy::gate()
+     * 🌙 (2026-09-15) เจ้าของเปลี่ยนกติกา: "ทุกคนที่ล็อกอินคุยได้" — เดิมบัญชีที่ไม่ได้มาจาก FB/LINE
+     * ถูกกันตอนถึงข้อความที่ต้องจ่าย (no_link) และคนไม่มี token Thaiprompt ถูกกันเลย (no_token)
+     * ตอนนี้เว็บคุยกับแม่หมอด้วยตัวตนของเว็บเอง เงื่อนไขทั้งสองจึงถูกลบ
      */
-    public function test_บัญชีที่ไม่ได้เชื่อมช่องทาง_ฟรีได้แต่จ่ายไม่ได้(): void
+    public function test_ทุกคนที่ล็อกอินคุยได้_ไม่ต้องเชื่อมช่องทางหรือมี_token(): void
     {
         $this->freeThenPaid(2, '2');
         $user = $this->unlinkedMember();
-        app(\App\Services\Wallet\WalletService::class)->credit($user, 100, 'seed');
+        $user->forceFill(['thaiprompt_token' => null])->save();
 
-        $this->actingAs($user);
-
-        // ยังอยู่ในโควตาฟรี → เข้าได้ปกติ
-        $this->assertTrue(ChatPolicy::gate($user)['allowed'], 'ในโควตาฟรีต้องไม่ถูกกัน');
+        $this->assertTrue(ChatPolicy::gate($user)['allowed']);
 
         $this->usedToday($user, 2);
+        $this->assertTrue(ChatPolicy::gate($user)['allowed'], 'เกินโควตา = จ่ายเครดิตคุยต่อได้ ไม่ถูกกัน');
 
-        // เกินโควตา = ต้องจ่าย → ถูกขอให้เชื่อมช่องทางก่อน
-        $gate = ChatPolicy::gate($user);
-        $this->assertFalse($gate['allowed']);
-        $this->assertSame('no_link', $gate['code']);
+        $this->assertSame('guest', ChatPolicy::gate(null)['code']);
     }
 }

@@ -156,9 +156,10 @@ class FreeReadingPolicy
                 'reason' => 'กรุณาเข้าสู่ระบบเพื่อรับคำทำนายฟรีค่ะ'];
         }
 
-        // session กับ Thaiprompt หมดอายุ → ยิงไปก็ล้มแน่ ให้เข้าระบบใหม่ก่อน
-        // (ไม่งั้นลูกค้าจะวนอยู่กับหน้าที่ล้มซ้ำ ๆ โดยไม่รู้ว่าต้องทำอะไร)
-        if (empty($user->thaiprompt_token)) {
+        // ไม่มีทางไป Thaiprompt เลย (ยังไม่ได้ตั้ง client ของเว็บ และลูกค้าไม่มี token) → ยิงไปก็ล้มแน่
+        // 🔮 (2026-09-15) เดิมเช็คแค่ token → ลูกค้าเบอร์/อีเมลทุกคนเจอ "เซสชันหมดอายุ" ทั้งที่ไม่เคยมี
+        //    ตอนนี้เว็บทำนายด้วยตัวตนของเว็บเองได้ (FortuneBotClient::canRead)
+        if (! app(\App\Services\FortuneBot\FortuneBotClient::class)->canRead($user)) {
             return ['allowed' => false, 'code' => 'no_token', 'reading_id' => null,
                 'reason' => 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้งค่ะ'];
         }

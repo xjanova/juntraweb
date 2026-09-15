@@ -8,7 +8,9 @@ use App\Http\Controllers\Controller;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Services\AiOracle;
-use App\Services\FortuneBot\FortuneBotClient;
+use App\Services\Chat\ChatOffers;
+use App\Services\Chat\ChatReadingIntent;
+use App\Services\Chat\MaeMorUpstream;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\ChatSuggestions;
@@ -24,21 +26,23 @@ use Illuminate\Support\Str;
  *
  * Functionally mirrors the web ChatController but:
  *   - Returns JSON only (never redirects).
- *   - Skips the FB/LINE link gate (mobile users typically authenticate
- *     by email/password). Upstream Thaiprompt routing requires a
- *     `thaiprompt_token`; without one we transparently fall back to
- *     the local AiOracle so the chat never returns a blank reply.
+ *   - Talks to แม่หมอ through MaeMorUpstream — the same lane as the web, so
+ *     every logged-in user can chat (no Thaiprompt token needed). If
+ *     Thaiprompt is unreachable we fall back to the local AiOracle so the
+ *     chat never returns a blank reply.
  *   - Stores the upstream session id in cache keyed by conversation id
  *     instead of the web session, so reconnects from the mobile app
  *     pick up the same upstream context.
- *   - Debits AFTER a non-empty reply (same fairness policy as web).
+ *   - Debits AFTER a non-empty reply (same fairness policy as web), and
+ *     never for an offer of reading packages (kind=offer) — the reading
+ *     itself is what gets paid for (owner, 2026-09-15).
  */
 class ChatController extends Controller
 {
     use PreventsDuplicateCharges;
 
     public function __construct(
-        private FortuneBotClient $bot,
+        private MaeMorUpstream $upstream,
         private AiOracle $oracle,
         private WalletService $wallet,
     ) {}
@@ -83,14 +87,12 @@ class ChatController extends Controller
 
         // Greet via upstream when possible so mobile + web feel identical.
         $greeting = 'สวัสดีค่ะลูก แม่หมอจันทราอยู่ตรงนี้แล้ว · อยากปรึกษาเรื่องอะไรเป็นพิเศษวันนี้คะ?';
-        if ($this->bot->isAvailable($user)) {
-            $start = $this->bot->start($user);
-            if (!empty($start['greeting'])) {
-                $greeting = $start['greeting'];
-            }
-            if (!empty($start['session_id'])) {
-                $this->cacheUpstreamSession($convo->id, $start['session_id']);
-            }
+        $start = $this->upstream->start($user);
+        if (!empty($start['greeting'])) {
+            $greeting = $start['greeting'];
+        }
+        if (!empty($start['session'])) {
+            $this->cacheUpstreamSession($convo->id, $start['session']);
         }
 
         ChatMessage::create([
@@ -215,12 +217,16 @@ class ChatController extends Controller
         $dispatch = $this->dispatchToUpstream($user, $conversation, $data['message']);
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
+        $kind     = $dispatch['kind'] ?? 'reply';
+        $topic    = $kind === 'offer' ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null;
+        $offers   = $topic !== null ? ChatOffers::for($topic) : [];
 
         // Debit only AFTER a successful reply — fairer when upstream blips. And
         // NEVER for a degraded placeholder (no AI key + upstream unreachable):
-        // the user gets the "not ready" note for free (parity with web).
+        // the user gets the "not ready" note for free (parity with web). Nor
+        // for an offer of reading packages — the reading is what gets paid for.
         $debitTx = null;
-        if ($cost > 0 && !$degraded) {
+        if ($cost > 0 && !$degraded && $kind !== 'offer') {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'AI chat message', [
                     'reference_type' => 'chat_message',
@@ -238,8 +244,9 @@ class ChatController extends Controller
         try {
             $assistant = ChatMessage::create([
                 'chat_conversation_id' => $conversation->id,
-                'role'    => 'assistant',
-                'content' => $reply,
+                'role'        => 'assistant',
+                'content'     => $reply,
+                'offer_topic' => $offers !== [] ? $topic : null,
             ]);
         } catch (\Throwable $e) {
             if ($debitTx) {
@@ -268,9 +275,11 @@ class ChatController extends Controller
         return response()->json([
             'data' => [
                 'message'     => $this->msgPayload($assistant),
-                'reply'       => $reply,
+                // แอพรุ่นที่ออกไปแล้วแสดงแค่ข้อความ — ต่อรายการแพ็กเกจท้ายคำตอบให้เลือกได้จริง
+                // (ข้อความที่เก็บในห้องไม่มีรายการนี้ ประวัติแสดงเป็นการ์ดจาก offer_topic แทน)
+                'reply'       => $reply . ChatOffers::asText($offers),
                 'balance'     => (float) $this->wallet->balance($user),
-                'cost'        => $cost,
+                'cost'        => $kind === 'offer' ? 0.0 : $cost,
                 'degraded'    => $degraded,
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => ChatPolicy::dailyLeft($user),
@@ -278,7 +287,11 @@ class ChatController extends Controller
                 'blocked'     => ChatPolicy::exhausted($user),
                 'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
-                'suggestions' => $awaiting ? [] : ChatSuggestions::followUp(),
+                'suggestions' => $awaiting || $offers !== [] ? [] : ChatSuggestions::followUp(),
+                // 🌙 (2026-09-15) ลูกค้าขอให้ทำนาย → แพ็กเกจเปิดไพ่ (หักเครดิตตอนเปิดไพ่จริง ไม่ใช่ตอนนี้)
+                'kind'        => $kind,
+                'offers'      => $offers,
+                'question'    => $offers !== [] ? mb_substr($data['message'], 0, 300) : null,
             ],
         ]);
     }
@@ -289,42 +302,36 @@ class ChatController extends Controller
 
     private function dispatchToUpstream($user, ChatConversation $conversation, string $message): array
     {
-        if (!$this->bot->isAvailable($user)) {
-            return $this->degradedFallback($message);
+        // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นแพ็กเกจเลย ไม่ถาม AI
+        if (($topic = ChatReadingIntent::detect($message)) !== null) {
+            return ['reply' => ChatOffers::invite($topic), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
-        $sessionId = $this->loadUpstreamSession($conversation->id);
-        if (!$sessionId) {
-            $start = $this->bot->start($user);
-            $sessionId = $start['session_id'] ?? null;
-            if ($sessionId) {
-                $this->cacheUpstreamSession($conversation->id, $sessionId);
-            }
-        }
-        if (!$sessionId) {
-            return $this->degradedFallback($message);
-        }
-
-        $resp  = $this->bot->send($user, $sessionId, $message);
-        $reply = $resp['reply'] ?? null;
+        $sessionId = $this->loadUpstreamSession($conversation->id) ?? $this->openUpstreamSession($user, $conversation->id);
+        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message) : null;
 
         // Stale upstream session (6h TTL) — refresh once then retry.
-        if (!$reply || trim($reply) === '') {
+        if ($out === null && $sessionId) {
             $this->forgetUpstreamSession($conversation->id);
-            $start = $this->bot->start($user);
-            $newSession = $start['session_id'] ?? null;
-            if ($newSession) {
-                $this->cacheUpstreamSession($conversation->id, $newSession);
-                $resp2 = $this->bot->send($user, $newSession, $message);
-                $reply = $resp2['reply'] ?? null;
-            }
+            $newSession = $this->openUpstreamSession($user, $conversation->id);
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message) : null;
         }
 
-        if (!$reply || trim($reply) === '') {
+        if ($out === null) {
             return $this->degradedFallback($message);
         }
 
-        return ['reply' => $reply, 'degraded' => false];
+        return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
+    }
+
+    private function openUpstreamSession($user, int $convoId): ?string
+    {
+        $session = $this->upstream->start($user)['session'] ?? null;
+        if ($session) {
+            $this->cacheUpstreamSession($convoId, $session);
+        }
+
+        return $session;
     }
 
     /**
@@ -366,10 +373,13 @@ class ChatController extends Controller
     private function msgPayload(ChatMessage $m): array
     {
         return [
-            'id'         => $m->id,
-            'role'       => $m->role,
-            'content'    => $m->content,
-            'created_at' => optional($m->created_at)->toIso8601String(),
+            'id'          => $m->id,
+            'role'        => $m->role,
+            'content'     => $m->content,
+            'created_at'  => optional($m->created_at)->toIso8601String(),
+            // ข้อความที่แม่หมอยื่นแพ็กเกจเปิดไพ่ — ราคาอ่านสด ณ ตอนนี้ ไม่ใช่ราคาตอนที่คุย
+            'offer_topic' => $m->offer_topic,
+            'offers'      => $m->offer_topic ? ChatOffers::for($m->offer_topic) : [],
         ];
     }
 

@@ -4,6 +4,7 @@ namespace App\Services\FortuneBot;
 
 use App\Models\Setting;
 use App\Models\User;
+use App\Services\Thaiprompt\JuntraServerClient;
 use App\Services\ThaipromptTokenService;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Cache;
@@ -26,6 +27,13 @@ use Illuminate\Support\Facades\Log;
  * If the dedicated tarot endpoint is not yet deployed upstream, we fall
  * back to running the tarot prompt through the chat pipeline — same pool,
  * same quality, just a slightly less structured response shape.
+ *
+ * 🔮 (2026-09-15) Paid readings (tarot / free card / deep) go through the
+ * web's own server-to-server lane first (JuntraServerClient::fortune) — the
+ * per-user endpoints above need the customer's Thaiprompt token, which
+ * phone/e-mail members (most of the site) never have: they paid for tarot
+ * and got card-meaning text, and every deep reading was refunded. The token
+ * lane is only the fallback while Thaiprompt has not deployed the server lane.
  */
 class FortuneBotClient
 {
@@ -34,6 +42,42 @@ class FortuneBotClient
 
     /** ค่าที่ใส่แทน null ใน cache เพื่อกันยิง upstream ซ้ำตอนล่ม */
     private const PAYOUT_MISS = 'miss';
+
+    public function __construct(private ?JuntraServerClient $server = null) {}
+
+    /**
+     * ทำนายให้ลูกค้าคนนี้ได้ไหม — ทางของเว็บเอง (ลูกค้าทุกคน) หรือ token ของลูกค้า
+     *
+     * ต่างจาก isAvailable() ที่ถามว่า "มี token ของลูกค้าไหม" (ใช้กับแชท/บัญชีรับเงิน/สลิปทางเดิม)
+     */
+    public function canRead(?User $user): bool
+    {
+        return $user !== null && ($this->server()->isConfigured() || $this->isAvailable($user));
+    }
+
+    /**
+     * ยิงทางของเว็บก่อน — คืน [data|null, ถอยไปทาง token ได้ไหม]
+     *
+     * ถอยเฉพาะตอนทางของเว็บ "ยังไม่มี" (unsupported) เท่านั้น ถ้า "มีแต่ล่ม" (unavailable = AI เงียบ/
+     * หมดเวลา) ห้ามถอย: พูล AI ก้อนเดียวกัน ยิงซ้ำอีกทางก็ล่ม และรอสองรอบเกินเพดาน 60 วิของ
+     * Apache → ลูกค้าเห็นหน้า error ทั้งที่เงินถูกหักไปแล้ว
+     *
+     * @return array{0:?array,1:bool}
+     */
+    private function viaServer(string $kind, array $payload, string $mustHave): array
+    {
+        $res = $this->server()->fortune($kind, $payload);
+        if ($res['status'] === 'ok' && ! empty($res['data'][$mustHave])) {
+            return [$res['data'], false];
+        }
+
+        return [null, $res['status'] === 'unsupported'];
+    }
+
+    private function server(): JuntraServerClient
+    {
+        return $this->server ??= app(JuntraServerClient::class);
+    }
 
     /** Start a new chat conversation. */
     public function start(User $user): ?array
@@ -89,6 +133,11 @@ class FortuneBotClient
      */
     public function interpretTarot(User $user, array $payload): ?array
     {
+        [$data, $fallback] = $this->viaServer('tarot/interpret', $payload, 'interpretation');
+        if ($data !== null || ! $fallback || ! $this->isAvailable($user)) {
+            return $data;
+        }
+
         try {
             $resp = $this->client($user)->post($this->fortuneUrl('/tarot/interpret'), $payload);
             if ($resp->successful()) {
@@ -124,6 +173,11 @@ class FortuneBotClient
      */
     public function freeTarot(User $user, array $payload): ?array
     {
+        [$data, $fallback] = $this->viaServer('tarot/free', $payload, 'interpretation');
+        if ($data !== null || ! $fallback || ! $this->isAvailable($user)) {
+            return $data;
+        }
+
         try {
             $resp = $this->client($user)->post($this->fortuneUrl('/tarot/free'), $payload);
 
@@ -412,16 +466,23 @@ class FortuneBotClient
      */
     public function deepReading(?User $user, array $questions, ?string $birthDate, ?string $name = null): ?array
     {
-        if (! $this->isAvailable($user) || empty($questions)) {
+        if (! $user || empty($questions)) {
             return null;
         }
 
+        $payload = array_filter([
+            'questions' => array_values($questions),
+            'birth_date' => $birthDate,
+            'name' => $name,
+        ], fn ($v) => $v !== null && $v !== '');
+
+        [$data, $fallback] = $this->viaServer('deep', $payload, 'reading');
+        if ($data !== null || ! $fallback || ! $this->isAvailable($user)) {
+            return $data;
+        }
+
         try {
-            $resp = $this->client($user)->post($this->fortuneUrl('/deep'), array_filter([
-                'questions' => array_values($questions),
-                'birth_date' => $birthDate,
-                'name' => $name,
-            ], fn ($v) => $v !== null && $v !== ''));
+            $resp = $this->client($user)->post($this->fortuneUrl('/deep'), $payload);
 
             if ($resp->successful()) {
                 $data = $resp->json('data');

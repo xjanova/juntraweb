@@ -162,6 +162,14 @@ class TarotController extends Controller
 
         $cost = Pricing::for($type);
 
+        // ระบบทำนายจริงต่อไม่ได้เลย (ไม่ได้ตั้ง client ของเว็บ และลูกค้าไม่มี token) → หยุดก่อนหักเงิน
+        // (แอพทำแบบนี้อยู่แล้วที่ Api\V1\HistoryController — เว็บเคยหักเงินแล้วส่งข้อความประกอบ
+        //  จากความหมายไพ่ให้แทนคำทำนาย)
+        if ($cost > 0 && ! $this->ai->isAvailableFor($user)) {
+            return redirect()->route('tarot.index')
+                ->with('status', 'ตอนนี้แม่หมอยังเชื่อมต่อระบบทำนายไม่ได้ชั่วคราว — ยังไม่มีการหักเครดิต ลองใหม่อีกครั้งนะคะ');
+        }
+
         // Reserve credit BEFORE we touch the AI, so a failed reading doesn't
         // leak server resources and a successful one always has a paired tx.
         // If insufficient, bounce to /wallet so the user can top up — their
@@ -187,6 +195,7 @@ class TarotController extends Controller
         // From here on, ANY failure (DB error, AI throw, etc.) must roll back
         // the debit by issuing a refund row — otherwise the user is charged
         // for a reading they never received. Every catch path must refund.
+        $reading = null;
         try {
             $reading = Reading::create([
                 'user_id'       => $user->id,
@@ -212,6 +221,13 @@ class TarotController extends Controller
 
             $reading->load('tarotCards.card');
             $aiResult = $this->ai->interpretTarot($reading, $user);
+
+            // 🔴 source 'local' = ไม่ได้คำทำนายจริง (Thaiprompt เงียบ/หมดเวลา) — เป็นข้อความที่ประกอบ
+            //    จากคอลัมน์ความหมายไพ่ เก็บเงินเต็มราคาสำหรับของแบบนี้ไม่ได้ → คืนเงิน (ตรงกับแอพ)
+            if ($tx && ($aiResult['source'] ?? null) === 'local') {
+                throw new \RuntimeException('upstream_unavailable');
+            }
+
             $reading->result      = $aiResult['text'];
             $reading->ai_provider = $aiResult['provider'];
             $reading->ai_model    = $aiResult['model'];
@@ -240,6 +256,16 @@ class TarotController extends Controller
                         'tx_id' => $tx->id,
                         'err'   => $refundErr->getMessage(),
                     ]);
+                }
+            }
+            // แถวที่ยังไม่มีคำทำนายต้องไม่ค้างในประวัติ — ไม่งั้นลูกค้าเปิดเจอรายการเปล่า
+            // ที่ดูเหมือน "จ่ายแล้วไม่ได้อะไร" ทั้งที่เงินถูกคืนไปแล้ว
+            if ($refunded && $reading && blank($reading->result)) {
+                try {
+                    $reading->tarotCards()->delete();
+                    $reading->delete();
+                } catch (\Throwable) {
+                    // ลบไม่ได้ก็ไม่เป็นไร — เงินคืนแล้ว แค่มีแถวว่างค้าง
                 }
             }
             return redirect()->route('tarot.index')->with('status', $refunded

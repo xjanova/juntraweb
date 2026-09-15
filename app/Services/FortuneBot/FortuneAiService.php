@@ -36,7 +36,8 @@ class FortuneAiService
      */
     public function isAvailableFor(?User $user): bool
     {
-        return $this->bot->isAvailable($user);
+        // ทางของเว็บเอง (ทุกคน) หรือ token ของลูกค้า — เดิมถามแค่ token → ลูกค้าเบอร์/อีเมลเปิดไพ่ในแอพไม่ได้
+        return $this->bot->canRead($user);
     }
 
     /**
@@ -61,7 +62,7 @@ class FortuneAiService
             'prompt' => TarotPromptBuilder::userPrompt($reading),
         ];
 
-        if ($this->bot->isAvailable($user)) {
+        if ($this->bot->canRead($user)) {
             $remote = $this->bot->interpretTarot($user, $payload);
             if ($remote && ! empty($remote['interpretation'])) {
                 return [
@@ -98,8 +99,8 @@ class FortuneAiService
      */
     public function freeTarot(Reading $reading, ?User $user, int $maxChars): ?array
     {
-        if (! $this->bot->isAvailable($user)) {
-            Log::warning('FortuneAiService::freeTarot — ไม่มี thaiprompt_token ใช้งานได้', [
+        if (! $this->bot->canRead($user)) {
+            Log::warning('FortuneAiService::freeTarot — ไม่มีทางไป Thaiprompt (ไม่ได้ตั้ง client และไม่มี token)', [
                 'user_id' => $user?->id,
                 'reading' => $reading->id,
             ]);

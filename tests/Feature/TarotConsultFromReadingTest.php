@@ -101,8 +101,11 @@ class TarotConsultFromReadingTest extends TestCase
         $this->assertSame(1, $convo->messages()->where('role', 'assistant')->count());
     }
 
-    /** Owner without a Facebook/LINE link is routed to /chat to connect first. */
-    public function test_unlinked_owner_bounced_to_chat(): void
+    /**
+     * 🌙 (2026-09-15) "ทุกคนที่ล็อกอินคุยได้" — เจ้าของไพ่ที่ไม่ได้มาจาก FB/LINE และไม่มี token
+     * เดิมถูกเด้งไปหน้าเชื่อมบัญชี ตอนนี้ถามต่อจากไพ่ที่จ่ายแล้วได้เหมือนทุกคน (ไม่หักเงินเพิ่ม)
+     */
+    public function test_owner_without_fb_line_link_can_consult_too(): void
     {
         $owner = User::factory()->create(); // no fb/line link, no token
         app(WalletService::class)->credit($owner, 100, 'seed');
@@ -110,9 +113,11 @@ class TarotConsultFromReadingTest extends TestCase
 
         $this->actingAs($owner)
             ->post("/chat/from-reading/{$reading->id}", ['question' => 'x'])
-            ->assertRedirect(route('chat.index'));
+            ->assertRedirect(route('chat.index'))
+            ->assertSessionHas('chat_primed_reading', $reading->id);
 
-        // Nothing primed, nothing to auto-send.
-        $this->assertDatabaseMissing('chat_messages', ['role' => 'assistant']);
+        $this->assertSame(100.0, app(WalletService::class)->balance($owner), 'priming must not debit the wallet');
+        $convo = ChatConversation::where('user_id', $owner->id)->firstOrFail();
+        $this->assertSame(1, $convo->messages()->where('role', 'assistant')->count());
     }
 }
