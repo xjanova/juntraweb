@@ -180,6 +180,42 @@ class WalletController extends Controller
         return redirect()->route('wallet.topups')->with('status', 'ยกเลิกรายการเติมเงินเรียบร้อยแล้ว');
     }
 
+    /**
+     * แนบสลิปจากหน้าสถานะรายการ (โอนตาม QR ยอดเฉพาะแล้ว แต่ SMS ยังไม่เข้า / อยากให้เร็วขึ้น)
+     *
+     * กติกาเดียวกับห้องแชทและแอพ: สลิปใบเดียวใช้ได้ครั้งเดียว → ตรวจอัตโนมัติด้วย
+     * SlipAutoVerifier (SlipOK + ทะเบียนสลิปของแม่หมอ) → ตรวจไม่ได้ = รอแอดมินตามเดิม
+     */
+    public function topupSlipUpload(Request $request, WalletTransaction $tx, \App\Services\Wallet\SlipAutoVerifier $slips)
+    {
+        abort_unless($tx->user_id === $request->user()->id, 403);
+        if ($tx->type !== 'topup' || $tx->status !== 'pending') {
+            return redirect()->route('wallet.topup.show', $tx)->with('status', 'รายการนี้ไม่ได้รอตรวจสอบแล้ว');
+        }
+
+        $request->validate(['slip' => 'required|image|max:4096']);
+        $file = $request->file('slip');
+        $hash = hash_file('sha256', $file->getRealPath());
+        try {
+            $this->wallet->assertSlipNotReused($hash, $tx->id);
+        } catch (DuplicateSlipException $e) {
+            return back()->withErrors(['slip' => $e->getMessage()]);
+        }
+
+        // เก็บใบใหม่ก่อน แล้วค่อยลบใบเก่า — ถ้าเก็บพลาด ใบเดิมต้องยังอยู่
+        $old = $tx->slip_path;
+        $path = $file->store('topup-slips', 'local');
+        $tx->update(['slip_path' => $path, 'slip_hash' => $hash]);
+        if ($old && $old !== $path) {
+            $this->discardSlip($old);
+        }
+
+        $result = $slips->verify($tx->fresh(), $request->user(), $path);
+
+        return redirect()->route('wallet.topup.show', $tx)->with('status', $result['message']
+            ?? 'ได้รับสลิปแล้ว — แอดมินจะตรวจสอบและเครดิตให้โดยเร็ว');
+    }
+
     /** Best-effort delete of a just-stored slip when the top-up gets rejected. */
     private function discardSlip(?string $slipPath): void
     {

@@ -71,6 +71,24 @@ class WalletTransactionResource extends Resource
                         '<a href="' . e($url) . '" target="_blank"><img src="' . e($url) . '" style="max-width:320px;border:1px solid #ccc;border-radius:8px"></a>'
                     );
                 }),
+            Forms\Components\Placeholder::make('slip_check')
+                ->label('ผลตรวจสลิปอัตโนมัติ')
+                ->content(function (?WalletTransaction $record) {
+                    $c = (array) data_get($record?->meta, 'slip_check', []);
+                    if ($c === []) return '— ยังไม่ได้ตรวจอัตโนมัติ —';
+                    $label = match ($c['decision'] ?? '') {
+                        'approve'   => '✅ ผ่าน (เครดิตอัตโนมัติ)',
+                        'duplicate' => '⛔ สลิปถูกใช้ไปแล้ว',
+                        default     => '⏳ รอแอดมินตรวจ',
+                    };
+                    $lines = [$label, 'เหตุผล: ' . ($c['reason'] ?? '-')];
+                    if (!empty($c['amount']))    $lines[] = 'ยอดในสลิป: ฿' . number_format((float) $c['amount'], 2);
+                    if (!empty($c['sender']))    $lines[] = 'ผู้โอน: ' . $c['sender'];
+                    if (!empty($c['trans_ref'])) $lines[] = 'เลขอ้างอิง: ' . $c['trans_ref'];
+                    if (!empty($c['checked_at'])) $lines[] = 'ตรวจเมื่อ: ' . \Illuminate\Support\Carbon::parse($c['checked_at'])->timezone(config('app.timezone'))->format('d/m/Y H:i');
+
+                    return new \Illuminate\Support\HtmlString(implode('<br>', array_map('e', $lines)));
+                }),
             Forms\Components\Placeholder::make('approval_info')
                 ->label('การอนุมัติ/ปฏิเสธ')
                 ->content(function (?WalletTransaction $record) {
@@ -123,6 +141,24 @@ class WalletTransactionResource extends Resource
                         'danger'  => 'failed',
                         'gray'    => ['refunded', 'cancelled'],
                     ]),
+                Tables\Columns\TextColumn::make('slip_check')
+                    ->label('ตรวจสลิป')
+                    ->state(fn (WalletTransaction $r) => data_get($r->meta, 'slip_check.decision'))
+                    ->formatStateUsing(fn ($state) => match ($state) {
+                        'approve'   => 'ผ่าน',
+                        'duplicate' => 'ใช้แล้ว',
+                        'review'    => 'รอตรวจ',
+                        default     => '—',
+                    })
+                    ->badge()
+                    ->color(fn ($state) => match ($state) {
+                        'approve'   => 'success',
+                        'duplicate' => 'danger',
+                        'review'    => 'warning',
+                        default     => 'gray',
+                    })
+                    ->tooltip(fn (WalletTransaction $r) => data_get($r->meta, 'slip_check.reason'))
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('reference_code')->label('Ref')->copyable()->toggleable(),
                 Tables\Columns\IconColumn::make('slip_path')
                     ->label('สลิป')
@@ -167,9 +203,44 @@ class WalletTransactionResource extends Resource
                     ])
                     ->action(function (WalletTransaction $r, array $data) {
                         try {
+                            // สลิปที่ระบบอ่านเลขอ้างอิงได้ ต้องจองในทะเบียนกลางของแม่หมอก่อน —
+                            // ไม่งั้นแอดมินอนุมัติที่เว็บ แล้วลูกค้าเอาสลิปใบเดิมไปใช้กับบอทได้อีก
+                            $ref = trim((string) ($r->bank_reference ?: data_get($r->meta, 'slip_check.trans_ref', '')));
+                            $warn = null;
+                            // ยอดไม่ตรง = approveTopup จะปฏิเสธอยู่แล้ว — อย่าเพิ่งจองสลิปทิ้งไว้
+                            $amountOk = abs((float) $data['slip_amount'] - (float) $r->amount) < 0.005;
+                            if ($ref !== '' && $amountOk && $r->status === 'pending') {
+                                $registry = app(\App\Services\Wallet\SlipRegistry::class);
+                                if ($other = $registry->usedLocally($ref, $r->id)) {
+                                    Notification::make()->title('ไม่อนุมัติ: สลิปนี้ใช้เติมเงินรายการ ' . $other->reference_code . ' ไปแล้ว')->danger()->persistent()->send();
+
+                                    return;
+                                }
+                                $claim = $registry->claim($r, [
+                                    'trans_ref' => $ref,
+                                    'amount'    => (float) $data['slip_amount'],
+                                    'sender_name' => data_get($r->meta, 'slip_check.sender'),
+                                ]);
+                                if ($claim['status'] === \App\Services\Wallet\SlipRegistry::ALREADY_USED) {
+                                    Notification::make()
+                                        ->title('ไม่อนุมัติ: สลิปนี้ถูกใช้ไปแล้วที่ ' . \App\Services\Wallet\SlipRegistry::whereUsed($claim['used_by'], 'slip_registry'))
+                                        ->danger()->persistent()->send();
+
+                                    return;
+                                }
+                                if ($claim['status'] === \App\Services\Wallet\SlipRegistry::UNAVAILABLE) {
+                                    $warn = 'อนุมัติแล้ว แต่ยังจองสลิปในทะเบียนแม่หมอไม่ได้ (Thaiprompt ต่อไม่ติด)';
+                                }
+                                if (! $r->bank_reference) {
+                                    $r->update(['bank_reference' => $ref]);
+                                }
+                            }
+
                             app(WalletService::class)->approveTopup($r, auth()->user(), (float) $data['slip_amount']);
                             Cache::forget('wallet:pending_topup_count');
-                            Notification::make()->title('อนุมัติเรียบร้อย')->success()->send();
+                            $warn
+                                ? Notification::make()->title($warn)->warning()->persistent()->send()
+                                : Notification::make()->title('อนุมัติเรียบร้อย')->success()->send();
                         } catch (SlipAmountMismatchException | DuplicateSlipException $e) {
                             Notification::make()->title($e->getMessage())->danger()->persistent()->send();
                         } catch (\Throwable $e) {

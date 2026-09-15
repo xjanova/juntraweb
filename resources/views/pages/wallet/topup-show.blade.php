@@ -82,7 +82,27 @@
             <img src="{{ $slipUrl }}" alt="สลิปการโอน" style="max-width:100%;border-radius:14px;border:1px solid var(--line)" loading="lazy">
           </a>
           <div style="font-size:11px;color:var(--ink-faint);margin-top:6px">สลิปนี้เก็บแบบส่วนตัว — เฉพาะคุณกับแอดมินเปิดดูได้</div>
+          @php($check = data_get($tx->meta, 'slip_check.decision'))
+          @if ($tx->status === 'pending' && $check === 'review')
+            <div style="font-size:13px;color:#d4a017;margin-top:10px">ระบบตรวจอัตโนมัติไม่ผ่านบางข้อ — แอดมินกำลังตรวจสลิปให้ค่ะ</div>
+          @elseif ($tx->status === 'pending' && $check === 'duplicate')
+            <div style="font-size:13px;color:#c2382e;margin-top:10px">สลิปนี้ถูกใช้ไปแล้ว — ถ้าโอนใหม่แล้ว แนบสลิปใบใหม่ด้านล่างได้เลย</div>
+          @endif
         </div>
+      @endif
+
+      @if (!empty($canCancel))
+        <form method="POST" action="{{ route('wallet.topup.slip.upload', $tx) }}" enctype="multipart/form-data"
+              style="margin-top:24px;border-top:1px solid var(--line);padding-top:20px">
+          @csrf
+          <label for="slip" class="eyebrow" style="display:inline-flex;margin-bottom:8px">{{ $slipUrl ? 'แนบสลิปใบใหม่' : 'โอนแล้ว? แนบสลิปให้ระบบตรวจทันที' }}</label>
+          @error('slip')<div style="color:#c2382e;font-size:13px;margin-bottom:8px">{{ $message }}</div>@enderror
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input type="file" id="slip" name="slip" accept="image/*" required style="flex:1;min-width:0">
+            <button type="submit" class="btn btn-primary">ส่งสลิป</button>
+          </div>
+          <div style="font-size:11px;color:var(--ink-faint);margin-top:6px">ระบบตรวจกับธนาคารอัตโนมัติ (สลิปใบเดียวใช้ได้ครั้งเดียว ทั้งเว็บและแม่หมอใน LINE/Facebook) — ตรวจไม่ได้จะส่งให้แอดมินตรวจ</div>
+        </form>
       @endif
     </div>
 

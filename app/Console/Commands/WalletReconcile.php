@@ -67,6 +67,21 @@ class WalletReconcile extends Command
         }
 
         $this->error("$drift of $checked wallet(s) drifted." . ($this->option('fix') ? ' (corrected)' : ' Run with --fix to correct.'));
+
+        // A balance that doesn't match its ledger means money was created or lost somewhere — the
+        // owner hears about it the same night, not whenever someone next reads laravel.log.
+        \App\Support\AdminAlerts::send(new \App\Support\Alerts\Alert(
+            key: 'wallet-drift:' . now()->toDateString(),
+            level: \App\Support\Alerts\Alert::CRITICAL,
+            title: 'ยอดวอลเลตไม่ตรงกับบัญชีรายการ ' . $drift . ' กระเป๋า',
+            body: "ยอดคงเหลือที่เก็บไว้ไม่เท่ากับผลรวมรายการเงินเข้า-ออก — อาจมีการเครดิต/หักเงินที่ไม่ผ่านระบบ\n"
+                . 'ดูรายละเอียดใน laravel.log (wallet:reconcile drift detected) แล้วรัน php artisan wallet:reconcile --fix หลังตรวจแล้ว',
+            facts: ['กระเป๋าที่ไม่ตรง' => $drift . ' / ' . $checked, 'แก้อัตโนมัติ' => $this->option('fix') ? 'แก้แล้ว' : 'ยังไม่แก้'],
+            url: url('/admin'),
+            urlLabel: 'เปิดหน้าแอดมิน',
+            category: 'system',
+        ), 720);
+
         return self::FAILURE;
     }
 }

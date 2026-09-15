@@ -72,6 +72,10 @@ class AuthController extends Controller
         // แล้วคืน false อยู่ดี แต่เขียนให้ชัดว่าตั้งใจปฏิเสธ
         if (!$user || $user->password === null || $user->password === ''
             || !Hash::check($data['password'], $user->password)) {
+            // เส้นนี้เช็ครหัสเองด้วย Hash::check จึงไม่มี event Failed ของ Laravel —
+            // ต้องแจ้งตัวนับการเดารหัสเอง ไม่งั้นบอทยิงผ่านแอพได้โดยไม่มีใครเห็น
+            \App\Support\Alerts\SecurityAlerts::loginFailed($login, $request->ip());
+
             return response()->json([
                 'message' => 'อีเมล/เบอร์โทร หรือรหัสผ่านไม่ถูกต้อง',
             ], 401);

@@ -35,16 +35,28 @@ class JuntraServerClient
         return $this->clientId() !== '' && $this->clientSecret() !== '' && $this->base() !== '';
     }
 
+    /** ยังขอ token ได้อยู่ไหม — ให้ watchdog เตือนเมื่อสายขาด (ใช้ token ที่ cache ไว้ ไม่ยิงถี่) */
+    public function ping(): bool
+    {
+        return $this->isConfigured() && $this->token() !== null;
+    }
+
     /* ============================ SLIPS ============================ */
 
     /**
      * ส่งสลิปให้ Thaiprompt ตรวจด้วย SlipOK ชุดเดียวกับบอทแม่หมอ พร้อมบอกว่า
      * เคยถูกใช้ในฝั่งแม่หมอแล้วหรือยัง
      *
-     * @return array{status:'ok'|'flood_guard'|'unavailable',data:?array}
+     * 'unsupported' = ยังไม่ได้ตั้งค่า client หรือฝั่ง Thaiprompt ยังไม่ deploy endpoint นี้ (404/405)
+     * — ผู้เรียกถอยไปใช้ทางเดิมได้ ต่างจาก 'unavailable' ที่แปลว่า "ควรทำได้แต่ต่อไม่ติด"
+     *
+     * @return array{status:'ok'|'flood_guard'|'unavailable'|'unsupported',data:?array}
      */
     public function verifySlip(string $absolutePath, int|string $userRef, ?float $expectedAmount = null): array
     {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'data' => null];
+        }
         if (! is_file($absolutePath)) {
             return ['status' => 'unavailable', 'data' => null];
         }
@@ -65,7 +77,7 @@ class JuntraServerClient
         }
         $this->logMiss('verifySlip', $resp);
 
-        return ['status' => 'unavailable', 'data' => null];
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
     }
 
     /**
@@ -97,10 +109,13 @@ class JuntraServerClient
      * ก่อนเครดิตเสมอ ใครจองได้ก่อนคนนั้นได้ใช้ (ทะเบียนมี unique กันชนพร้อมกัน)
      *
      * @param  array{trans_ref:string,amount:float|string,user_ref:int|string,topup_ref:string}  $slip
-     * @return array{status:'claimed'|'already_used'|'unavailable',data:?array}
+     * @return array{status:'claimed'|'already_used'|'unavailable'|'unsupported',data:?array}
      */
     public function claimSlip(array $slip): array
     {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'data' => null];
+        }
         $body = array_filter([
             'trans_ref'        => (string) $slip['trans_ref'],
             'amount'           => number_format((float) $slip['amount'], 2, '.', ''),
@@ -123,7 +138,7 @@ class JuntraServerClient
         }
         $this->logMiss('claimSlip', $resp);
 
-        return ['status' => 'unavailable', 'data' => null];
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
     }
 
     /* ======================= UNIQUE AMOUNTS ======================= */
@@ -245,6 +260,13 @@ class JuntraServerClient
         Cache::put(self::TOKEN_CACHE, $token, now()->addSeconds(min($ttl, 86400)));
 
         return $token;
+    }
+
+    /** The route doesn't exist on the other side yet (rolling deploy) — not the same as "down". */
+    private function missing(?Response $resp): bool
+    {
+        return $resp !== null && in_array($resp->status(), [404, 405], true)
+            && $resp->json('reason_code') === null;
     }
 
     private function logMiss(string $what, ?Response $resp): void

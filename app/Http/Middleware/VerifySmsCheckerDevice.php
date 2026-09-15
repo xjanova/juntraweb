@@ -26,6 +26,8 @@ class VerifySmsCheckerDevice
         $device = SmsCheckerDevice::findByApiKey($apiKey);
         if (! $device) {
             Log::warning('SmsChecker: invalid API key', ['ip' => $request->ip()]);
+            // This gateway can credit wallets — a stranger knocking on it is the owner's business.
+            \App\Support\Alerts\SecurityAlerts::smsGatewayRejected('API key ไม่ถูกต้อง', $request->ip(), $request->header('X-Device-Id'));
             return response()->json(['success' => false, 'message' => 'Invalid API key'], 401);
         }
 
