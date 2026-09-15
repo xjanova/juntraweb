@@ -56,7 +56,8 @@ class TelegramAlertsTest extends TestCase
 
         $calls = $this->telegramCalls();
         $this->assertCount(1, $calls);
-        $this->assertStringContainsString('/sendPhoto', $calls[0]->url());
+        // A drawn card where GD/FreeType exist, plain text otherwise — either way exactly one message.
+        $this->assertMatchesRegularExpression('~/(sendPhoto|sendMessage)$~', $calls[0]->url());
         // The bot token never reaches the history table.
         $row = DB::table('admin_alerts')->first();
         $this->assertTrue((bool) $row->ok);
@@ -73,6 +74,9 @@ class TelegramAlertsTest extends TestCase
 
     public function test_sms_credit_announces_money_in(): void
     {
+        if (! \App\Support\Alerts\AlertCard::available()) {
+            $this->markTestSkipped('needs GD + FreeType to send the card as a photo');
+        }
         $this->enableTelegram();
         $user = User::factory()->create(['name' => 'คุณทดสอบ']);
         $tx = app(WalletService::class)->recordPendingTopup($user, 100.37, null, 'promptpay');
@@ -104,6 +108,9 @@ class TelegramAlertsTest extends TestCase
 
     public function test_reading_is_reported_silently(): void
     {
+        if (! \App\Support\Alerts\AlertCard::available()) {
+            $this->markTestSkipped('needs GD + FreeType to send the card as a photo');
+        }
         $this->enableTelegram();
         $user = User::factory()->create();
         Reading::create(['user_id' => $user->id, 'session_token' => 't', 'type' => 'tarot_three', 'payload' => ['cost' => 19]]);

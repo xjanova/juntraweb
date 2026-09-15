@@ -217,6 +217,9 @@ class SlipCrossCheckTest extends TestCase
 
     public function test_waiting_slip_reaches_telegram_with_the_photo(): void
     {
+        if (! \App\Support\Alerts\AlertCard::available()) {
+            $this->markTestSkipped('needs GD + FreeType to send the card as a photo');
+        }
         Setting::put('telegram_bot_token', '123456789:AAHfakeTokenForTestsOnly_abcdefghij', 'telegram', true);
         Setting::put('telegram_chat_id', '555000111', 'telegram');
         Setting::put('telegram_alerts_enabled', '1', 'telegram');
