@@ -173,6 +173,39 @@ class SlipCrossCheckTest extends TestCase
         $this->assertSame(0.0, app(WalletService::class)->balance($this->user));
     }
 
+    public function test_client_refused_by_thaiprompt_falls_back_to_the_customers_token(): void
+    {
+        // Rolling deploy / client not yet allowed: the web's own identity is refused. Slips must keep
+        // auto-crediting through the customer's linked token exactly as before — not pile up on admins.
+        $this->user->forceFill(['thaiprompt_token' => 'customer-token'])->save();
+        Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::fake([
+            self::TP . '/oauth/token' => Http::response(['error' => 'invalid_client'], 401),
+            self::TP . '/api/v1/juntra/payment/verify-slip' => Http::response(['data' => $this->slip()]),
+            'api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]]),
+        ]);
+
+        $res = $this->check();
+
+        $this->assertTrue($res['paid']);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/payment/verify-slip') && $r->hasHeader('Authorization', 'Bearer customer-token'));
+        Http::assertNotSent(fn (Request $r) => str_contains($r->url(), '/juntra/server/'));
+    }
+
+    public function test_thaiprompt_down_sends_the_slip_to_admin(): void
+    {
+        Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::fake([
+            self::TP . '/oauth/token' => Http::response(['access_token' => 'srv-token', 'expires_in' => 3600]),
+            self::TP . '/api/v1/juntra/server/slips/verify' => Http::response('Bad gateway', 502),
+            'api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]]),
+        ]);
+
+        $this->assertNull($this->check());
+        $this->assertSame('pending', $this->tx->fresh()->status);
+        $this->assertSame('review', data_get($this->tx->fresh()->meta, 'slip_check.decision'));
+    }
+
     public function test_nothing_configured_and_no_user_token_goes_to_admin(): void
     {
         Setting::put('thaiprompt_client_id', '', 'thaiprompt');

@@ -27,18 +27,34 @@ class JuntraServerClient
 {
     private const TOKEN_CACHE = 'juntra:server_token';
 
-    /** เพิ่งขอ token ไม่ผ่าน — อย่ายิงซ้ำทุก request */
+    /** เพิ่งขอ token ไม่ผ่าน — อย่ายิงซ้ำทุก request (ค่า = 'refused' | 'network') */
     private const TOKEN_MISS = 'juntra:server_token_miss';
+
+    /**
+     * ทำไมรอบล่าสุดไม่ได้คำตอบ: 'refused' = Thaiprompt ไม่ยอมรับตัวตนของเว็บ (client ผิด/
+     * ยังไม่เปิดสิทธิ์) · 'network' = ต่อไม่ติด/ล่ม — แยกกันเพราะ refused ต้องถอยไปใช้
+     * ทางเดิม (ไม่งั้นช่วงรอตั้งค่า สลิปทุกใบจะไปกองที่แอดมิน) ส่วน network ต้องส่งแอดมิน
+     */
+    private ?string $lastFailure = null;
 
     public function isConfigured(): bool
     {
         return $this->clientId() !== '' && $this->clientSecret() !== '' && $this->base() !== '';
     }
 
-    /** ยังขอ token ได้อยู่ไหม — ให้ watchdog เตือนเมื่อสายขาด (ใช้ token ที่ cache ไว้ ไม่ยิงถี่) */
+    /**
+     * สายยังใช้ได้ไหม — ให้ watchdog เตือนเมื่อสายขาด: ขอ token ได้ และ Thaiprompt ยอมรับ
+     * ตัวตนของเว็บ (เช็คเลขปลอมที่ /slips/check ซึ่งฟรี ไม่กินโควตา SlipOK)
+     * endpoint ยังไม่ deploy (404) = ยังไม่ถือว่าสายขาด
+     */
     public function ping(): bool
     {
-        return $this->isConfigured() && $this->token() !== null;
+        if (! $this->isConfigured()) {
+            return false;
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/slips/check'), ['refs' => ['PING000000000000']]));
+
+        return $resp !== null && ($resp->successful() || $this->missing($resp));
     }
 
     /* ============================ SLIPS ============================ */
@@ -197,19 +213,25 @@ class JuntraServerClient
      */
     private function send(callable $call): ?Response
     {
+        $this->lastFailure = null;
         if (! $this->isConfigured()) {
+            $this->lastFailure = 'refused';
+
             return null;
         }
 
         for ($attempt = 0; $attempt < 2; $attempt++) {
             $token = $this->token();
             if ($token === null) {
+                $this->lastFailure = Cache::get(self::TOKEN_MISS) === 'refused' ? 'refused' : 'network';
+
                 return null;
             }
             try {
                 $resp = $call(Http::acceptJson()->withToken($token)->connectTimeout(4)->timeout(10));
             } catch (\Throwable $e) {
                 Log::warning('JuntraServerClient: request threw', ['err' => mb_substr($e->getMessage(), 0, 200)]);
+                $this->lastFailure = 'network';
 
                 return null;
             }
@@ -242,7 +264,7 @@ class JuntraServerClient
                 ]);
         } catch (\Throwable $e) {
             Log::warning('JuntraServerClient: token request threw', ['err' => mb_substr($e->getMessage(), 0, 200)]);
-            Cache::put(self::TOKEN_MISS, 1, now()->addSeconds(60));
+            Cache::put(self::TOKEN_MISS, 'network', now()->addSeconds(60));
 
             return null;
         }
@@ -251,7 +273,10 @@ class JuntraServerClient
         if (! $resp->successful() || $token === '') {
             // ห้ามลง body — ถ้า upstream echo คำขอกลับมา ความลับของ client จะติดไปด้วย
             Log::warning('JuntraServerClient: token refused', ['status' => $resp->status()]);
-            Cache::put(self::TOKEN_MISS, 1, now()->addSeconds(60));
+            // 4xx = client ถูกปฏิเสธ (ผิด/ยังไม่เปิด client_credentials) — จำนานกว่า เพราะ
+            // ลองซ้ำก็ไม่หาย · 5xx = ฝั่งนั้นล่ม ลองใหม่ในไม่ช้า
+            $refused = $resp->status() >= 400 && $resp->status() < 500;
+            Cache::put(self::TOKEN_MISS, $refused ? 'refused' : 'network', now()->addSeconds($refused ? 300 : 60));
 
             return null;
         }
@@ -262,11 +287,21 @@ class JuntraServerClient
         return $token;
     }
 
-    /** The route doesn't exist on the other side yet (rolling deploy) — not the same as "down". */
+    /**
+     * "ทางนี้ยังใช้ไม่ได้" ต่างจาก "ล่ม": route ยังไม่มีฝั่งโน้น (deploy ไม่พร้อมกัน), หรือ
+     * Thaiprompt ไม่ยอมรับตัวตนของเว็บ (token ไม่ได้ / 401 / 403) — ผู้เรียกถอยไปใช้ทางเดิม
+     * (และ watchdog จะเตือนแอดมินเรื่องสาย) แทนการโยนสลิปทุกใบไปรอแอดมิน
+     */
     private function missing(?Response $resp): bool
     {
-        return $resp !== null && in_array($resp->status(), [404, 405], true)
-            && $resp->json('reason_code') === null;
+        if ($resp === null) {
+            return $this->lastFailure === 'refused';
+        }
+        if (in_array($resp->status(), [401, 403], true)) {
+            return true;
+        }
+
+        return in_array($resp->status(), [404, 405], true) && $resp->json('reason_code') === null;
     }
 
     private function logMiss(string $what, ?Response $resp): void
