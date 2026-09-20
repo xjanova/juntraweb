@@ -15,7 +15,12 @@
       <p class="lede" style="margin:0 auto">เข้าสู่ระบบเพื่อบันทึกประวัติการดูดวงและคำพยากรณ์ที่ได้รับ</p>
     </div>
 
-    @php $tpEnabled = \App\Models\Setting::get('thaiprompt_enabled', '0') === '1'; @endphp
+    @php
+      $tpEnabled = \App\Models\Setting::get('thaiprompt_enabled', '0') === '1';
+      // ด่านกันบอทโผล่เฉพาะคนที่กรอกผิดซ้ำ ๆ — $turnstileRequired มาจาก
+      // AuthenticatedSessionController (LoginChallenge) และต้องมีคีย์ด้วย
+      $showTurnstile = ($turnstileRequired ?? false) && \App\Support\Turnstile::siteKey() !== '';
+    @endphp
 
     @if ($tpEnabled)
       <div class="panel" style="margin-bottom:18px;text-align:center">
@@ -48,6 +53,21 @@
         <input type="checkbox" name="remember" style="accent-color:var(--gold)">
         จดจำการเข้าสู่ระบบ
       </label>
+
+      {{-- ด่านกันบอท โผล่เฉพาะคนที่กรอกผิดซ้ำ ๆ (LoginChallenge) — ฟอร์มนี้เป็น
+           POST ธรรมดา Cloudflare จึงแถม hidden input cf-turnstile-response
+           มาให้เอง ไม่ต้องเขียน JS เหมือนฝั่ง Filament ที่เป็น Livewire --}}
+      @if ($showTurnstile)
+        <div style="margin-bottom:20px">
+          <div style="font-size:13px;color:var(--ink-dim);margin-bottom:10px;text-align:center">
+            เพื่อความปลอดภัย กรุณายืนยันว่าคุณไม่ใช่บอท
+          </div>
+          <div class="cf-turnstile" data-sitekey="{{ \App\Support\Turnstile::siteKey() }}"
+               data-theme="dark" data-language="th"
+               style="display:flex;justify-content:center"></div>
+        </div>
+      @endif
+
       <button class="btn btn-primary" style="width:100%;justify-content:center">
         เข้าสู่ระบบ
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
@@ -62,4 +82,10 @@
     </form>
   </div>
 </section>
+
+@if ($showTurnstile)
+  @push('scripts')
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  @endpush
+@endif
 @endsection

@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Support\LoginChallenge;
 use App\Support\PhoneNumber;
+use App\Support\Turnstile;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -46,9 +48,30 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        $login    = trim((string) $this->input('email'));
+        $login = trim((string) $this->input('email'));
         $password = (string) $this->input('password');
         $remember = $this->boolean('remember');
+
+        // ด่านกันบอท — โผล่เฉพาะเมื่อ IP นี้หรือบัญชีนี้ถูกกรอกผิดซ้ำ ๆ
+        //
+        // ต้องอยู่ก่อน Auth::attempt เพื่อไม่ให้สคริปต์ได้ลองรหัสแม้แต่ครั้งเดียว
+        // และต้องมีที่นี่ ไม่ใช่แค่ /admin/login เพราะล็อกอินสำเร็จที่หน้านี้
+        // ก็ได้ session ของ guard `web` ตัวเดียวกัน แล้วเดินเข้า /admin ได้เลย
+        // ถ้าแอดมินคนนั้น role ผ่าน canAccessPanel()
+        if (LoginChallenge::required($this->ip(), $login)) {
+            if (! Turnstile::verify($this->input('cf-turnstile-response'), $this->ip())) {
+                // ปักธงไว้ให้ widget โผล่รอบถัดไปแน่ ๆ — กรณีที่สะดุดแกน "ต่อบัญชี"
+                // หน้า GET ยังไม่รู้ว่าจะกรอกบัญชีไหน จึงยังไม่ได้แสดง widget มา
+                // ถ้าไม่ปักธง เจ้าของบัญชีที่โดนบ็อตเน็ตรุมจะติดวนล็อกอินไม่ได้
+                LoginChallenge::markRequired();
+
+                // ไม่เรียก recordFailure ที่นี่ — นี่คือ captcha ไม่ผ่าน/หมดอายุ
+                // ไม่ใช่การเดารหัสผิด นับรวมกันจะลงโทษคนที่นั่งกรอกนานเกินไป
+                throw ValidationException::withMessages([
+                    'email' => 'กรุณายืนยันว่าคุณไม่ใช่บอทก่อนเข้าสู่ระบบ แล้วลองอีกครั้งนะคะ',
+                ]);
+            }
+        }
 
         // ลองด้วยอีเมลก่อน แล้วค่อยลองเป็นเบอร์โทร (normalise ให้ตรงกับที่เก็บ)
         $ok = Auth::attempt(['email' => $login, 'password' => $password], $remember);
@@ -62,6 +85,7 @@ class LoginRequest extends FormRequest
 
         if (! $ok) {
             RateLimiter::hit($this->throttleKey());
+            LoginChallenge::recordFailure($this->ip(), $login);
 
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
@@ -69,6 +93,9 @@ class LoginRequest extends FormRequest
         }
 
         RateLimiter::clear($this->throttleKey());
+        // ล้างทั้งสองแกน ไม่ใช่แค่แกน IP — คนที่ลืมรหัสแล้วกรอกถูกในที่สุด
+        // ไม่ควรถูกท้าทายต่ออีกชั่วโมงจากทุกเครื่องที่เขาใช้
+        LoginChallenge::clear($this->ip(), $login);
     }
 
     /**

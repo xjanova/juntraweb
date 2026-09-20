@@ -2,6 +2,8 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Auth\AdminLogin;
+use App\Models\Setting;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -31,7 +33,9 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
-            ->login()
+            // หน้าล็อกอินของเราเอง = ของ Filament + Cloudflare Turnstile บังคับ
+            // (ของเดิมมีแค่ rate limit 5 ครั้ง/นาที/IP ซึ่งบ็อตเน็ตเดินผ่านได้)
+            ->login(AdminLogin::class)
             ->brandName($brand)
             ->colors([
                 'primary' => Color::Amber,
@@ -70,13 +74,14 @@ class AdminPanelProvider extends PanelProvider
     private function resolveBrand(): string
     {
         try {
-            $value = \App\Models\Setting::get('site_name');
+            $value = Setting::get('site_name');
             if (is_string($value) && $value !== '') {
                 return $value;
             }
         } catch (\Throwable $e) {
             // DB not migrated yet (installer running) — fall through.
         }
+
         return config('app.name') ?: 'แม่หมอจันทรา';
     }
 }

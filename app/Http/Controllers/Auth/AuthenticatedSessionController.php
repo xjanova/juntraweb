@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
+use App\Support\LoginChallenge;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,10 +14,16 @@ class AuthenticatedSessionController extends Controller
 {
     /**
      * Display the login view.
+     *
+     * ส่ง $turnstileRequired ไปด้วยเพื่อให้ฟอร์มแสดง widget เฉพาะคนที่
+     * กรอกผิดซ้ำ ๆ — ตอนนี้ยังไม่รู้ว่าเขาจะกรอกบัญชีไหน จึงเช็คได้แค่แกน IP
+     * กับธงใน session ({@see LoginChallenge})
      */
-    public function create(): View
+    public function create(Request $request): View
     {
-        return view('auth.login');
+        return view('auth.login', [
+            'turnstileRequired' => LoginChallenge::required($request->ip()),
+        ]);
     }
 
     /**
