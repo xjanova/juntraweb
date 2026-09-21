@@ -79,6 +79,7 @@ class SmsOrderPresenter
                 'base_amount'     => $base,
                 'platform'        => null,
                 'can_void'        => false,
+                'slip'            => $this->slip($tx, $meta),
             ],
             'server_name'               => $site,
             'synced_version'            => $tx->updated_at ? (int) ($tx->updated_at->getTimestamp() * 1000) : 0,
@@ -126,6 +127,35 @@ class SmsOrderPresenter
 
         return $txs->map(fn (WalletTransaction $tx) => $this->present($tx, $notifications->get($tx->id), false))
             ->values()->all();
+    }
+
+    /**
+     * สลิปที่ลูกค้าแนบกับรายการนี้ → แอพโชว์ทัมบ์เนล + แตะดูรูปเต็ม (โครงเดียวกับ slip ของ Thaiprompt)
+     *
+     * ส่งแค่ path ของ endpoint ไม่ส่งตัวรูป — รูปมีชื่อ/เลขบัญชีลูกค้า ต้องผ่าน VerifySmsCheckerDevice
+     * ทุกครั้งที่โหลด แอพยอมแนบ API key เฉพาะ path รูปแบบ api/v1/sms-payment/orders/{id}/slip-image
+     *
+     * รายการที่ SMS ธนาคารยืนยัน (confirmed_via=sms) ไม่ส่งสลิป แม้ลูกค้าจะแนบไว้ก็ตาม:
+     * แอพถือว่า "มีสลิป" = อนุมัติผ่านสลิป (OrderApproval.approvalMethod) ส่งไปป้ายจะผิด
+     */
+    private function slip(WalletTransaction $tx, array $meta): ?array
+    {
+        if (empty($tx->slip_path) || ($meta['confirmed_via'] ?? null) === 'sms') {
+            return null;
+        }
+
+        $check  = (array) ($meta['slip_check'] ?? []);
+        // confirmTopupAuto เขียนทับคอลัมน์ slip_amount ด้วยยอดที่เครดิต — ยอดจริงในสลิปอยู่ใน meta
+        $amount = $meta['slip_amount'] ?? $check['amount'] ?? $tx->slip_amount;
+
+        return [
+            'image_path'       => "api/v1/sms-payment/orders/{$tx->id}/slip-image",
+            'trans_ref'        => $meta['trans_ref'] ?? $check['trans_ref'] ?? $tx->bank_reference,
+            'sender_name'      => $meta['sender_name'] ?? $check['sender'] ?? null,
+            'receiver_account' => null,
+            'amount'           => $amount !== null ? (float) $amount : null,
+            'checked_at'       => $check['checked_at'] ?? null,
+        ];
     }
 
     /** สถานะรายการ → approval_status ที่แอพรู้จัก (ApprovalStatus.kt) */

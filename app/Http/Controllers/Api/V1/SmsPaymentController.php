@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 /**
@@ -261,6 +262,25 @@ class SmsPaymentController extends Controller
                 'orders'         => $this->orders->presentMany($rows),
                 'latest_version' => (int) round(microtime(true) * 1000),
             ],
+        ]);
+    }
+
+    /**
+     * GET /orders/{id}/slip-image — the slip the customer attached to a top-up,
+     * for the app's thumbnail / full view (path comes from SmsOrderPresenter::slip).
+     * Slips carry the payer's name and account number: private disk only, device
+     * auth on every request, never cached by the phone or anything in between.
+     */
+    public function slipImage(int $id)
+    {
+        $tx = WalletTransaction::where('type', 'topup')->whereKey($id)->first(['id', 'slip_path']);
+        if (! $tx || ! $tx->slip_path || ! Storage::disk('local')->exists($tx->slip_path)) {
+            return $this->err('Slip not found', 404);
+        }
+
+        return Storage::disk('local')->response($tx->slip_path, null, [
+            'Cache-Control'          => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 

@@ -175,5 +175,6 @@ Route::prefix('v1/sms-payment')->middleware(VerifySmsCheckerDevice::class)->name
     Route::get('orders',            [SmsPaymentController::class, 'orders'])->middleware('throttle:120,1')->name('orders');
     Route::get('orders/sync',       [SmsPaymentController::class, 'syncOrders'])->middleware('throttle:120,1')->name('orders.sync');
     Route::get('orders/match',      [SmsPaymentController::class, 'matchOrder'])->middleware('throttle:120,1')->name('orders.match');
+    Route::get('orders/{id}/slip-image', [SmsPaymentController::class, 'slipImage'])->whereNumber('id')->middleware('throttle:120,1')->name('orders.slip');
     Route::get('dashboard-stats',   [SmsPaymentController::class, 'dashboardStats'])->middleware('throttle:120,1')->name('stats');
 });

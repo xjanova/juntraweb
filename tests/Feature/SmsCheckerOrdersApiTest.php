@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\WalletTransaction;
 use App\Services\Wallet\WalletService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Concerns\SmsCheckerDeviceRequests;
 use Tests\TestCase;
 
@@ -487,5 +488,118 @@ class SmsCheckerOrdersApiTest extends TestCase
         $this->assertSame('Pixel 8', $fresh->device_name);
         $this->assertSame('2.9.0', $fresh->app_version);
         $this->assertStringStartsWith('fcm-token-', $fresh->fcm_token);
+    }
+
+    /* ═══════════════════ สลิปที่ลูกค้าแนบ → ทัมบ์เนลในแอพ ═══════════════════ */
+
+    /** PNG 1×1 — แค่ให้ไฟล์บนดิสก์เป็นรูปจริง */
+    private const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+    private function withSlip(WalletTransaction $tx, array $meta = []): WalletTransaction
+    {
+        $path = "wallet-slips/{$tx->id}.png";
+        Storage::disk('local')->put($path, base64_decode(self::PNG_1PX));
+        $tx->forceFill(['slip_path' => $path, 'meta' => array_merge((array) $tx->meta, $meta)])->save();
+
+        return $tx->fresh();
+    }
+
+    private function onlyOrder(SmsCheckerDevice $device): array
+    {
+        return $this->getJson('/api/v1/sms-payment/orders?status=all', $this->deviceHeaders($device))
+            ->assertOk()->json('data.data.0');
+    }
+
+    public function test_a_slipok_credited_topup_carries_its_slip_and_the_app_can_load_it(): void
+    {
+        Storage::fake('local');
+        $tx = $this->withSlip($this->pendingTopup(User::factory()->create(), 100.37), [
+            'slip_check' => [
+                'decision' => 'approve', 'trans_ref' => 'TR-001', 'amount' => 100.37,
+                'sender' => 'นาย ก', 'checked_at' => '2026-09-21T10:00:00+07:00',
+            ],
+        ]);
+        // ทางเดียวกับ SlipAutoVerifier::verify หลังผ่านครบทุกด่าน
+        app(WalletService::class)->confirmTopupAuto($tx, [
+            'source' => 'slipok', 'trans_ref' => 'TR-001', 'slip_amount' => 100.37, 'sender_name' => 'นาย ก',
+        ]);
+        $device = $this->device();
+
+        $order = $this->onlyOrder($device);
+        $this->assertOrderShape($order);
+        $this->assertSame('auto_approved', $order['approval_status']);
+        $this->assertNull($order['notification_id'], 'ไม่มี SMS จับคู่ — แอพติดป้าย "อนุมัติผ่านสลิป"');
+        $slip = $order['order_details_json']['slip'];
+        $this->assertSame("api/v1/sms-payment/orders/{$tx->id}/slip-image", $slip['image_path']);
+        $this->assertSame('TR-001', $slip['trans_ref']);
+        $this->assertSame('นาย ก', $slip['sender_name']);
+        $this->assertSame(100.37, $slip['amount']);
+        $this->assertSame('2026-09-21T10:00:00+07:00', $slip['checked_at']);
+
+        // แอพต่อ image_path กับ baseUrl ของเซิร์ฟเวอร์ที่ลงทะเบียน แล้วแนบ key ของเครื่อง
+        $res = $this->get('/' . $slip['image_path'], $this->deviceHeaders($device))->assertOk();
+        $this->assertSame('image/png', $res->headers->get('Content-Type'));
+        $this->assertStringContainsString('no-store', $res->headers->get('Cache-Control'));
+        $this->assertStringContainsString('private', $res->headers->get('Cache-Control'));
+        $this->assertSame(base64_decode(self::PNG_1PX), $res->streamedContent());
+    }
+
+    public function test_a_topup_waiting_for_review_shows_the_slip_the_customer_sent(): void
+    {
+        Storage::fake('local');
+        $tx = $this->withSlip($this->pendingTopup(User::factory()->create(), 100.37));
+
+        $order = $this->onlyOrder($this->device());
+
+        $this->assertSame('pending_review', $order['approval_status']);
+        $this->assertSame("api/v1/sms-payment/orders/{$tx->id}/slip-image", $order['order_details_json']['slip']['image_path']);
+        $this->assertNull($order['order_details_json']['slip']['trans_ref']);
+    }
+
+    public function test_an_sms_confirmed_topup_sends_no_slip_so_the_app_badge_stays_sms(): void
+    {
+        Storage::fake('local');
+        $tx = $this->withSlip($this->pendingTopup(User::factory()->create(), 100.37));
+        app(WalletService::class)->confirmTopupAuto($tx, ['confirmed_via' => 'sms']);
+
+        $this->assertNull($this->onlyOrder($this->device())['order_details_json']['slip']);
+    }
+
+    public function test_a_topup_without_a_slip_has_none(): void
+    {
+        $this->pendingTopup(User::factory()->create(), 100.37);
+
+        $this->assertNull($this->onlyOrder($this->device())['order_details_json']['slip']);
+    }
+
+    public function test_slip_image_needs_a_device_and_a_slip_that_still_exists(): void
+    {
+        Storage::fake('local');
+        $user = User::factory()->create();
+        $withSlip = $this->withSlip($this->pendingTopup($user, 100.37));
+        $noSlip = $this->pendingTopup($user, 100.38);
+        $device = $this->device();
+        $headers = $this->deviceHeaders($device);
+        $url = fn (int $id) => "/api/v1/sms-payment/orders/{$id}/slip-image";
+
+        $this->get($url($withSlip->id))->assertStatus(401);
+        $this->get($url($withSlip->id), ['X-Api-Key' => 'nope'])->assertStatus(401);
+        $this->get($url($noSlip->id), $headers)->assertNotFound();
+        $this->get($url(999999), $headers)->assertNotFound();
+        $this->get('/api/v1/sms-payment/orders/abc/slip-image', $headers)->assertNotFound();
+
+        // รายการอื่นที่ไม่ใช่เติมเงิน ห้ามใช้ endpoint นี้เปิดไฟล์
+        $withSlip->forceFill(['type' => 'debit'])->save();
+        $this->get($url($withSlip->id), $headers)->assertNotFound();
+        $withSlip->forceFill(['type' => 'topup'])->save();
+
+        // เครื่องที่ถูกระงับ ดูสลิปไม่ได้แม้ key ถูก
+        $device->forceFill(['status' => 'suspended'])->save();
+        $this->get($url($withSlip->id), $headers)->assertForbidden();
+        $device->forceFill(['status' => 'active'])->save();
+
+        // ไฟล์ถูกลบไปแล้ว (เช่น CleanupExpiredTopups) → 404 ให้แอพจำไว้ ไม่ยิงซ้ำ
+        Storage::disk('local')->delete($withSlip->slip_path);
+        $this->get($url($withSlip->id), $headers)->assertNotFound();
     }
 }
