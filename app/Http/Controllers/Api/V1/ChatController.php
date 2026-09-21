@@ -7,14 +7,17 @@ use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Http\Controllers\Controller;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
+use App\Models\Reading;
 use App\Services\AiOracle;
 use App\Services\Chat\ChatOffers;
 use App\Services\Chat\ChatReadingIntent;
 use App\Services\Chat\MaeMorUpstream;
+use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\ChatSuggestions;
 use App\Support\Pricing;
+use App\Support\TarotSpreads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -59,6 +62,8 @@ class ChatController extends Controller
             'data' => $rows->map(fn (ChatConversation $c) => [
                 'id'            => $c->id,
                 'title'         => $c->title,
+                // 💬 (2026-09-21) ห้องที่คุยต่อจากคำพยากรณ์ไหน (null = ห้องคุยทั่วไป) — แอพรุ่นเก่าเมินฟิลด์นี้
+                'reading_id'    => $c->reading_id,
                 'message_count' => (int) $c->messages_count,
                 'updated_at'    => optional($c->updated_at)->toIso8601String(),
             ])->values(),
@@ -75,21 +80,66 @@ class ChatController extends Controller
         return response()->json(['data' => ChatSuggestions::topics()]);
     }
 
+    /**
+     * เปิดห้องใหม่ — 💬 (2026-09-21) ส่ง `reading_id` มาด้วย = ห้องที่คุยต่อจากคำพยากรณ์ที่จ่ายแล้ว
+     *
+     * แม่หมอได้ไพ่ทุกใบ + คำพยากรณ์ฉบับเต็มเป็นบริบท (ReadingChatContext) และคำถามเรื่องไพ่ชุดนั้นไม่โดน
+     * เปลี่ยนเป็นใบเสนอแพ็กเกจ — เหมือนปุ่ม "ถามแม่หมอ" ของเว็บ · มีห้องของไพ่ชุดนี้อยู่แล้ว = เปิดห้องเดิมต่อ (200)
+     * แอพรุ่นเก่าไม่ส่ง reading_id → ห้องคุยทั่วไปแบบเดิมทุกอย่าง (201)
+     */
     public function startConversation(Request $request): JsonResponse
     {
         $user = $request->user();
+        $data = $request->validate([
+            'reading_id' => 'sometimes|nullable|integer|min:1',
+        ]);
+
+        $reading = null;
+        if (! empty($data['reading_id'])) {
+            // ไพ่ของคนอื่น = 404 เหมือนไม่มีอยู่ (ไม่บอกว่ามีคำพยากรณ์เลขนี้ของใครอยู่)
+            $reading = Reading::where('id', $data['reading_id'])->where('user_id', $user->id)->first();
+            if (! $reading) {
+                return response()->json(['message' => 'ไม่พบคำพยากรณ์นี้', 'reason_code' => 'reading_not_found'], 404);
+            }
+            if (! TarotSpreads::isTarotType((string) $reading->type)) {
+                return response()->json([
+                    'message'     => 'คุยต่อกับแม่หมอได้เฉพาะคำพยากรณ์ไพ่ยิปซีค่ะ',
+                    'reason_code' => 'reading_not_tarot',
+                ], 422);
+            }
+            if (! ReadingChatContext::usable($reading)) {
+                return response()->json([
+                    'message'     => 'คำพยากรณ์ชุดนี้ยังไม่พร้อมให้คุยต่อค่ะ (แม่หมอยังอ่านไม่เสร็จ หรืออ่านไม่สำเร็จ)',
+                    'reason_code' => 'reading_not_ready',
+                ], 422);
+            }
+
+            $existing = ChatConversation::where('user_id', $user->id)
+                ->where('reading_id', $reading->id)
+                ->latest('id')
+                ->first();
+            if ($existing) {
+                return response()->json(['data' => $this->startPayload($existing->load('messages'), $user, $reading)], 200);
+            }
+        }
+
         $token = (string) Str::uuid();
         $convo = ChatConversation::create([
             'user_id'       => $user->id,
             'session_token' => $token,
-            'title'         => 'สนทนากับแม่หมอ',
+            'title'         => $reading ? ReadingChatContext::title($reading) : 'สนทนากับแม่หมอ',
+            'reading_id'    => $reading?->id,
         ]);
 
         // Greet via upstream when possible so mobile + web feel identical.
         $greeting = 'สวัสดีค่ะลูก แม่หมอจันทราอยู่ตรงนี้แล้ว · อยากปรึกษาเรื่องอะไรเป็นพิเศษวันนี้คะ?';
-        $start = $this->upstream->start($user);
+        $start = $this->upstream->start($user, $reading ? ReadingChatContext::for($reading) : null);
         if (!empty($start['greeting'])) {
             $greeting = $start['greeting'];
+        }
+        if ($reading) {
+            // คำทักทายเดียวกับเว็บ (บอกจำนวนใบ + ชื่อแพ็กเกจ) — ไม่ขึ้นกับว่า Thaiprompt รุ่นไหน
+            $greeting = ReadingChatContext::greeting($reading);
         }
         if (!empty($start['session'])) {
             $this->cacheUpstreamSession($convo->id, $start['session']);
@@ -101,19 +151,23 @@ class ChatController extends Controller
             'content' => $greeting,
         ]);
 
-        return response()->json([
-            'data' => [
-                'conversation' => $this->convoPayload($convo->fresh('messages')),
-                'balance'      => (float) $this->wallet->balance($user),
-                // 🎁 (2026-07-28) ราคาที่คนนี้ต้องจ่ายข้อความถัดไป (0 = ยังอยู่ในโควตาฟรี)
-                'cost'         => ChatPolicy::costFor($user),
-                'daily_limit'  => ChatPolicy::dailyLimit(),
-                'daily_left'   => ChatPolicy::dailyLeft($user),
-                'blocked'      => ChatPolicy::exhausted($user),
-                // ปุ่มคำถามลัดชุดเริ่มต้น — ชุดเดียวกับเว็บ (ChatSuggestions)
-                'suggestions'  => ChatSuggestions::starter(),
-            ],
-        ], 201);
+        return response()->json(['data' => $this->startPayload($convo->fresh('messages'), $user, $reading)], 201);
+    }
+
+    /** สถานะครบชุดของการเปิดห้อง (ห้องใหม่ 201 / ห้องของไพ่ชุดเดิม 200) — รูปเดียวกันทั้งสองทาง */
+    private function startPayload(ChatConversation $convo, $user, ?Reading $reading): array
+    {
+        return [
+            'conversation' => $this->convoPayload($convo),
+            'balance'      => (float) $this->wallet->balance($user),
+            // 🎁 (2026-07-28) ราคาที่คนนี้ต้องจ่ายข้อความถัดไป (0 = ยังอยู่ในโควตาฟรี)
+            'cost'         => ChatPolicy::costFor($user),
+            'daily_limit'  => ChatPolicy::dailyLimit(),
+            'daily_left'   => ChatPolicy::dailyLeft($user),
+            'blocked'      => ChatPolicy::exhausted($user),
+            // ปุ่มคำถามลัดชุดเริ่มต้น — ชุดเดียวกับเว็บ (ChatSuggestions) · ห้องของไพ่ = ชุดถามต่อจากไพ่
+            'suggestions'  => $reading ? ChatSuggestions::forReading($reading) : ChatSuggestions::starter(),
+        ];
     }
 
     /**
@@ -142,6 +196,9 @@ class ChatController extends Controller
             ? ChatSuggestions::isAwaitingAnswer((string) $lastAssistant->content)
             : false;
 
+        // 💬 (2026-09-21) ห้องที่คุยต่อจากไพ่ = ชุดถามต่อจากไพ่ (ตรรกะเดียวกับหน้าแชทของเว็บ)
+        $reading = ReadingChatContext::readingOf($conversation);
+
         return response()->json([
             'data' => array_merge($this->convoPayload($conversation), [
                 'balance'     => (float) $this->wallet->balance($user),
@@ -152,7 +209,9 @@ class ChatController extends Controller
                 'awaiting'    => $awaiting,
                 'suggestions' => $awaiting
                     ? []
-                    : ($hasUserMessage ? ChatSuggestions::followUp() : ChatSuggestions::starter()),
+                    : ($reading
+                        ? ChatSuggestions::forReading($reading)
+                        : ($hasUserMessage ? ChatSuggestions::followUp() : ChatSuggestions::starter())),
             ]),
         ]);
     }
@@ -219,7 +278,7 @@ class ChatController extends Controller
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
         $topic    = $kind === 'offer' ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null;
-        $offers   = $topic !== null ? ChatOffers::for($topic) : [];
+        $offers   = $topic !== null ? ChatOffers::for($topic, $user) : [];
 
         // Debit only AFTER a successful reply — fairer when upstream blips. And
         // NEVER for a degraded placeholder (no AI key + upstream unreachable):
@@ -302,31 +361,38 @@ class ChatController extends Controller
 
     private function dispatchToUpstream($user, ChatConversation $conversation, string $message): array
     {
+        // 💬 (2026-09-21) ห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว (reading_id) — บริบทสร้างใหม่จากฐานข้อมูลและส่งไปทุกรอบ
+        //    ห้องฝั่ง Thaiprompt หมดอายุ (cache ของเรา 6 ชม.) เปิดใหม่เมื่อไรแม่หมอก็ยังเห็นคำพยากรณ์ครบ
+        $reading  = ReadingChatContext::readingOf($conversation);
+        $context  = $reading ? ReadingChatContext::for($reading) : null;
+        $grounded = $reading !== null;
+
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นแพ็กเกจเลย ไม่ถาม AI
-        if (($topic = ChatReadingIntent::detect($message)) !== null) {
+        //    ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว ("จากไพ่ชุดนี้ ดวงความรักเป็นยังไง" ต้องได้คำตอบ ไม่ใช่ใบเสนอราคา)
+        if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
             return ['reply' => ChatOffers::invite($topic), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
-        $sessionId = $this->loadUpstreamSession($conversation->id) ?? $this->openUpstreamSession($user, $conversation->id);
-        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message) : null;
+        $sessionId = $this->loadUpstreamSession($conversation->id) ?? $this->openUpstreamSession($user, $conversation->id, $context);
+        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message, $grounded, $context) : null;
 
         // Stale upstream session (6h TTL) — refresh once then retry.
         if ($out === null && $sessionId) {
             $this->forgetUpstreamSession($conversation->id);
-            $newSession = $this->openUpstreamSession($user, $conversation->id);
-            $out = $newSession ? $this->upstream->send($user, $newSession, $message) : null;
+            $newSession = $this->openUpstreamSession($user, $conversation->id, $context);
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context) : null;
         }
 
         if ($out === null) {
-            return $this->degradedFallback($message);
+            return $this->degradedFallback($message, $context);
         }
 
         return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
     }
 
-    private function openUpstreamSession($user, int $convoId): ?string
+    private function openUpstreamSession($user, int $convoId, ?string $context = null): ?string
     {
-        $session = $this->upstream->start($user)['session'] ?? null;
+        $session = $this->upstream->start($user, $context)['session'] ?? null;
         if ($session) {
             $this->cacheUpstreamSession($convoId, $session);
         }
@@ -338,11 +404,12 @@ class ChatController extends Controller
      * Local AiOracle fallback. Marked "degraded" only when there's no Gemini
      * key either — i.e. the reply is a placeholder, not a real answer — so the
      * caller can skip the charge (parity with the web ChatController).
+     * 💬 (2026-09-21) ห้องที่ผูกกับไพ่ — ทางสำรองก็ตอบจากคำพยากรณ์เดิม
      */
-    private function degradedFallback(string $message): array
+    private function degradedFallback(string $message, ?string $context = null): array
     {
         return [
-            'reply'    => $this->oracle->chat([(object) ['role' => 'user', 'content' => $message]]),
+            'reply'    => $this->oracle->chat([(object) ['role' => 'user', 'content' => $message]], $context),
             'degraded' => !$this->oracle->isConfigured(),
         ];
     }
@@ -362,6 +429,8 @@ class ChatController extends Controller
         return [
             'id'         => $convo->id,
             'title'      => $convo->title,
+            // 💬 (2026-09-21) ห้องที่คุยต่อจากคำพยากรณ์ไหน (null = ห้องคุยทั่วไป)
+            'reading_id' => $convo->reading_id,
             'created_at' => optional($convo->created_at)->toIso8601String(),
             'updated_at' => optional($convo->updated_at)->toIso8601String(),
             'messages'   => $convo->messages
@@ -379,7 +448,7 @@ class ChatController extends Controller
             'created_at'  => optional($m->created_at)->toIso8601String(),
             // ข้อความที่แม่หมอยื่นแพ็กเกจเปิดไพ่ — ราคาอ่านสด ณ ตอนนี้ ไม่ใช่ราคาตอนที่คุย
             'offer_topic' => $m->offer_topic,
-            'offers'      => $m->offer_topic ? ChatOffers::for($m->offer_topic) : [],
+            'offers'      => $m->offer_topic ? ChatOffers::for($m->offer_topic, request()->user()) : [],
         ];
     }
 

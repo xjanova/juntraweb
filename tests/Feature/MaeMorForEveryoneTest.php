@@ -7,6 +7,7 @@ use App\Models\ChatMessage;
 use App\Models\Reading;
 use App\Models\Setting;
 use App\Models\TarotCard;
+use App\Models\TarotReadingCard;
 use App\Models\User;
 use App\Services\Wallet\WalletService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -199,17 +200,29 @@ class MaeMorForEveryoneTest extends TestCase
         $this->freeChat();
         $user = $this->phoneMember();
 
+        // 💬 (2026-09-21) ห้องผูกกับไพ่ในฐานข้อมูล (reading_id) — เดิมเป็นแค่ป้ายใน session เบราว์เซอร์
+        $reading = Reading::create([
+            'user_id' => $user->id, 'session_token' => 'reading-tok', 'type' => 'tarot_single',
+            'result' => 'ไพ่คนโง่ตั้งตรง — ลูกกำลังจะได้เริ่มต้นสิ่งใหม่ค่ะ',
+        ]);
+        TarotReadingCard::create([
+            'reading_id' => $reading->id, 'tarot_card_id' => $this->seedDeck()->id,
+            'position' => 1, 'position_label' => 'คำตอบของไพ่', 'reversed' => false,
+        ]);
+        ChatConversation::create(['user_id' => $user->id, 'session_token' => 'room-tok', 'reading_id' => $reading->id]);
+
         $this->actingAs($user)
             ->withSession([
-                'chat_primed_reading' => 1,
-                'chat_reading_primer_at' => time(),
+                'chat_token' => 'room-tok',
                 'thaiprompt_chat_session' => 'srv:' . self::SESSION,
             ])
             ->postJson(route('chat.send'), ['message' => 'จากไพ่ชุดนี้ ดวงความรักของหนูเป็นยังไงคะ'])
             ->assertOk()
             ->assertJsonPath('kind', 'reply');
 
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/server/chat/send') && (int) $r['grounded'] === 1);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/server/chat/send')
+            && (int) $r['grounded'] === 1
+            && str_contains((string) $r['context'], 'ไพ่คนโง่ตั้งตรง'));
     }
 
     /* ─────────────────────────── แชทในแอพ ─────────────────────────── */

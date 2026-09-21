@@ -3,7 +3,7 @@
 
 @php
   // Compact meta for the Alpine submit-label lookup.
-  $spreadJs = collect($spreads)->mapWithKeys(fn ($s) => [$s['key'] => ['count' => $s['count'], 'name' => $s['name_th']]]);
+  $spreadJs = collect($spreads)->mapWithKeys(fn ($s) => [$s['key'] => ['count' => $s['count'], 'name' => $s['name_th'], 'locked' => $s['locked_until'] ?? null]]);
 
   // Per-spread line-art glyph (inherits `currentColor` → gold medallion).
   // Keyed by spread key so adding a spread degrades gracefully to a default.
@@ -242,6 +242,16 @@
 
           <div class="spread-tagline">{{ $s['tagline'] }}</div>
 
+          {{-- ข้อห้ามเปิดซ้ำของครูบาอาจารย์ (ReadingCooldown) — บอกก่อนเลือกไพ่ ไม่ใช่หลังเลือกเสร็จ --}}
+          @if (! empty($s['locked_until']))
+            <div class="spread-locked" style="font-size:12.5px;line-height:1.6;color:var(--ink-dim);border-top:1px dashed var(--line, rgba(255,255,255,.15));padding-top:10px">
+              ครูบาอาจารย์ห้ามเปิดซ้ำ — เปิดได้อีกครั้ง {{ $s['locked_until'] }}
+              @if (! empty($s['locked_reading']))
+                · <a href="{{ route('tarot.show', $s['locked_reading']) }}" style="color:var(--gold, inherit);text-decoration:underline">ดูคำทำนายเดิม</a>
+              @endif
+            </div>
+          @endif
+
           <div class="spread-foot">
             <span class="spread-foot__est">{{ $s['count'] }} ใบ · ~{{ $s['est'] }}</span>
             <span class="spread-pick">
@@ -254,8 +264,8 @@
     </div>
 
     <div class="spread-cta">
-      <button class="btn btn-primary" style="width:100%;justify-content:center" type="submit">
-        <span x-text="meta[spread] ? `กางไพ่ ${meta[spread].count} ใบ — ${meta[spread].name} →` : 'เลือกไพ่ของคุณ →'"></span>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" type="submit" :disabled="!!meta[spread]?.locked">
+        <span x-text="meta[spread]?.locked ? `เปิด${meta[spread].name}ได้อีกครั้ง ${meta[spread].locked}` : (meta[spread] ? `กางไพ่ ${meta[spread].count} ใบ — ${meta[spread].name} →` : 'เลือกไพ่ของคุณ →')"></span>
       </button>
       <div style="margin-top:14px;font-size:12px;color:var(--ink-dim);letter-spacing:.04em;line-height:1.7">
         ระบบจะกางไพ่ทั้ง 78 ใบให้คุณเลือกด้วยตัวเองในขั้นตอนถัดไป ✨<br>

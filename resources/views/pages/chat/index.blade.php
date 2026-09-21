@@ -22,7 +22,7 @@
           $lastAsked = $m->content;
       }
       $offers = (! $readonly && $m->role === 'assistant' && $m->offer_topic)
-          ? \App\Services\Chat\ChatOffers::for($m->offer_topic)
+          ? \App\Services\Chat\ChatOffers::for($m->offer_topic, auth()->user())
           : [];
 
       return [

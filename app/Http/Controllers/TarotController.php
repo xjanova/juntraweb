@@ -10,8 +10,10 @@ use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\ReadingCooldown;
 use App\Support\TarotSpreads;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -25,14 +27,19 @@ class TarotController extends Controller
         private WalletService $wallet,
     ) {}
 
-    public function index()
+    public function index(Request $request)
     {
         // Decorate each registered spread with its live resolved price so the
         // landing page lists every "รูปแบบการวางไพ่" without hardcoding.
-        $spreads = collect(TarotSpreads::all())->map(function ($meta, $key) {
+        $user = $request->user();
+        $spreads = collect(TarotSpreads::all())->map(function ($meta, $key) use ($user) {
             $meta['key']   = $key;
             $meta['count'] = count($meta['positions']);
             $meta['price'] = Pricing::for(TarotSpreads::priceKey($key));
+            // ข้อห้ามเปิดซ้ำ — บอกบนการ์ดเลยว่าเปิดได้อีกเมื่อไหร่ ไม่ต้องให้ลูกค้าเลือกไพ่ก่อนแล้วค่อยรู้
+            $blocking = ReadingCooldown::blockingReading($user, $key);
+            $meta['locked_until']   = $blocking ? ReadingCooldown::thaiDate(ReadingCooldown::availableAt($blocking, $key)) : null;
+            $meta['locked_reading'] = $blocking?->id;
             return $meta;
         })->values()->all();
 
@@ -51,6 +58,10 @@ class TarotController extends Controller
             'spread'   => ['required', Rule::in(TarotSpreads::keys())],
             'question' => 'nullable|string|max:500',
         ]);
+
+        if ($blocked = $this->cooldownBlock($request, $data['spread'])) {
+            return $blocked;
+        }
 
         $request->session()->put('tarot_pick', [
             'spread'   => $data['spread'],
@@ -73,6 +84,9 @@ class TarotController extends Controller
         }
 
         $key   = $sess['spread'];
+        if ($blocked = $this->cooldownBlock($request, $key)) {
+            return $blocked;
+        }
         $cards = TarotCard::where('active', true)
             ->inRandomOrder()
             ->get(['id', 'slug', 'name_th']);
@@ -167,6 +181,41 @@ class TarotController extends Controller
                 ->with('status', 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่');
         }
 
+        // ข้อห้ามเปิดซ้ำ — ตรวจใต้ล็อกต่อ "ลูกค้า × แพ็กเกจ" จนสร้างรายการเสร็จ: สองแท็บที่กดพร้อมกัน
+        // (คนละ _idem จึงผ่านด่านกันกดซ้ำทั้งคู่) ต้องไม่ผ่านด่านนี้ไปทั้งคู่
+        $key = TarotSpreads::keyFromType($type);
+        $openLock = null;
+        if ($key !== null && ReadingCooldown::days($key) > 0) {
+            $openLock = Cache::lock("tarot-open:{$user->id}:{$key}", 30);
+            if (! $openLock->get()) {
+                return redirect()->route('tarot.index')
+                    ->with('status', 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่');
+            }
+        }
+
+        try {
+            if ($key !== null && ($blocked = $this->cooldownBlock($request, $key))) {
+                return $blocked;
+            }
+
+            return $this->chargeAndCreate($request, $user, $type, $cards, $positions);
+        } finally {
+            $openLock?->release();
+        }
+    }
+
+    /** ข้อห้ามเปิดซ้ำ — redirect พร้อมเหตุผล หรือ null ถ้าเปิดได้ */
+    private function cooldownBlock(Request $request, string $key)
+    {
+        $blocking = ReadingCooldown::blockingReading($request->user(), $key);
+
+        return $blocking
+            ? redirect()->route('tarot.index')->with('status', ReadingCooldown::message($blocking, $key))
+            : null;
+    }
+
+    private function chargeAndCreate(Request $request, $user, string $type, $cards, array $positions)
+    {
         $cost = Pricing::for($type);
 
         // ระบบทำนายจริงต่อไม่ได้เลย (ไม่ได้ตั้ง client ของเว็บ และลูกค้าไม่มี token) → หยุดก่อนหักเงิน

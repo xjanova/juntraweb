@@ -20,6 +20,8 @@ use Tests\TestCase;
  *   - Only the reading's OWNER may consult it (privacy / IDOR).
  *   - Priming แม่หมอ with the drawn cards NEVER debits the wallet — the charge
  *     happens later, per follow-up message, on the normal /chat/send path.
+ *   - 💬 (2026-09-21) the room is bound to the reading in the DB (reading_id) —
+ *     the context itself is covered by ReadingChatContextTest.
  *   - Owners who haven't linked Facebook/LINE are bounced to /chat (which
  *     renders the connect CTA) rather than silently entering a dead chat.
  */
@@ -94,10 +96,13 @@ class TarotConsultFromReadingTest extends TestCase
         $resp->assertRedirect(route('chat.index'));
         $this->assertSame(100.0, app(WalletService::class)->balance($owner), 'priming must not debit the wallet');
         $resp->assertSessionHas('chat_autosend', 'เรื่องงานเป็นอย่างไร');
-        $resp->assertSessionHas('chat_primed_reading', $reading->id);
 
-        // A grounded greeting (the priming reply) is stored, ready to show.
+        // 💬 (2026-09-21) ห้องผูกกับไพ่ในฐานข้อมูล (ไม่ใช่ session เบราว์เซอร์) และเป็นห้องสดของ session นี้
         $convo = ChatConversation::where('user_id', $owner->id)->firstOrFail();
+        $this->assertSame($reading->id, $convo->reading_id);
+        $resp->assertSessionHas('chat_token', $convo->session_token);
+
+        // A grounded greeting is stored, ready to show.
         $this->assertSame(1, $convo->messages()->where('role', 'assistant')->count());
     }
 
@@ -113,11 +118,11 @@ class TarotConsultFromReadingTest extends TestCase
 
         $this->actingAs($owner)
             ->post("/chat/from-reading/{$reading->id}", ['question' => 'x'])
-            ->assertRedirect(route('chat.index'))
-            ->assertSessionHas('chat_primed_reading', $reading->id);
+            ->assertRedirect(route('chat.index'));
 
         $this->assertSame(100.0, app(WalletService::class)->balance($owner), 'priming must not debit the wallet');
         $convo = ChatConversation::where('user_id', $owner->id)->firstOrFail();
+        $this->assertSame($reading->id, $convo->reading_id);
         $this->assertSame(1, $convo->messages()->where('role', 'assistant')->count());
     }
 }

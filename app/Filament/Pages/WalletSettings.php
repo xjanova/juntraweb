@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\Setting;
 use App\Support\FreeReadingPolicy;
+use App\Support\ReadingCooldown;
 use App\Support\ServiceGate;
 use App\Support\TarotSpreads;
 use Filament\Forms\Components\Grid;
@@ -69,6 +70,7 @@ class WalletSettings extends Page implements HasForms
             $feature = "tarot_{$k}";
             $fill["pricing_{$feature}"] = Setting::get("pricing_{$feature}", $cfg[$feature] ?? 0);
             $fill["charge_{$feature}"] = Setting::get("pricing_{$feature}_enabled", '1') === '1';
+            $fill["cooldown_{$k}"] = ReadingCooldown::days($k);
             if (! empty($meta['visible_setting'])) {
                 $fill["visible_{$k}"] = Setting::get($meta['visible_setting']) === '1';
             }
@@ -92,7 +94,7 @@ class WalletSettings extends Page implements HasForms
     {
         // Tarot rows: toggle + price for every spread in the registry.
         $tarotRows = collect(TarotSpreads::registry())->flatMap(fn ($meta, $k) => array_filter([
-            $this->chargeRow("tarot_{$k}", $meta['name_th'].' ('.count($meta['positions']).' ใบ)', (float) config("pricing.tarot_{$k}", 0)),
+            $this->chargeRow("tarot_{$k}", $meta['name_th'].' ('.count($meta['positions']).' ใบ)', (float) config("pricing.tarot_{$k}", 0), $k),
             // แพ็กเกจใหม่ซ่อนไว้จนเจ้าของอนุมัติคำทำนายตัวอย่าง — สวิตช์เดียวเปิดขายทั้งเว็บ แชท และแอพ
             ! empty($meta['visible_setting'])
                 ? Toggle::make("visible_{$k}")
@@ -117,7 +119,7 @@ class WalletSettings extends Page implements HasForms
                 ]),
 
             Section::make('ไพ่ยิปซี')
-                ->description('เปิด/ปิดการเก็บเงินและตั้งราคาต่อการเปิดไพ่แต่ละรูปแบบ')
+                ->description('เปิด/ปิดการเก็บเงิน ตั้งราคา และข้อห้ามเปิดซ้ำของครูบาอาจารย์ (ลูกค้าคนเดิมเปิดแพ็กเกจเดิมซ้ำไม่ได้จนครบจำนวนวัน · 0 = ไม่จำกัด) ของไพ่แต่ละรูปแบบ')
                 ->schema($tarotRows),
 
             Section::make('บริการอื่น')
@@ -185,22 +187,33 @@ class WalletSettings extends Page implements HasForms
         ])->statePath('data');
     }
 
-    /** One "[toggle: charge?] [price]" row for a billable feature. */
-    private function chargeRow(string $feature, string $label, float $default): Grid
+    /**
+     * One "[toggle: charge?] [price]" row for a billable feature — plus
+     * "[ห้ามเปิดซ้ำภายใน N วัน]" when it is a tarot spread ($spreadKey).
+     */
+    private function chargeRow(string $feature, string $label, float $default, ?string $spreadKey = null): Grid
     {
-        return Grid::make(12)->schema([
+        return Grid::make(12)->schema(array_values(array_filter([
             Toggle::make("charge_{$feature}")
                 ->label($label)
                 ->helperText('เปิด = เก็บเงิน · ปิด = ฟรี')
                 ->inline(false)
                 ->onColor('success')
-                ->columnSpan(['default' => 12, 'md' => 8]),
+                ->columnSpan(['default' => 12, 'md' => $spreadKey ? 6 : 8]),
             TextInput::make("pricing_{$feature}")
                 ->label('ราคา (฿)')
                 ->prefix('฿')->numeric()->minValue(0)->maxValue(100000)
                 ->default($default)
-                ->columnSpan(['default' => 12, 'md' => 4]),
-        ]);
+                ->columnSpan(['default' => 12, 'md' => $spreadKey ? 3 : 4]),
+            $spreadKey
+                ? TextInput::make("cooldown_{$spreadKey}")
+                    ->label('ห้ามเปิดซ้ำภายใน (วัน)')
+                    ->helperText('0 = ไม่จำกัด')
+                    ->suffix('วัน')->numeric()->integer()->minValue(0)->maxValue(3650)
+                    ->default(0)
+                    ->columnSpan(['default' => 12, 'md' => 3])
+                : null,
+        ])));
     }
 
     public function save(): void
@@ -214,6 +227,12 @@ class WalletSettings extends Page implements HasForms
                 $spread = TarotSpreads::get(substr($key, strlen('visible_')));
                 if (! empty($spread['visible_setting'])) {
                     Setting::put($spread['visible_setting'], $value ? '1' : '0', 'pricing');
+                }
+            } elseif (str_starts_with($key, 'cooldown_')) {
+                // cooldown_<spread> → tarot_<spread>_cooldown_days (ReadingCooldown อ่านคีย์นี้ทั้งเว็บ แอพ และแชท)
+                $spread = substr($key, strlen('cooldown_'));
+                if (TarotSpreads::has($spread)) {
+                    Setting::put(ReadingCooldown::settingKey($spread), (string) max(0, (int) $value), 'tarot');
                 }
             } elseif (str_starts_with($key, 'closed_')) {
                 $svc = substr($key, strlen('closed_'));

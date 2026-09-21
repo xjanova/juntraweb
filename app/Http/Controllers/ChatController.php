@@ -11,13 +11,16 @@ use App\Services\AiOracle;
 use App\Services\Chat\ChatOffers;
 use App\Services\Chat\ChatReadingIntent;
 use App\Services\Chat\MaeMorUpstream;
+use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\ChatSuggestions;
 use App\Support\Markdown;
 use App\Support\Pricing;
 use App\Support\TarotSpreads;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -86,7 +89,8 @@ class ChatController extends Controller
         $conversation->load('messages');
 
         // เข้าแชทต่อจากการเปิดไพ่หรือเปล่า — ใช้เลือกชุดปุ่มคำถามลัด
-        $grounded = $request->session()->get('chat_primed_reading') !== null;
+        // 💬 (2026-09-21) อ่านจากห้อง (chat_conversations.reading_id) ไม่ใช่ session เบราว์เซอร์อีกต่อไป
+        $reading = ReadingChatContext::readingOf($conversation);
 
         return view('pages.chat.index', [
             'conversation' => $conversation,
@@ -97,7 +101,7 @@ class ChatController extends Controller
             'dailyLimit'   => $dailyLimit,
             'dailyLeft'    => $dailyLeft ?? 0,
             'readonly'     => false, // live chat room — input is active
-            'suggestions'  => $this->suggestionsFor($conversation, $grounded),
+            'suggestions'  => $this->suggestionsFor($conversation, $reading),
             'topics'       => ChatSuggestions::topics(),
             // แม่หมอกำลังถามกลับอยู่ไหม — ถ้าใช่ UI จะยุบแถบปุ่มคำถามลัด
             // เพื่อไม่ให้ผู้ใช้กดแล้วบทสนทนาหลุดโฟลว์ที่แม่หมอกำลังเดินอยู่
@@ -145,11 +149,67 @@ class ChatController extends Controller
         );
     }
 
-    /** ชุดปุ่มคำถามลัดที่เหมาะกับสถานะของบทสนทนาตอนนี้ */
-    private function suggestionsFor(ChatConversation $conversation, bool $grounded): array
+    /**
+     * 💬 (2026-09-21) ห้องของไพ่ชุดนี้ — คืน [ห้อง, เพิ่งผูกกับไพ่ไหม] แล้วตั้งให้เป็นห้องสดของ session นี้
+     *
+     *   1. เคยคุยเรื่องไพ่ชุดนี้แล้ว (กลับมาถามต่อวันหลัง / กดซ้ำ) → ห้องเดิม
+     *   2. ห้องสดยังไม่ได้คุยอะไร (มีแค่คำทักทาย) และยังไม่ผูกไพ่ → ผูกกับไพ่ชุดนี้ ไม่ทิ้งห้องเปล่าไว้ในประวัติ
+     *   3. ห้องสดกำลังคุยเรื่องอื่นอยู่ → เปิดห้องใหม่ (ห้องเดิมยังอยู่ในประวัติแชท)
+     *
+     * ล็อกต่อผู้ใช้กันกดเบิ้ล: สองคำขอพร้อมกันต้องได้ห้องเดียว คำทักทายเดียว
+     *
+     * @return array{0:ChatConversation,1:bool}
+     */
+    private function conversationForReading(Request $request, $user, Reading $reading): array
     {
-        if ($grounded) {
-            return ChatSuggestions::forReading();
+        $bind = function () use ($request, $user, $reading): array {
+            $room = ChatConversation::where('user_id', $user->id)
+                ->where('reading_id', $reading->id)
+                ->latest('id')
+                ->first();
+            if ($room) {
+                return [$room, false];
+            }
+
+            $live = $this->conversationFor($request, $user);
+            if ($live->reading_id === null && ! $live->messages()->where('role', 'user')->exists()) {
+                $live->update(['reading_id' => $reading->id, 'title' => ReadingChatContext::title($reading)]);
+                $room = $live;
+            } else {
+                $room = ChatConversation::create([
+                    'user_id'       => $user->id,
+                    'session_token' => (string) Str::uuid(),
+                    'reading_id'    => $reading->id,
+                    'title'         => ReadingChatContext::title($reading),
+                ]);
+            }
+
+            // คำทักทายประกอบในเครื่อง — ไม่ถาม AI ไม่คิดเงิน (เดิมเสียหนึ่งรอบไปกับการ prime)
+            $room->messages()->create([
+                'role'    => 'assistant',
+                'content' => ReadingChatContext::greeting($reading),
+            ]);
+
+            return [$room, true];
+        };
+
+        try {
+            [$room, $fresh] = Cache::lock("chat:reading-room:{$user->id}", 10)->block(5, $bind);
+        } catch (LockTimeoutException) {
+            // อีกคำขอถือล็อกนานผิดปกติ — ทำต่อเองดีกว่าให้ลูกค้าเห็นหน้า error (อย่างแย่ได้ห้องซ้ำ ไม่เสียข้อมูล)
+            [$room, $fresh] = $bind();
+        }
+
+        $request->session()->put('chat_token', $room->session_token);
+
+        return [$room, $fresh];
+    }
+
+    /** ชุดปุ่มคำถามลัดที่เหมาะกับสถานะของบทสนทนาตอนนี้ */
+    private function suggestionsFor(ChatConversation $conversation, ?Reading $reading): array
+    {
+        if ($reading !== null) {
+            return ChatSuggestions::forReading($reading);
         }
 
         $hasUserMessage = $conversation->relationLoaded('messages')
@@ -222,11 +282,11 @@ class ChatController extends Controller
             'content' => $data['message'],
         ]);
 
-        $dispatch = $this->dispatchToUpstream($request, $user, $data['message']);
+        $dispatch = $this->dispatchToUpstream($request, $user, $conversation, $data['message']);
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
-        $offers   = $kind === 'offer' ? ChatOffers::for((string) ($dispatch['offer_topic'] ?? 'general')) : [];
+        $offers   = $kind === 'offer' ? ChatOffers::for((string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
 
         // Debit only AFTER a successful reply — fairer to the user when upstream
         // blips. And NEVER charge for a degraded placeholder (no AI key AND
@@ -309,15 +369,19 @@ class ChatController extends Controller
     }
 
     /**
-     * Enter the live chat pre-grounded on a finished tarot reading.
+     * Enter the live chat grounded on a finished tarot reading.
      *
      * The user has already paid for + opened this spread; now they can ask
-     * แม่หมอ specific follow-ups and she answers reading the *exact* cards
-     * they drew (not a blank-slate chat). We do this by priming a fresh
-     * upstream session with a hidden context primer (card × position ×
-     * meaning + the interpretation) — that priming reply becomes a grounded
-     * greeting. Every follow-up question then rides the normal /chat/send
-     * path, so billing + the FB/LINE gate are exactly the existing ones.
+     * แม่หมอ specific follow-ups and she answers from the *exact* cards and
+     * the interpretation they received (not a blank-slate chat). Every
+     * follow-up question rides the normal /chat/send path, so billing + the
+     * gate are exactly the existing ones.
+     *
+     * 💬 (2026-09-21) เดิม "prime" แม่หมอด้วยข้อความแชทลับ ซึ่งถูกตัดที่ 1,000 ตัว (12 เดือนไปถึงแค่เดือน 1-4
+     * ไม่มีเนื้อคำพยากรณ์เลย) กินรอบสนทนาหนึ่งรอบ เลื่อนหลุดประวัติหลัง ~5 คำถาม และลิงก์ห้อง↔ไพ่อยู่ใน
+     * session เบราว์เซอร์ (หมดอายุ ~2 ชม.) — ตอนนี้ห้องผูกกับไพ่ในฐานข้อมูล (reading_id) และไพ่ทุกใบ +
+     * คำพยากรณ์ฉบับเต็มไปเป็น `context` ใน system message ของแม่หมอ (ReadingChatContext)
+     * กลับมากดถามต่อวันหลังก็เข้าห้องเดิม บริบทสร้างใหม่จากฐานข้อมูลเสมอ
      */
     public function fromReading(Request $request, Reading $reading)
     {
@@ -338,10 +402,15 @@ class ChatController extends Controller
             return redirect()->route('chat.index')->with('status', $gate['reason']);
         }
 
-        // ครบโควตาวันนี้แล้วอย่าเพิ่ง prime — การ prime ยิง upstream หนึ่งครั้งเต็ม ๆ
-        // ถ้าปล่อยผ่านผู้ใช้จะเสียคำถามแรกฟรี ๆ แล้วโดนเด้ง 429 ทันทีที่หน้าแชท
+        // ครบโควตาวันนี้แล้ว — คำถามแรกที่ส่งอัตโนมัติจะโดนเด้ง 429 ทันทีที่หน้าแชท บอกตรงนี้เลยดีกว่า
         if (ChatPolicy::exhausted($user)) {
             return redirect()->route('chat.index')->with('status', ChatPolicy::limitMessage());
+        }
+
+        // 💬 (2026-09-21) แม่หมอยังอ่านไม่เสร็จ / อ่านไม่สำเร็จ (คืนเงินแล้ว) = ยังไม่มีคำพยากรณ์ให้คุยต่อ
+        //    (หน้าผลซ่อนปุ่มนี้อยู่แล้ว — กันฟอร์มเก่าที่ค้างอยู่ในแท็บ)
+        if (! ReadingChatContext::usable($reading)) {
+            return redirect()->route('tarot.show', $reading);
         }
 
         $question = trim((string) $request->input('question', ''));
@@ -349,20 +418,16 @@ class ChatController extends Controller
             $question = mb_substr($question, 0, 2000);
         }
 
-        // Live chat conversation — same session-token model as index().
-        $conversation = $this->conversationFor($request, $user);
+        $previousToken = $request->session()->get('chat_token');
+        [$conversation, $fresh] = $this->conversationForReading($request, $user, $reading);
 
-        // Prime แม่หมอ with this reading's cards — but only ONCE per reading, so
-        // a refresh / double-tap can't re-prime (a wasted upstream call) or
-        // stack duplicate greetings in the thread.
-        if ($request->session()->get('chat_primed_reading') !== $reading->id) {
-            $reading->load('tarotCards.card');
-            $greeting = $this->primeReadingContext($request, $user, $reading);
-            $conversation->messages()->create([
-                'role'    => 'assistant',
-                'content' => $greeting,
-            ]);
-            $request->session()->put('chat_primed_reading', $reading->id);
+        // ห้อง Thaiprompt ของห้องนี้: เพิ่งผูกไพ่ / สลับมาจากห้องอื่น / ยังไม่มี → เปิดใหม่พร้อมบริบทเต็ม
+        // กดซ้ำ/รีเฟรชในห้องเดิม → ใช้ห้องเดิมต่อ (ประวัติฝั่งแม่หมอไม่หาย) · เปิดห้องไม่ถาม AI จึงไม่เสียรอบ
+        $switched = $previousToken !== $conversation->session_token;
+        if ($fresh || $switched || ! $request->session()->has('thaiprompt_chat_session')) {
+            // ลืมห้องเก่าก่อนเสมอ — เปิดใหม่ไม่ติด ข้อความถัดไปจะเปิดเองพร้อมบริบท ไม่ไปคุยในห้องของเรื่องอื่น
+            $request->session()->forget('thaiprompt_chat_session');
+            $this->openUpstreamSession($request, $user, ReadingChatContext::for($reading));
         }
 
         // Carry the first question into /chat so it auto-sends there (charged
@@ -411,11 +476,17 @@ class ChatController extends Controller
      * fall back to the local AiOracle — juntra's chat NEVER breaks, even
      * when upstream is down.
      */
-    private function dispatchToUpstream(Request $request, $user, string $message): array
+    private function dispatchToUpstream(Request $request, $user, ChatConversation $conversation, string $message): array
     {
+        // 💬 (2026-09-21) ห้องที่ผูกกับไพ่ที่จ่ายแล้ว — อ่านจากฐานข้อมูลทุกครั้ง (เดิมอ่านจาก session เบราว์เซอร์
+        //    และมีอายุ 24 ชม.) · บริบท = ไพ่ทุกใบ + คำพยากรณ์ฉบับเต็ม ส่งไปทุกรอบ ห้องฝั่ง Thaiprompt หมดอายุ
+        //    หรือ cache ถูกล้างเมื่อไร แม่หมอก็ยังเห็นคำพยากรณ์ครบ
+        $reading  = ReadingChatContext::readingOf($conversation);
+        $context  = $reading ? ReadingChatContext::for($reading) : null;
+        $grounded = $reading !== null;
+
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย
-        //    ไม่ส่งไปให้ AI ทำนายฟรี · ยกเว้นห้องที่เพิ่งเปิดไพ่มา (ถามต่อจากไพ่ที่จ่ายแล้ว = คุยได้)
-        $grounded = $this->groundedOnReading($request);
+        //    ไม่ส่งไปให้ AI ทำนายฟรี · ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว (ถามเรื่องไพ่ชุดนั้น = คุยได้)
         if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
             return ['reply' => ChatOffers::invite($topic), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
@@ -423,10 +494,10 @@ class ChatController extends Controller
         // Re-use the upstream session id across messages for context continuity.
         $sessionId = $request->session()->get('thaiprompt_chat_session');
         if (!$sessionId) {
-            $sessionId = $this->openUpstreamSession($request, $user);
+            $sessionId = $this->openUpstreamSession($request, $user, $context);
         }
 
-        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message, $grounded) : null;
+        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message, $grounded, $context) : null;
 
         if ($out === null && $sessionId) {
             // Possible stale upstream session (6h cache TTL on Thaiprompt) —
@@ -435,40 +506,32 @@ class ChatController extends Controller
                 'user_id' => $user->id,
             ]);
             $request->session()->forget('thaiprompt_chat_session');
-            $newSession = $this->openUpstreamSession($request, $user);
-            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded) : null;
+            $newSession = $this->openUpstreamSession($request, $user, $context);
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context) : null;
         }
 
         if ($out === null) {
             Log::warning('แม่หมอ upstream still silent after retry — falling back to AiOracle', [
                 'user_id' => $user->id,
             ]);
-            return $this->degradedFallback($message);
+            return $this->degradedFallback($message, $context);
         }
 
         return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
     }
 
-    /** ห้องนี้เพิ่งเปิดไพ่มา (ภายใน 24 ชม.) — คำถามต่อจากไพ่ที่จ่ายแล้วคุยได้ ไม่ต้องยื่นแพ็กเกจซ้ำ */
-    private function groundedOnReading(Request $request): bool
-    {
-        $at = (int) $request->session()->get('chat_reading_primer_at', 0);
-
-        return $request->session()->get('chat_primed_reading') !== null && $at > 0 && (time() - $at) < 86400;
-    }
-
     /**
-     * เปิด upstream session ใหม่ — และถ้าบทสนทนานี้ถูก prime ด้วยไพ่ไว้
-     * ให้ป้อนบริบทไพ่ซ้ำก่อนเสมอ
+     * เปิด upstream session ใหม่ — ห้องที่ผูกกับไพ่ได้บริบทเต็มไปด้วยตั้งแต่เปิด
      *
      * upstream หมุน session เองทุก 6 ชม. (TTL) เดิมเมื่อ session หมุนแล้ว
      * เราเปิดใหม่ "เปล่า ๆ" บริบทไพ่จึงหายเงียบ ๆ — ผู้ใช้ยังเห็นหน้าจอเดิม
      * ที่ชวนถามต่อจากไพ่ แต่แม่หมอตอบเหมือนไม่เคยเห็นไพ่ชุดนั้นเลย
-     * (อาการนี้ยิ่งเด่นเมื่อผู้ใช้กดปุ่มคำถามลัดที่อ้างอิงไพ่โดยตรง)
+     * 💬 (2026-09-21) บริบทไม่ใช่ข้อความ primer ที่ต้องยิงซ้ำ (และเงียบหายได้ถ้ายิงไม่ผ่าน) อีกต่อไป
+     * แต่เป็นฟิลด์ `context` ของการเปิดห้อง ซึ่งผู้เรียกสร้างใหม่จากฐานข้อมูล (reading_id)
      */
-    private function openUpstreamSession(Request $request, $user): ?string
+    private function openUpstreamSession(Request $request, $user, ?string $context = null): ?string
     {
-        $start     = $this->upstream->start($user);
+        $start     = $this->upstream->start($user, $context);
         $sessionId = $start['session'] ?? null;
         if (! $sessionId) {
             return null;
@@ -476,93 +539,7 @@ class ChatController extends Controller
 
         $request->session()->put('thaiprompt_chat_session', $sessionId);
 
-        $primer = $request->session()->get('chat_reading_primer');
-        $primedAt = (int) $request->session()->get('chat_reading_primer_at', 0);
-
-        // จำกัดอายุไว้ 24 ชม. — ไม่งั้นบริบทไพ่จะติดอยู่ใน session ตลอดไป
-        // แล้วผู้ใช้ที่กลับมาคุยเรื่องอื่นอีกหลายวันจะเจอแม่หมออ้างถึงไพ่ชุดเก่า
-        // ที่เขาไม่ได้เปิดวันนี้ (บริบทที่ควรช่วย กลายเป็นบริบทที่หลอน)
-        if (is_string($primer) && $primer !== '' && $primedAt > 0 && (time() - $primedAt) < 86400) {
-            // ป้อนบริบทไพ่เงียบ ๆ — คำตอบของ primer ไม่ถูกแสดงและไม่คิดเงิน
-            $this->upstream->send($user, $sessionId, $primer, true);
-        } elseif ($primer !== null) {
-            $request->session()->forget(['chat_reading_primer', 'chat_reading_primer_at', 'chat_primed_reading']);
-        }
-
         return $sessionId;
-    }
-
-    /**
-     * Open a fresh upstream session and prime it with the drawn cards so every
-     * follow-up question in this session is read against them. Returns the
-     * greeting to show (the AI's priming reply, or a local one if upstream is
-     * unreachable). The priming exchange is NOT charged and NOT shown as a user
-     * bubble — only the greeting surfaces.
-     */
-    private function primeReadingContext(Request $request, $user, Reading $reading): string
-    {
-        $primer = $this->buildReadingPrimer($reading);
-        // เก็บไว้ให้ openUpstreamSession ป้อนซ้ำเมื่อ session หมุน (มีอายุ 24 ชม.)
-        $request->session()->put('chat_reading_primer', $primer);
-        $request->session()->put('chat_reading_primer_at', time());
-
-        $start     = $this->upstream->start($user);
-        $sessionId = $start['session'] ?? null;
-        if ($sessionId) {
-            $request->session()->put('thaiprompt_chat_session', $sessionId);
-            $out = $this->upstream->send($user, $sessionId, $primer, true);
-            if ($out !== null) {
-                return $out['reply'];
-            }
-        }
-
-        return $this->localReadingGreeting($reading);
-    }
-
-    /** Hidden context message that teaches แม่หมอ the exact cards drawn. */
-    private function buildReadingPrimer(Reading $reading): string
-    {
-        $spreadName = TarotSpreads::nameForType($reading->type) ?? 'ไพ่ยิปซี';
-
-        $lines   = [];
-        $lines[] = '[บริบทสำหรับแม่หมอ — ลูกคนนี้เพิ่งเปิดไพ่ยิปซีเสร็จ ขอให้จำไพ่ชุดนี้ไว้ตอบคำถามต่อ ๆ ไป]';
-        $lines[] = 'รูปแบบการวางไพ่: ' . $spreadName;
-        if (! empty($reading->question)) {
-            $lines[] = 'คำถามตั้งต้น: ' . $reading->question;
-        }
-        $lines[] = 'ไพ่ที่เปิดได้ตามตำแหน่ง:';
-        foreach ($reading->tarotCards as $rc) {
-            $dir     = $rc->reversed ? 'กลับหัว' : 'ตั้งตรง';
-            $meaning = $rc->reversed
-                ? ($rc->card->reversed_meaning_th ?? '')
-                : ($rc->card->upright_meaning_th ?? '');
-            $lines[] = sprintf(
-                ' %d. %s: %s (%s)%s',
-                $rc->position,
-                $rc->position_label,
-                $rc->card->name_th ?? '',
-                $dir,
-                $meaning !== '' ? ' — ' . $meaning : '',
-            );
-        }
-        if (! empty($reading->result)) {
-            $lines[] = '';
-            $lines[] = 'คำพยากรณ์ที่แม่หมอให้ไปแล้ว (ย่อ): ' . mb_substr(strip_tags($reading->result), 0, 700);
-        }
-        $lines[] = '';
-        $lines[] = 'โปรดทักทายลูกสั้น ๆ อย่างอบอุ่น บอกว่าแม่หมอเห็นไพ่ชุดนี้แล้ว และชวนให้ลูกถามเจาะจงว่าอยากรู้เรื่องใดเพิ่มเติมจากไพ่ชุดนี้ — ตอบเป็นภาษาไทยล้วน ไม่ต้องอ่านไพ่ซ้ำทั้งหมด';
-
-        return implode("\n", $lines);
-    }
-
-    /** Grounded greeting used when upstream can't be primed (no AI, no charge). */
-    private function localReadingGreeting(Reading $reading): string
-    {
-        $n          = $reading->tarotCards->count();
-        $spreadName = TarotSpreads::nameForType($reading->type) ?? 'ไพ่ยิปซี';
-
-        return "แม่หมอเห็นไพ่ทั้ง {$n} ใบจากการเปิด \"{$spreadName}\" ของลูกแล้วนะคะ ✨ "
-            . 'อยากให้แม่หมอเจาะลึกเรื่องไหนเป็นพิเศษจากไพ่ชุดนี้คะ? พิมพ์คำถามด้านล่างได้เลยค่ะ';
     }
 
     /**
@@ -571,19 +548,20 @@ class ChatController extends Controller
      * caller can skip the charge. When a key IS set the local model gives a
      * genuine reply and we charge normally.
      */
-    private function degradedFallback(string $message): array
+    private function degradedFallback(string $message, ?string $context = null): array
     {
         return [
-            'reply'    => $this->fallback($message),
+            'reply'    => $this->fallback($message, $context),
             'degraded' => !$this->oracle->isConfigured(),
         ];
     }
 
-    private function fallback(string $message): string
+    /** 💬 (2026-09-21) ห้องที่ผูกกับไพ่ — ทางสำรองก็ตอบจากคำพยากรณ์เดิม (เดิมได้แค่ข้อความของลูกค้าอย่างเดียว) */
+    private function fallback(string $message, ?string $context = null): string
     {
         return $this->oracle->chat([
             (object) ['role' => 'user', 'content' => $message],
-        ]);
+        ], $context);
     }
 
     /**

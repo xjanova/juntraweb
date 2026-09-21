@@ -15,6 +15,10 @@ use App\Services\Thaiprompt\JuntraServerClient;
  *
  * รหัสห้องที่เก็บไว้ติดคำนำหน้าบอกทาง ("srv:" / "usr:") เพราะห้องของสองทางใช้แทนกันไม่ได้
  * รหัสเก่าที่ไม่มีคำนำหน้า = ทางเดิม
+ *
+ * 💬 (2026-09-21) `$context` = คำพยากรณ์ที่ห้องนี้คุยต่อ (ReadingChatContext) ไปกับทางที่ 1 เท่านั้น
+ * ทางที่ 2 จงใจไม่ส่ง: endpoint นั้นรับ token ของลูกค้า ถ้ายอมรับบริบทที่ไปอยู่ใน system message
+ * ลูกค้าคนไหนถือ token ก็เขียนคำสั่งระบบของแม่หมอเองได้ (ทางนี้ใช้เฉพาะตอนยังไม่ได้ตั้ง client ของเว็บ)
  */
 class MaeMorUpstream
 {
@@ -24,9 +28,9 @@ class MaeMorUpstream
     ) {}
 
     /** @return array{session:string,greeting:?string}|null  null = คุยกับแม่หมอไม่ได้ตอนนี้ */
-    public function start(User $user): ?array
+    public function start(User $user, ?string $context = null): ?array
     {
-        $res = $this->server->chatStart($user->id);
+        $res = $this->server->chatStart($user->id, $context);
         if ($res['status'] === 'ok' && ! empty($res['data']['session_id'])) {
             return ['session' => 'srv:' . $res['data']['session_id'], 'greeting' => $res['data']['greeting'] ?? null];
         }
@@ -44,12 +48,12 @@ class MaeMorUpstream
     /**
      * @return array{reply:string,kind:string,offer_topic:?string}|null  null = ไม่มีคำตอบจริง (ผู้เรียกลองห้องใหม่/ถอยไปทางสำรอง)
      */
-    public function send(User $user, string $session, string $text, bool $grounded = false): ?array
+    public function send(User $user, string $session, string $text, bool $grounded = false, ?string $context = null): ?array
     {
         [$mode, $sid] = str_contains($session, ':') ? explode(':', $session, 2) : ['usr', $session];
 
         if ($mode === 'srv') {
-            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded);
+            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded, $context);
             $reply = trim((string) ($res['data']['reply'] ?? ''));
             if ($res['status'] !== 'ok' || $reply === '') {
                 return null;

@@ -10,6 +10,7 @@ use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
+use App\Support\ReadingCooldown;
 use App\Support\TarotSpreads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -203,6 +204,39 @@ class HistoryController extends Controller
         if (!$this->guardChargeAuto($request, 'reading')) {
             return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
         }
+
+        // ข้อห้ามเปิดซ้ำ (ReadingCooldown) — ตรวจใต้ล็อกต่อ "ลูกค้า × แพ็กเกจ" จนสร้างรายการเสร็จ
+        // เหมือนเว็บ: สองคำขอพร้อมกัน (คนละ Idempotency-Key) ต้องไม่ผ่านด่านไปทั้งคู่
+        $key = TarotSpreads::keyFromType($data['type']);
+        $openLock = null;
+        if ($key !== null && ReadingCooldown::days($key) > 0) {
+            $openLock = Cache::lock("tarot-open:{$user->id}:{$key}", 30);
+            if (!$openLock->get()) {
+                $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
+                return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
+            }
+        }
+
+        try {
+            if ($key !== null && ($blocking = ReadingCooldown::blockingReading($user, $key))) {
+                $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
+                return response()->json([
+                    'message'      => ReadingCooldown::message($blocking, $key),
+                    'reason_code'  => 'cooldown',
+                    'reading_id'   => $blocking->id,
+                    'available_at' => ReadingCooldown::availableAt($blocking, $key)->toIso8601String(),
+                ], 409);
+            }
+
+            return $this->chargeAndCreate($user, $data, $orderedPicks, $positions);
+        } finally {
+            $openLock?->release();
+        }
+    }
+
+    /** @param  array<int,array<string,mixed>>  $orderedPicks */
+    private function chargeAndCreate($user, array $data, array $orderedPicks, array $positions): JsonResponse
+    {
         $cost = Pricing::for($data['type']);
         $balance = $this->wallet->balance($user);
 

@@ -90,6 +90,10 @@ class TarotPackagesTest extends TestCase
         $this->cast($this->member(), 'year')->assertRedirect();
         $this->assertSame('ก.ย. 2569', $this->sent[0]['months'][0]);
         $this->assertSame('ส.ค. 2570', $this->sent[0]['months'][11]);
+        // the plain prompt (the app's path and the fallbacks) names the same real months
+        $this->assertStringContainsString('ตำแหน่งที่ 1 — เดือนที่ 1 (ก.ย. 2569)', $this->sent[0]['prompt']);
+        $this->assertStringContainsString('ตำแหน่งที่ 12 — เดือนที่ 12 (ส.ค. 2570)', $this->sent[0]['prompt']);
+        $this->assertStringNotContainsString('ด้านบวกของไพ่', $this->sent[0]['prompt'], 'upright is not "the positive side" — an upright Tower is heavy');
 
         // Late in the month the first "month" would be a few days — start next month.
         Carbon::setTestNow(Carbon::parse('2026-09-28 10:00', 'Asia/Bangkok'));

@@ -28,6 +28,8 @@
  *   visible_setting => (optional) Setting key that must be '1' before the spread
  *                 is sold — a new package stays hidden until the owner approves
  *                 sample readings (TarotSpreads filters it out everywhere)
+ *   cooldown_days => (optional) ข้อห้ามของครูบาอาจารย์: ห้ามลูกค้าคนเดิมเปิดแพ็กเกจนี้ซ้ำภายใน N วัน
+ *                 (ค่าเริ่มต้นเท่านั้น — แอดมินปรับได้ที่หลังบ้าน, App\Support\ReadingCooldown)
  *
  * Positions length == the number of cards the user must pick.
  * The per-package reading itself (structure, rules, length) lives on Thaiprompt
@@ -163,6 +165,8 @@ return [
         'price_key' => 'tarot_year',
         'layout'    => 'grid',
         'birth'     => true,
+        // เจ้าของสั่ง (2026-09-21): ไพ่ 12 ใบเปิดได้เดือนละครั้ง
+        'cooldown_days' => 30,
         'est'       => '12 นาที',
         'depth'     => 'สรุปทีละเดือนสั้น ๆ ครบทั้ง 12 เดือน แล้วปิดด้วยภาพรวมทั้งปีและเดือนที่ต้องระวัง/เดือนทอง',
         'positions' => [

@@ -25,6 +25,9 @@ use Illuminate\Support\Facades\Log;
  */
 class JuntraServerClient
 {
+    /** 💬 (2026-09-21) เพดานของฟิลด์ `context` ฝั่ง Thaiprompt (JuntraChatService::MAX_CONTEXT_CHARS) */
+    public const CHAT_CONTEXT_MAX = 16000;
+
     private const TOKEN_CACHE = 'juntra:server_token';
 
     /** เพิ่งขอ token ไม่ผ่าน — อย่ายิงซ้ำทุก request (ค่า = 'refused' | 'network') */
@@ -162,14 +165,19 @@ class JuntraServerClient
     /**
      * เปิดห้องแชทแม่หมอด้วยตัวตนของเว็บ — ลูกค้าทุกคนคุยได้ ไม่ต้องมีบัญชี Thaiprompt
      *
+     * @param  string|null  $context  💬 (2026-09-21) ห้องที่คุยต่อจากคำพยากรณ์ (ReadingChatContext) —
+     *                                Thaiprompt วางไว้ใน system message ทุกรอบ · Thaiprompt รุ่นเก่าเมินฟิลด์นี้เฉย ๆ
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatStart(int|string $userRef): array
+    public function chatStart(int|string $userRef, ?string $context = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
         }
-        $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/chat/start'), ['user_ref' => (string) $userRef]));
+        $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/chat/start'), array_filter([
+            'user_ref' => (string) $userRef,
+            'context'  => $this->chatContext($context),
+        ], fn ($v) => $v !== null)));
         if ($resp?->successful() && is_array($resp->json('data'))) {
             return ['status' => 'ok', 'data' => $resp->json('data')];
         }
@@ -183,7 +191,7 @@ class JuntraServerClient
      *
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false): array
+    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
@@ -197,6 +205,9 @@ class JuntraServerClient
                 'text'       => mb_substr($text, 0, 1000),
                 // ห้องที่เพิ่งเปิดไพ่ (จ่ายแล้ว) — แม่หมอคุยต่อจากไพ่ได้เต็มที่ ไม่ชวนเปิดไพ่ซ้ำ
                 'grounded'   => $grounded ? 1 : null,
+                // 💬 (2026-09-21) ส่งบริบทไปทุกรอบ — ห้องฝั่ง Thaiprompt หมดอายุ/cache ถูกล้างเมื่อไร
+                //    ห้องนั้นก็ยังตอบ 200 แบบ "ไม่มีประวัติ" (ไม่ใช่ error) เราจึงไม่มีทางรู้ว่าต้องป้อนบริบทใหม่
+                'context'    => $this->chatContext($context),
             ], fn ($v) => $v !== null && $v !== '')));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {
@@ -391,6 +402,14 @@ class JuntraServerClient
             'status' => $resp->status(),
             'reason' => $resp->json('reason_code'),
         ]);
+    }
+
+    /** ว่าง = ไม่ส่งฟิลด์ (ห้องคุยทั่วไป) · ยาวเกินเพดาน = ตัดท้าย ไม่ให้ทั้งคำขอโดน 422 */
+    private function chatContext(?string $context): ?string
+    {
+        $context = trim((string) $context);
+
+        return $context === '' ? null : mb_substr($context, 0, self::CHAT_CONTEXT_MAX);
     }
 
     private function url(string $path): string

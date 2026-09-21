@@ -2,7 +2,9 @@
 
 namespace App\Services\Chat;
 
+use App\Models\User;
 use App\Support\Pricing;
+use App\Support\ReadingCooldown;
 use App\Support\TarotSpreads;
 
 /**
@@ -62,9 +64,11 @@ final class ChatOffers
     }
 
     /**
+     * @param  User|null  $user  ลูกค้าที่คุยอยู่ — แพ็กเกจที่เขายังติดข้อห้ามเปิดซ้ำ (ReadingCooldown) ไม่ยื่นให้
+     *                           (ยื่นไปก็กดซื้อไม่ได้) · null = ไม่กรอง
      * @return array<int,array{key:string,kind:string,spread:?string,label:string,cards:?int,price:float,blurb:string,url:string}>
      */
-    public static function for(string $topic): array
+    public static function for(string $topic, ?User $user = null): array
     {
         $out = [];
         foreach (self::BY_TOPIC[ChatReadingIntent::normalizeTopic($topic)] as $key) {
@@ -88,7 +92,7 @@ final class ChatOffers
             }
             // all() = เฉพาะที่เปิดขาย — แพ็กเกจที่ซ่อนอยู่ห้ามโผล่เป็นการ์ด (กดไปก็ซื้อไม่ได้)
             $meta = TarotSpreads::all()[$key] ?? null;
-            if ($meta === null) {
+            if ($meta === null || ReadingCooldown::blockingReading($user, $key) !== null) {
                 continue;
             }
             $out[] = [
