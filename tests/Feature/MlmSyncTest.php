@@ -2,70 +2,97 @@
 
 namespace Tests\Feature;
 
+use App\Models\Setting;
 use App\Models\User;
+use App\Services\Affiliate\MaeMorAffiliate;
 use App\Services\Mlm\MlmApiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
- * Guards the "ยอดตรงกับ Thaiprompt" sync layer: epoch-based cache busting,
+ * Guards the "ยอดจากผังแม่หมอ" sync layer: epoch-based cache busting,
  * the fetched_at stamp, and the web + mobile refresh endpoints.
+ *
+ * 🌙 (2026-09-21) อ่านด้วยตัวตนของเซิร์ฟเวอร์จันทรา (/juntra/server/affiliate/*) — ลูกค้าทุกคน
+ *   เห็นสายงานของตัวเองโดยไม่ต้องผูก Thaiprompt · ยังไม่อยู่ในผัง = ให้แม่หมอสร้างสมาชิกให้แล้วอ่านใหม่
  */
 class MlmSyncTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const TP = 'https://tp.test';
+
     /** Mutable "upstream state" the single Http::fake closure reads live. */
     private float $upstreamAllTime = 1234.0;
     private bool $upstreamDown = false;
-    /** Response body for POST /claim-referral (null → 404 invalid_code). */
-    private ?array $upstreamClaim = null;
 
-    private function linkedUser(): User
+    /** user_ref ที่แม่หมอรู้จักแล้ว (อ่านได้เลย) — คนอื่นได้ 404 not_enrolled จนกว่าจะเรียก /accounts */
+    private array $enrolled = [];
+
+    protected function setUp(): void
     {
-        return User::factory()->create(['thaiprompt_token' => 'tp-token-123']);
+        parent::setUp();
+
+        Setting::put('thaiprompt_base_url', self::TP, 'thaiprompt');
+        Setting::put('thaiprompt_client_id', '9f1c-client', 'thaiprompt');
+        Setting::put('thaiprompt_client_secret', 'super-secret-value', 'thaiprompt', true);
+    }
+
+    private function customer(): User
+    {
+        return User::factory()->create();
     }
 
     /**
-     * One dynamic stub for every /juntra/mlm/* endpoint — tests flip the
+     * One dynamic stub for every /juntra/server/affiliate/* endpoint — tests flip the
      * properties above between calls instead of re-registering stubs (which
      * would depend on Http::fake ordering semantics).
      */
     private function fakeUpstream(): void
     {
-        Http::fake(function ($request) {
+        Http::fake(function (Request $request) {
+            $url = $request->url();
+            if (str_contains($url, '/oauth/token')) {
+                return Http::response(['access_token' => 'srv-token', 'expires_in' => 3600]);
+            }
             if ($this->upstreamDown) {
                 return Http::response(null, 503);
             }
-            $url = $request->url();
-            if (str_contains($url, '/juntra/mlm/claim-referral')) {
-                return $this->upstreamClaim !== null
-                    ? Http::response($this->upstreamClaim, 201)
-                    : Http::response(['claimed' => false, 'reason_code' => 'invalid_code'], 404);
+            if (str_contains($url, '/affiliate/accounts')) {
+                $this->enrolled[(int) $request['user_ref']] = true;
+
+                return Http::response(['data' => [
+                    'member_code' => 'TEST123',
+                    'enrolled_now' => true,
+                    'sponsor' => ['name' => 'ผู้เชิญ', 'member_code' => 'MLMABCD1234'],
+                    'referral' => ['code' => $request['referral_code'] ?? null, 'applied' => isset($request['referral_code']), 'reason_code' => null],
+                ]], 201);
             }
-            if (str_contains($url, '/juntra/mlm/stats')) {
+            if (preg_match('#/affiliate/members/(\d+)/#', $url, $m) && ! isset($this->enrolled[(int) $m[1]])) {
+                return Http::response(['reason_code' => 'not_enrolled', 'message' => 'x'], 404);
+            }
+            if (str_contains($url, '/stats')) {
                 return Http::response([
-                    'user'   => ['name' => 'ทดสอบ', 'referral_code' => 'TEST123'],
+                    'user' => ['name' => 'ทดสอบ', 'referral_code' => 'TEST123'],
                     'totals' => ['today' => 10, 'this_month' => 100, 'all_time' => $this->upstreamAllTime],
                 ]);
             }
-            if (str_contains($url, '/juntra/mlm/tree')) {
-                return Http::response([
-                    'tree' => ['id' => 1, 'name' => 'ทดสอบ', 'children' => []],
-                ]);
+            if (str_contains($url, '/tree')) {
+                return Http::response(['tree' => ['id' => 1, 'name' => 'ทดสอบ', 'children' => []]]);
             }
-            return Http::response([
-                'data' => [], 'meta' => ['total' => 0, 'last_page' => 1, 'current_page' => 1],
-            ]);
+
+            return Http::response(['data' => [], 'meta' => ['total' => 0, 'last_page' => 1, 'current_page' => 1]]);
         });
     }
 
     /** Cached numbers stay pinned until bustCache bumps the epoch — then the next read is live. */
     public function test_bust_cache_makes_next_read_hit_upstream(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
         $this->upstreamAllTime = 1000.0;
         $this->fakeUpstream();
 
@@ -83,10 +110,39 @@ class MlmSyncTest extends TestCase
         $this->assertSame(2000.0, (float) $fresh['totals']['all_time'], 'must be live after bust');
     }
 
-    /** Dashboard renders end-to-end with live upstream data (new org-chart blade). */
-    public function test_web_dashboard_renders_with_linked_user(): void
+    /** Reads go out as the juntraweb server, keyed by this site's user id — never the customer's token. */
+    public function test_reads_use_the_server_identity_and_local_user_id(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
+        $this->fakeUpstream();
+
+        app(MlmApiClient::class)->stats($u);
+
+        Http::assertSent(fn (Request $r) => $r->url() === self::TP . "/api/v1/juntra/server/affiliate/members/{$u->id}/stats"
+            && $r->hasHeader('Authorization', 'Bearer srv-token'));
+    }
+
+    /** A customer who never linked Thaiprompt is enrolled on first view, then sees their line. */
+    public function test_customer_without_thaiprompt_is_enrolled_then_sees_their_line(): void
+    {
+        $u = $this->customer(); // ไม่มี thaiprompt_token
+        $this->fakeUpstream();
+
+        $this->actingAs($u)->get(route('mlm.dashboard'))
+            ->assertOk()
+            ->assertSee('TEST123')
+            ->assertDontSee('เข้าสู่ระบบด้วย Thaiprompt');
+
+        $this->assertSame('TEST123', $u->fresh()->maemor_member_code);
+        Http::assertSent(fn (Request $r) => str_contains($r->url(), '/affiliate/accounts') && (int) $r['user_ref'] === $u->id);
+    }
+
+    /** Dashboard renders end-to-end with live upstream data (new org-chart blade). */
+    public function test_web_dashboard_renders_for_a_member(): void
+    {
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
         $this->fakeUpstream();
 
         $r = $this->actingAs($u)->get(route('mlm.dashboard'));
@@ -101,7 +157,7 @@ class MlmSyncTest extends TestCase
     /** Web refresh endpoint busts the cache and lands back on the dashboard. */
     public function test_web_refresh_redirects_to_dashboard(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
         $this->fakeUpstream();
 
         $r = $this->actingAs($u)->post(route('mlm.refresh'));
@@ -109,10 +165,11 @@ class MlmSyncTest extends TestCase
         $r->assertRedirect(route('mlm.dashboard'))->assertSessionHas('status');
     }
 
-    /** Mobile refresh: linked user gets {refreshed:true}; the next GET is live. */
-    public function test_mobile_refresh_busts_cache_for_linked_user(): void
+    /** Mobile refresh: any customer gets {refreshed:true}; the next GET is live. */
+    public function test_mobile_refresh_busts_cache(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
         $this->upstreamAllTime = 500.0;
         $this->fakeUpstream();
         Sanctum::actingAs($u);
@@ -128,20 +185,24 @@ class MlmSyncTest extends TestCase
         $this->assertSame(900.0, (float) $r->json('data.totals.all_time'));
     }
 
-    /** Mobile refresh short-circuits with the standard not-linked envelope. */
-    public function test_mobile_refresh_requires_thaiprompt_link(): void
+    /** แอพ: ลูกค้าที่ไม่เคยผูก Thaiprompt ต้องเห็นสายงาน (เดิมได้ 403 thaiprompt_not_linked) */
+    public function test_mobile_customer_without_thaiprompt_is_not_turned_away(): void
     {
-        Sanctum::actingAs(User::factory()->create()); // no token
+        Sanctum::actingAs($this->customer());
+        $this->fakeUpstream();
 
-        $this->postJson('/api/v1/mlm/refresh')
-            ->assertStatus(403)
-            ->assertJsonPath('reason_code', 'thaiprompt_not_linked');
+        $this->getJson('/api/v1/mlm/stats')
+            ->assertOk()
+            ->assertJsonPath('linked', true)
+            ->assertJsonPath('data.user.referral_code', 'TEST123');
+        $this->postJson('/api/v1/mlm/refresh')->assertOk();
     }
 
     /** Stats + tree envelopes carry fetched_at so the app can show "ข้อมูล ณ เวลา". */
     public function test_mobile_stats_envelope_includes_fetched_at(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
         $this->fakeUpstream();
         Sanctum::actingAs($u);
 
@@ -152,46 +213,37 @@ class MlmSyncTest extends TestCase
         $this->assertNotEmpty($this->getJson('/api/v1/mlm/tree')->json('fetched_at'));
     }
 
-    /** Successful claim enrolls + busts the local cache so the tree shows the new sponsor line. */
-    public function test_claim_referral_success_busts_local_cache(): void
+    /** รหัสเชิญถูกใช้แล้ว (แม่หมอตอบชัด) → ล้างทิ้ง + จำรหัสสมาชิกของลูกค้าไว้ทำลิงก์เชิญต่อ */
+    public function test_referral_code_is_consumed_once_the_tree_answers(): void
     {
-        $u = $this->linkedUser();
-        $this->upstreamAllTime = 500.0;
-        $this->upstreamClaim = [
-            'claimed'     => true,
-            'member_code' => 'MLMNEW1234',
-            'sponsor'     => ['name' => 'ผู้เชิญ', 'member_code' => 'MLMABCD1234'],
-        ];
+        $u = User::factory()->create(['pending_referral_code' => 'MLMABCD1234']);
         $this->fakeUpstream();
 
-        // Prime cache, then claim — next read must be live.
-        app(MlmApiClient::class)->stats($u);
-        $this->upstreamAllTime = 800.0;
+        $result = app(MaeMorAffiliate::class)->ensureMember($u);
 
-        $result = app(MlmApiClient::class)->claimReferral($u, 'MLMABCD1234');
-
-        $this->assertTrue($result['claimed']);
-        $this->assertSame('ผู้เชิญ', $result['sponsor']['name']);
-        $this->assertSame(800.0, (float) app(MlmApiClient::class)->stats($u)['totals']['all_time']);
+        $this->assertSame('ok', $result['status']);
+        $this->assertTrue($result['data']['referral']['applied']);
+        $u->refresh();
+        $this->assertNull($u->pending_referral_code);
+        $this->assertSame('TEST123', $u->maemor_member_code);
     }
 
-    /** A definitive upstream rejection reports its reason and HTTP status (cookie consumed by caller). */
-    public function test_claim_referral_rejection_reports_reason(): void
+    /** แม่หมอล่ม (5xx) ต้องไม่ทำรหัสเชิญหาย — เดิมถูกลบทิ้งทันที ผู้เชิญเสียลูกทีมเงียบ ๆ */
+    public function test_referral_code_survives_an_outage(): void
     {
-        $u = $this->linkedUser();
-        $this->fakeUpstream(); // upstreamClaim stays null → 404 invalid_code
+        $u = User::factory()->create(['pending_referral_code' => 'MLMABCD1234']);
+        $this->upstreamDown = true;
+        $this->fakeUpstream();
 
-        $result = app(MlmApiClient::class)->claimReferral($u, 'BADCODE');
-
-        $this->assertFalse($result['claimed']);
-        $this->assertSame('invalid_code', $result['reason_code']);
-        $this->assertSame(404, $result['status']);
+        $this->assertSame('unavailable', app(MaeMorAffiliate::class)->ensureMember($u)['status']);
+        $this->assertSame('MLMABCD1234', $u->fresh()->pending_referral_code);
     }
 
     /** A failed upstream call must not pin empty numbers for the full 5-min TTL. */
     public function test_upstream_failure_is_not_cached_long(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
         $this->upstreamDown = true;
         $this->fakeUpstream();
 
@@ -215,7 +267,7 @@ class MlmSyncTest extends TestCase
      */
     public function test_browser_hitting_commissions_lands_on_the_dashboard_table(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
         $this->fakeUpstream();
 
         $this->actingAs($u)->get(route('mlm.commissions'), self::BROWSER)
@@ -225,7 +277,8 @@ class MlmSyncTest extends TestCase
     /** ตารางในหน้าแดชบอร์ดยังต้องได้ JSON เหมือนเดิม (อย่าแก้จนพังของเดิม) */
     public function test_commissions_still_serves_json_to_the_table_xhr(): void
     {
-        $u = $this->linkedUser();
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
         $this->fakeUpstream();
 
         $this->actingAs($u)
@@ -237,7 +290,7 @@ class MlmSyncTest extends TestCase
     /** เมนู "ทีมดูดวงของฉัน" ก็ลิงก์มาที่ /mlm/users — สมาชิกทั่วไปเคยเจอ 403 */
     public function test_browser_hitting_users_does_not_403_a_regular_member(): void
     {
-        $u = $this->linkedUser(); // ไม่ใช่แอดมิน
+        $u = $this->customer(); // ไม่ใช่แอดมิน
         $this->fakeUpstream();
 
         $this->actingAs($u)->get(route('mlm.users'), self::BROWSER)
@@ -249,6 +302,30 @@ class MlmSyncTest extends TestCase
     {
         $this->fakeUpstream();
 
-        $this->actingAs($this->linkedUser())->getJson(route('mlm.users'))->assertForbidden();
+        $this->actingAs($this->customer())->getJson(route('mlm.users'))->assertForbidden();
+    }
+
+    /** แอดมินที่ไม่ได้ผูก Thaiprompt เปิดหน้าสายงานเพื่อตรวจ — ต้องไม่ถูกสร้างเป็นสมาชิกใต้ผู้แนะนำเริ่มต้น */
+    public function test_unlinked_admin_viewing_the_page_is_not_enrolled(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $this->fakeUpstream();
+
+        $this->actingAs($admin)->get(route('mlm.dashboard'))->assertOk();
+
+        Http::assertNotSent(fn (Request $r) => str_contains($r->url(), '/affiliate/accounts'));
+        $this->assertNull($admin->fresh()->maemor_member_code);
+    }
+
+    /** สมาชิกทั่วไปส่ง ?user_id= มา = ยังได้ของตัวเอง (id สองฝั่งคนละชุด ห้ามดูของคนอื่น) */
+    public function test_member_cannot_peek_at_another_line(): void
+    {
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
+        $this->fakeUpstream();
+
+        $this->actingAs($u)->get(route('mlm.dashboard', ['user_id' => 999]))->assertOk();
+
+        Http::assertNotSent(fn (Request $r) => str_contains($r->url(), '/affiliate/admin/'));
     }
 }

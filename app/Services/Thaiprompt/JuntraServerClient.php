@@ -293,6 +293,62 @@ class JuntraServerClient
         return (bool) $resp?->successful();
     }
 
+    /* ============================ AFFILIATE ============================ */
+
+    /**
+     * 🌙 ผังแม่หมอ (/affiliate/*) — เว็บไม่คำนวณค่าแนะนำเอง: ส่งบิล อ่านผัง และสั่งงานแอดมินผ่านทางนี้
+     *
+     * ไม่โยน — ผู้เรียกตัดสินจาก status:
+     *   ok          = 2xx
+     *   rejected    = 4xx ที่ Thaiprompt ตอบชัด (ข้อมูลผิด/ไม่พบ) — ส่งซ้ำก็ไม่ช่วย
+     *   unavailable = ต่อไม่ได้ / 5xx / 429 — เก็บงานไว้ลองใหม่
+     *   unsupported = ยังไม่ได้ตั้งค่า client หรือ Thaiprompt ยังไม่ deploy เส้นนี้ — ลองใหม่ภายหลัง
+     *
+     * @param  'GET'|'POST'|'PUT'  $method
+     * @return array{status: string, code: int, data: ?array, reason_code: ?string, message: ?string}
+     */
+    public function affiliate(string $method, string $path, array $payload = [], int $timeout = 10): array
+    {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'code' => 0, 'data' => null, 'reason_code' => null, 'message' => null];
+        }
+
+        $url = $this->url('/affiliate' . $path);
+        $resp = $this->send(fn (PendingRequest $http) => match ($method) {
+            'GET' => $http->timeout($timeout)->get($url, $payload),
+            'PUT' => $http->timeout($timeout)->put($url, $payload),
+            default => $http->timeout($timeout)->post($url, $payload),
+        });
+
+        $code = $resp?->status() ?? 0;
+        $json = $resp ? ($resp->json() ?: null) : null;
+        $out = [
+            'code' => $code,
+            'data' => is_array($json) ? $json : null,
+            'reason_code' => is_array($json) ? ($json['reason_code'] ?? $json['data']['reason_code'] ?? null) : null,
+            'message' => is_array($json) ? ($json['message'] ?? null) : null,
+        ];
+
+        if ($resp === null) {
+            return ['status' => $this->lastFailure === 'refused' ? 'unsupported' : 'unavailable'] + $out;
+        }
+        if ($resp->successful()) {
+            return ['status' => 'ok'] + $out;
+        }
+        if ($this->missing($resp)) {
+            $this->logMiss('affiliate ' . $path, $resp);
+
+            return ['status' => 'unsupported'] + $out;
+        }
+        if ($code === 429 || $code >= 500) {
+            $this->logMiss('affiliate ' . $path, $resp);
+
+            return ['status' => 'unavailable'] + $out;
+        }
+
+        return ['status' => 'rejected'] + $out;
+    }
+
     /* ============================ TRANSPORT ============================ */
 
     /**

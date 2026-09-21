@@ -118,6 +118,32 @@ class ThaipromptSsoSignupTest extends TestCase
         $this->assertSame('member', $existing->role, 'การลิงก์ต้องไม่ไปแตะ role ของคนเก่า');
     }
 
+    /**
+     * 🌙 (2026-09-21) ลูกค้าที่ซื้อบนจันทราก่อนผูก Thaiprompt มีบัญชีเงาในผังแม่หมอ —
+     * ผูกเมื่อไรต้องบอกแม่หมอทันที (หลังตอบหน้าเว็บ) ให้รวมเข้าบัญชี Thaiprompt (เจ้าของสั่ง: Thaiprompt เป็นตัวหลัก)
+     */
+    public function test_first_link_tells_the_tree_so_the_shadow_account_is_merged(): void
+    {
+        User::factory()->create(['email' => 'buyer@example.com', 'role' => 'member']);
+
+        $this->completeCallback(['id' => '9004', 'email' => 'buyer@example.com', 'name' => 'ลูกค้าซื้อก่อนผูก'])
+            ->assertRedirect();
+
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/affiliate/accounts')
+            && (string) $r['thaiprompt_user_id'] === '9004');
+    }
+
+    /** ล็อกอินซ้ำโดยไม่มีอะไรเปลี่ยน = ไม่ต้องรบกวนแม่หมอทุกครั้ง */
+    public function test_relogin_with_the_same_link_does_not_call_the_tree(): void
+    {
+        User::factory()->create(['email' => 'linked@example.com', 'role' => 'member', 'thaiprompt_user_id' => '9005']);
+
+        $this->completeCallback(['id' => '9005', 'email' => 'linked@example.com', 'name' => 'ลูกค้าผูกแล้ว'])
+            ->assertRedirect();
+
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/affiliate/'));
+    }
+
     /** state ไม่ตรง = ต้องไม่สร้างบัญชีใด ๆ (กัน CSRF) */
     public function test_mismatched_state_creates_no_account(): void
     {

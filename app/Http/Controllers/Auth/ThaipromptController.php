@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Services\Mlm\MlmApiClient;
+use App\Services\Affiliate\MaeMorAffiliate;
 use App\Services\ThaipromptClient;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -208,7 +208,7 @@ class ThaipromptController extends Controller
         // downline. Best-effort: a definitive upstream answer (success OR
         // rejection) clears the cookie; a network failure keeps it so the
         // next login retries.
-        $referralStatus = $this->claimPendingReferral($request, $user);
+        $referralStatus = $this->claimPendingReferral($request, $user, linkedNow: $user->wasChanged('thaiprompt_user_id'));
 
         // Mobile-initiated flow → render a "back to app" success page
         // instead of dropping the user into the web dashboard. The page
@@ -229,57 +229,50 @@ class ThaipromptController extends Controller
     }
 
     /**
-     * Claim the pending juntra_ref cookie (if any) against Thaiprompt.
-     * Returns a flash message on success, null otherwise.
+     * ต่อสายงานแม่หมอหลังผูก Thaiprompt — ใช้รหัสเชิญที่ค้างอยู่ (ถ้ามี)
+     * Returns a flash message when the customer just joined an inviter's line, null otherwise.
      */
-    private function claimPendingReferral(Request $request, User $user): ?string
+    private function claimPendingReferral(Request $request, User $user, bool $linkedNow = false): ?string
     {
         // โค้ดที่ผู้ใช้กรอกตอนสมัครในแอพมาก่อน (เก็บฝั่งเซิร์ฟเวอร์ ไม่ผูกเบราว์เซอร์)
         // แล้วค่อยตกไปที่คุกกี้ของเบราว์เซอร์ที่เปิดลิงก์เชิญ
         //
         // ลำดับนี้สำคัญ: คนที่กดลิงก์เชิญบนมือถือแล้วสมัครในแอพ จะไม่มีคุกกี้
         // เลย เพราะคุกกี้อยู่ในเบราว์เซอร์คนละตัวกับ webview ที่ทำ SSO
-        $code = (string) ($user->pending_referral_code ?: '');
-        if ($code === '') {
-            $code = (string) $request->cookie('juntra_ref', '');
+        $cookieCode = substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string) $request->cookie('juntra_ref', '')) ?? '', 0, 64);
+        if (! $user->pending_referral_code && $cookieCode !== '' && ! $user->maemor_member_code) {
+            $user->forceFill(['pending_referral_code' => $cookieCode])->save();
         }
-        $code = substr(preg_replace('/[^A-Za-z0-9_-]/', '', $code) ?? '', 0, 64);
-        if ($code === '') {
+
+        // ไม่มีรหัสเชิญ = ไม่ต้องรอ Thaiprompt ตอนล็อกอิน (เข้าผังเองตอนเปิดหน้าสายงาน/ส่งบิลแรก)
+        if (! $user->pending_referral_code) {
+            // เพิ่งผูก Thaiprompt ครั้งนี้ → บอกผังแม่หมอหลังตอบหน้าเว็บแล้ว ให้รวมบัญชีที่ระบบสร้างให้ตอนซื้อก่อนผูก
+            //   เข้าบัญชี Thaiprompt ทันที (เจ้าของสั่ง: Thaiprompt เป็นตัวหลัก) — ไม่ต้องรอบิลถัดไป
+            if ($linkedNow && $user->thaiprompt_user_id) {
+                dispatch(fn () => app(MaeMorAffiliate::class)->ensureMember($user))->afterResponse();
+            }
+
             return null;
         }
 
-        $result = app(MlmApiClient::class)->claimReferral($user, $code);
-
-        // Network failure → keep the cookie; a later login retries the claim.
-        if ($result['status'] === 0) {
-            return null;
+        // 🌙 (2026-09-21) ผังแม่หมอผ่านตัวตนของเซิร์ฟเวอร์ — ผูก Thaiprompt ครั้งแรกเมื่อไร
+        //   Thaiprompt จะจับคู่ลูกค้าคนนี้กับบัญชีที่ผูก (ถ้ายังไม่เคยเข้าผังมาก่อน) แล้วต่อสายตามรหัสเชิญ
+        //   ต่อไม่ได้ = รหัสยังค้างอยู่ affiliate:sync-bills เก็บตกให้ทุกนาที (เดิมรหัสหายเมื่อ 5xx/429)
+        $result = app(MaeMorAffiliate::class)->ensureMember($user);
+        if ($result['status'] === 'ok' || $result['status'] === 'rejected') {
+            Cookie::queue(Cookie::forget('juntra_ref'));
         }
 
-        // Any definitive upstream answer consumes the cookie — success,
-        // invalid code, self-referral, or already enrolled in a network.
-        Cookie::queue(Cookie::forget('juntra_ref'));
+        $data = (array) ($result['data'] ?? []);
+        if (($data['enrolled_now'] ?? false) && ($data['referral']['applied'] ?? false)) {
+            $sponsorName = $data['sponsor']['name'] ?? null;
+            Log::info('Referral applied on Mae Mor tree', ['user_id' => $user->id]);
 
-        // เคลียร์โค้ดที่ค้างไว้ฝั่งเซิร์ฟเวอร์ด้วย ไม่งั้นจะพยายามเคลมซ้ำทุกครั้ง
-        // ที่ผู้ใช้ทำ SSO ใหม่ ทั้งที่อัปสตรีมตอบชัดเจนไปแล้ว
-        if ($user->pending_referral_code !== null) {
-            $user->forceFill(['pending_referral_code' => null])->save();
-        }
-
-        if ($result['claimed']) {
-            $sponsorName = $result['sponsor']['name'] ?? null;
-            Log::info('Referral claimed on Thaiprompt', [
-                'user_id' => $user->id,
-                'code'    => $code,
-            ]);
             return $sponsorName
                 ? "🎉 เข้าร่วมสายงานของ {$sponsorName} เรียบร้อย — เริ่มสร้างทีมของคุณได้เลย"
                 : '🎉 เข้าร่วมสายงานเรียบร้อย — เริ่มสร้างทีมของคุณได้เลย';
         }
 
-        Log::info('Referral claim declined upstream', [
-            'user_id'     => $user->id,
-            'reason_code' => $result['reason_code'],
-        ]);
         return null;
     }
 }

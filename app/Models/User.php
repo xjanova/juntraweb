@@ -35,6 +35,7 @@ class User extends Authenticatable implements FilamentUser
         'line_user_id',
         'signup_via',
         'pending_referral_code',
+        'maemor_member_code',
     ];
 
     protected $hidden = [

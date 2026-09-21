@@ -49,7 +49,7 @@ Route::get('/', [HomeController::class, 'index'])->name('home');
 
 // Affiliate invite landing — the Juntra app shares จันทรา.online/r/<code>.
 // Captures the referral code in a cookie + lands on home (was a 404 before).
-// Full commission attribution still requires Thaiprompt upstream support.
+// สมัครแล้วรหัสนี้ไปต่อสายงานที่ผังแม่หมอ (MaeMorAffiliate) — ค่าแนะนำคำนวณที่นั่น
 Route::get('/r/{code}', [ReferralController::class, 'show'])
     ->where('code', '[A-Za-z0-9_-]+')
     ->name('referral');

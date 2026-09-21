@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Affiliate\MaeMorAffiliate;
 use App\Support\PhoneNumber;
 use App\Support\Turnstile;
 use Illuminate\Auth\Events\Registered;
@@ -74,13 +75,24 @@ class RegisteredUserController extends Controller
         // ไม่มีอีเมล → สร้างให้จากเบอร์ (ไม่ซ้ำเพราะเบอร์ไม่ซ้ำ)
         $email = $data['email'] ?? PhoneNumber::placeholderEmail($phone);
 
+        // รหัสเชิญจากลิงก์ /r/{code} (คุกกี้ของเบราว์เซอร์นี้) — เก็บฝั่งเซิร์ฟเวอร์ทันที
+        //   ไม่งั้นลูกค้าที่ไปผูก/ซื้อจากแอพหรือเครื่องอื่นภายหลังจะหลุดจากสายของผู้เชิญ
+        $referral = substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string) $request->cookie('juntra_ref', '')) ?? '', 0, 64);
+
         $user = User::create([
             'name'       => $data['name'],
             'email'      => $email,
             'phone'      => $phone,
             'password'   => Hash::make($data['password']),
             'signup_via' => 'web',
+            'pending_referral_code' => $referral !== '' ? $referral : null,
         ]);
+
+        // เข้าผังแม่หมอใต้ผู้เชิญหลังส่งหน้าเว็บ — ผู้เชิญเห็นลูกทีมใหม่ทันที ลูกค้าไม่ต้องรอ
+        //   (Thaiprompt ต่อไม่ได้ตอนนั้น → affiliate:sync-bills เก็บตกให้)
+        if ($referral !== '') {
+            dispatch(fn () => app(MaeMorAffiliate::class)->ensureMember($user))->afterResponse();
+        }
 
         event(new Registered($user));
 

@@ -54,8 +54,10 @@
 
     @if (empty($stats))
       <div class="flash flash-error" style="margin-bottom:20px">
-        ⚠️ ยังเชื่อมต่อ Thaiprompt ไม่ได้ — ตัวเลขด้านล่างอาจไม่ใช่ข้อมูลจริง
-        <a href="{{ route('filament.admin.pages.membership-integration', [], false) }}" style="margin-left:8px;color:var(--gold);text-decoration:underline">ตรวจการตั้งค่า →</a>
+        ⚠️ ยังดึงข้อมูลจากผังแม่หมอไม่ได้ — ลองกด “ดึงยอดสด” อีกครั้งในอีกสักครู่
+        @if ($isAdmin)
+          <a href="{{ route('filament.admin.pages.membership-integration', [], false) }}" style="margin-left:8px;color:var(--gold);text-decoration:underline">ตรวจการตั้งค่า →</a>
+        @endif
       </div>
     @endif
 
@@ -64,8 +66,8 @@
       <span class="mlm-live-dot"></span>
       <div style="flex:1;min-width:220px">
         <div style="font-size:13px;color:var(--ink)">
-          ยอดตรงกับ Thaiprompt
-          <span style="color:var(--ink-faint)">· ไม่มีการคำนวณซ้ำฝั่งเว็บ</span>
+          ยอดจากผังแม่หมอ
+          <span style="color:var(--ink-faint)">· คำนวณที่แม่หมอทั้งหมด เว็บไม่คำนวณซ้ำ</span>
         </div>
         <div style="font-size:11.5px;color:var(--ink-faint);margin-top:2px" x-show="fetchedAt">
           ข้อมูล ณ <span style="color:var(--ink-dim)" x-text="formatFetched()"></span>
@@ -289,13 +291,13 @@
               <tr style="transition:background .15s">
                 <td style="padding:14px;color:var(--ink);border-bottom:1px solid var(--line-soft);white-space:nowrap" x-text="formatDate(c.created_at)"></td>
                 <td style="padding:14px;color:var(--ink);border-bottom:1px solid var(--line-soft)" x-text="c.from_user?.name || c.reading?.customer || '—'"></td>
-                <td style="padding:14px;color:var(--ink-dim);border-bottom:1px solid var(--line-soft)" x-text="c.reading?.id ? `#${c.reading.id}` : '—'"></td>
+                <td style="padding:14px;color:var(--ink-dim);border-bottom:1px solid var(--line-soft)" x-text="c.reading?.bill_reference || (c.reading?.id ? `#${c.reading.id}` : '—')"></td>
                 <td style="padding:14px;border-bottom:1px solid var(--line-soft)">
                   <span x-show="c.level === 1" style="color:var(--gold)">สายตรง</span>
                   <span x-show="c.level === 2" style="color:#9ec6f5">หลาน</span>
                 </td>
                 <td style="padding:14px;text-align:right;font-family:var(--display);font-weight:600;color:var(--moon);border-bottom:1px solid var(--line-soft)"
-                    x-text="`฿${Number(c.amount).toLocaleString()}`"></td>
+                    x-text="`฿${money(c.amount)}`"></td>
                 <td style="padding:14px;border-bottom:1px solid var(--line-soft)">
                   <span :style="badgeStyle(c.status)" x-text="statusLabel(c.status)"
                         style="display:inline-block;padding:3px 12px;border-radius:99px;font-family:var(--display);font-size:10px;letter-spacing:.1em;text-transform:uppercase"></span>
@@ -316,18 +318,6 @@
       </div>
     </div>
 
-    @if (empty($stats['user']))
-      <div class="panel" style="margin-top:28px;text-align:center;padding:36px">
-        <div class="eyebrow" style="display:inline-flex;margin-bottom:14px">ยังไม่ได้เชื่อม THAIPROMPT</div>
-        <p class="lede" style="margin:0 auto 18px">
-          คุณต้องเข้าสู่ระบบด้วย Thaiprompt ก่อน — ระบบจึงดึงข้อมูลสายงานของคุณได้
-        </p>
-        <a href="{{ route('thaiprompt.redirect') }}" class="btn btn-primary">
-          เข้าสู่ระบบด้วย Thaiprompt
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-        </a>
-      </div>
-    @endif
 
   </div>
 </section>
@@ -507,7 +497,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('mlmDashboard', (init) => ({
     viewingSelf: init.viewingSelf,
     isAdmin: init.isAdmin,
-    targetUserId: '',
+    targetUserId: @js($targetId ? (string) $targetId : ''),
     adminUsers: [],
     commissions: init.commissionsInitial || { data: [], meta: { current_page: 1, last_page: 1 } },
     treeData: init.treeData,
@@ -545,7 +535,10 @@ document.addEventListener('alpine:init', () => {
       const d = new Date(iso);
       return d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' });
     },
-    statusLabel(s) { return { paid: 'จ่ายแล้ว', approved: 'อนุมัติ', pending: 'รอ', rejected: 'ปฏิเสธ' }[s] || s; },
+    // rejected = ถูกดึงคืน (ลูกค้าได้เงินคืน) หรือแอดมินยกเลิก — เงินไม่อยู่ในกระเป๋า
+    statusLabel(s) { return { paid: 'จ่ายแล้ว', approved: 'อนุมัติ', pending: 'รอ', rejected: 'ยกเลิก' }[s] || s; },
+    // ตัวเลขตรงจากแม่หมอ — จำนวนเต็มไม่มีทศนิยม มีเศษสตางค์แสดง 2 ตำแหน่ง (แบบเดียวกับการ์ดด้านบน)
+    money(v) { const n = Number(v) || 0; return n.toLocaleString('th-TH', Number.isInteger(n) ? {} : { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
     badgeStyle(s) {
       // Alpine ผูก :style ด้วยสตริงจะเขียนทับ attribute style ทั้งก้อน
       // สไตล์พื้นฐานของ badge จึงต้องรวมมาในนี้ ไม่ใช่เขียนแยกไว้ที่ style=""
@@ -786,7 +779,10 @@ document.addEventListener('alpine:init', () => {
       if (this.targetUserId) url.searchParams.set('user_id', this.targetUserId);
       url.searchParams.set('page', page);
       const r = await fetch(url, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
-      this.commissions = await r.json();
+      // เซสชันหมด/แม่หมอล่ม → คงหน้าเดิมไว้ (เดิมเอา body error มาแทนทั้งตาราง → commissions.data หาย หน้าพัง)
+      if (!r.ok) return;
+      const j = await r.json();
+      if (Array.isArray(j?.data)) this.commissions = j;
     },
     async loadAdminUsers() {
       const r = await fetch(@js(route('mlm.users')), { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });

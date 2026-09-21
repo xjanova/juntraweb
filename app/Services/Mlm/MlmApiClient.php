@@ -2,26 +2,24 @@
 
 namespace App\Services\Mlm;
 
-use App\Models\Setting;
 use App\Models\User;
-use Illuminate\Http\Client\PendingRequest;
+use App\Services\Affiliate\MaeMorAffiliate;
+use App\Services\Thaiprompt\JuntraServerClient;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Read-only HTTP client for the Thaiprompt-Affiliate MLM API.
+ * อ่านผังแม่หมอ (Thaiprompt) มาแสดงบนเว็บ/แอพ — ตัวเลขทุกตัวมาจากที่นั่น ไม่คำนวณซ้ำที่นี่
  *
- *   GET  /api/v1/juntra/mlm/tree         (?user_id, ?depth)
- *   GET  /api/v1/juntra/mlm/commissions  (?user_id, ?page, ?status, ?from, ?to)
- *   GET  /api/v1/juntra/mlm/stats        (?user_id)
- *   GET  /api/v1/juntra/mlm/users        (admin only)
+ * 🌙 (2026-09-21) ยิงด้วยตัวตนของเซิร์ฟเวอร์จันทรา (/api/v1/juntra/server/affiliate/*)
+ *   เดิมใช้ token Thaiprompt ของลูกค้า → ลูกค้าที่สมัครด้วยเบอร์/อีเมล (ส่วนใหญ่) ไม่เห็นสายงานเลย
+ *   ตอนนี้ลูกค้าทุกคนเห็นของตัวเอง · แอดมินดูของคนอื่นด้วย id ผู้ใช้ฝั่ง Thaiprompt (?user_id=)
  *
- * Auth = the user's Sanctum bearer token saved on User model
- *        (`thaiprompt_token` — populated by the SSO callback).
+ *   ของตัวเอง:   /members/{users.id ของเว็บนี้}/{stats,tree,commissions}
+ *   แอดมินดูคนอื่น: /admin/users/{id ผู้ใช้ Thaiprompt}/{stats,tree,commissions} · /admin/users
  *
- * Every method caches the response per-user for a short TTL so navigating
- * between dashboard tabs doesn't hammer the upstream API.
+ * cache ต่อผู้ใช้ 5 นาที (ประวัติค่าแนะนำไม่ cache) · ปุ่ม "ดึงยอดสด" ล้างด้วย bustCache()
  */
 class MlmApiClient
 {
@@ -33,15 +31,18 @@ class MlmApiClient
      * i.e. "ข้อมูล ณ เวลา X". Commissions are always fresh; stats/tree
      * may come from cache, so the oldest timestamp is the honest one.
      */
-    private ?\Illuminate\Support\Carbon $lastFetchedAt = null;
+    private ?Carbon $lastFetchedAt = null;
+
+    public function __construct(
+        private JuntraServerClient $server,
+        private MaeMorAffiliate $affiliate,
+    ) {}
 
     public function tree(User $actor, ?int $userId = null, int $depth = 5): array
     {
         $cacheKey = $this->key($actor, 'tree.target.' . ($userId ?? 'self') . ".d{$depth}");
-        return $this->cachedGet($cacheKey, fn () => $this->client($actor)->get($this->url('/tree'), array_filter([
-            'user_id' => $userId,
-            'depth'   => $depth,
-        ]))->json() ?? []);
+
+        return $this->cachedGet($cacheKey, fn () => $this->read($actor, $userId, '/tree', ['depth' => $depth]));
     }
 
     public function commissions(User $actor, ?int $userId = null, int $page = 1, array $filters = []): array
@@ -50,50 +51,37 @@ class MlmApiClient
 
         // Pages aren't cached — operators want fresh data when paginating.
         $this->noteFetchedAt(now());
-        try {
-            $resp = $this->client($actor)->get($this->url('/commissions'), array_filter([
-                'user_id' => $userId,
-                'page'    => $page,
-                'status'  => $filters['status'] ?? null,
-                'from'    => $filters['from'] ?? null,
-                'to'      => $filters['to'] ?? null,
-                'per_page'=> $filters['per_page'] ?? null,
-            ]));
-        } catch (\Throwable $e) {
-            Log::warning('MlmApiClient /commissions threw', ['err' => $e->getMessage()]);
-            return $empty;
-        }
+        $data = $this->read($actor, $userId, '/commissions', array_filter([
+            'page' => $page,
+            'status' => $filters['status'] ?? null,
+            'from' => $filters['from'] ?? null,
+            'to' => $filters['to'] ?? null,
+            'per_page' => $filters['per_page'] ?? null,
+        ]));
 
-        if (!$resp->successful()) {
-            $this->logFail($resp, '/commissions');
-            return $empty;
-        }
-        return $resp->json() ?: $empty;
+        return $data ?? $empty;
     }
 
     public function stats(User $actor, ?int $userId = null): array
     {
         $cacheKey = $this->key($actor, 'stats.target.' . ($userId ?? 'self'));
-        return $this->cachedGet($cacheKey, fn () => $this->client($actor)->get($this->url('/stats'), array_filter([
-            'user_id' => $userId,
-        ]))->json() ?? []);
+
+        return $this->cachedGet($cacheKey, fn () => $this->read($actor, $userId, '/stats'));
     }
 
+    /** Admin-only — ผู้ใช้ที่มีกิจกรรมดูดวง (ตัวเลือก "ดูข้อมูลของใคร") */
     public function users(User $actor, string $q = '', int $perPage = 50): array
     {
-        // Admin-only — short cache because it backs a search box.
         $cacheKey = 'mlm.users.q.' . md5($q) . ".pp{$perPage}";
-        return $this->cachedGet($cacheKey, function () use ($actor, $q, $perPage) {
-            $resp = $this->client($actor)->get($this->url('/users'), array_filter([
-                'q'        => $q !== '' ? $q : null,
+
+        return $this->cachedGet($cacheKey, function () use ($q, $perPage) {
+            $res = $this->server->affiliate('GET', '/admin/users', array_filter([
+                'q' => $q !== '' ? $q : null,
                 'per_page' => $perPage,
             ]));
-            if (!$resp->successful()) {
-                $this->logFail($resp, '/users');
-                return ['data' => [], 'meta' => ['total' => 0]];
-            }
-            return $resp->json() ?: ['data' => []];
-        }, 60); // 1-min cache for the search box
+
+            return $res['status'] === 'ok' ? (array) $res['data'] : ['data' => [], 'meta' => ['total' => 0]];
+        }, 60);
     }
 
     /**
@@ -108,51 +96,45 @@ class MlmApiClient
     }
 
     /** When the data shown in this request was actually fetched from Thaiprompt. */
-    public function lastFetchedAt(): ?\Illuminate\Support\Carbon
+    public function lastFetchedAt(): ?Carbon
     {
         return $this->lastFetchedAt;
-    }
-
-    /**
-     * Claim a referral upstream — enrolls $actor under the inviter whose
-     * member_code is $code (captured from the จันทรา.online/r/{code} cookie).
-     *
-     * Returns ['claimed' => bool, 'reason_code' => ?string, 'status' => int,
-     * 'sponsor' => ?array]. `status` 0 = network failure (caller should keep
-     * the cookie and retry on a later login); any HTTP status = a definitive
-     * upstream answer (caller can clear the cookie).
-     */
-    public function claimReferral(User $actor, string $code): array
-    {
-        try {
-            $resp = $this->client($actor)->post($this->url('/claim-referral'), ['code' => $code]);
-        } catch (\Throwable $e) {
-            Log::warning('MlmApiClient /claim-referral threw', ['err' => $e->getMessage()]);
-            return ['claimed' => false, 'reason_code' => 'network', 'status' => 0, 'sponsor' => null];
-        }
-
-        $json = $resp->json() ?: [];
-        if ($resp->successful() && ($json['claimed'] ?? false) === true) {
-            // Downline changed — make the next dashboard read live.
-            $this->bustCache($actor);
-        }
-
-        return [
-            'claimed'     => (bool) ($json['claimed'] ?? false),
-            'reason_code' => $json['reason_code'] ?? null,
-            'status'      => $resp->status(),
-            'sponsor'     => is_array($json['sponsor'] ?? null) ? $json['sponsor'] : null,
-        ];
     }
 
     /* ============================================================
        INTERNAL
        ============================================================ */
 
-    private function url(string $path): string
+    /**
+     * อ่านหนึ่งเส้น — ของตัวเองยังไม่อยู่ในผัง (not_enrolled) → ให้ Thaiprompt สร้างสมาชิกให้แล้วอ่านใหม่
+     *
+     * @return array|null null = ต่อไม่ได้/ถูกปฏิเสธ (หน้าเว็บแสดงว่ายังดึงข้อมูลไม่ได้)
+     */
+    private function read(User $actor, ?int $targetUserId, string $what, array $query = []): ?array
     {
-        $base = rtrim((string) Setting::get('thaiprompt_base_url', 'https://main.thaiprompt.online'), '/');
-        return $base . '/api/v1/juntra/mlm' . $path;
+        $path = $targetUserId !== null
+            ? "/admin/users/{$targetUserId}{$what}"
+            : "/members/{$actor->id}{$what}";
+
+        $res = $this->server->affiliate('GET', $path, $query);
+
+        // แอดมินที่ไม่ได้ผูก Thaiprompt เปิดหน้านี้เพื่อตรวจงาน ไม่ได้มาเป็นสมาชิก — ห้ามสร้างตัวตนเงาให้
+        $mayEnroll = ! $actor->isAdmin() || $actor->thaiprompt_user_id;
+        if ($targetUserId === null && $res['reason_code'] === 'not_enrolled' && $mayEnroll
+            && $this->affiliate->ensureMember($actor)['status'] === 'ok') {
+            $res = $this->server->affiliate('GET', $path, $query);
+        }
+
+        if ($res['status'] !== 'ok') {
+            Log::warning("MlmApiClient: Thaiprompt {$path} → {$res['status']}", [
+                'code' => $res['code'],
+                'reason' => $res['reason_code'],
+            ]);
+
+            return null;
+        }
+
+        return (array) $res['data'];
     }
 
     /** Cache-key namespace versioned by the actor's epoch (see bustCache). */
@@ -167,53 +149,33 @@ class MlmApiClient
     }
 
     /** Keep the OLDEST fetch time of the request — the honest "ข้อมูล ณ เวลา" stamp. */
-    private function noteFetchedAt(\Illuminate\Support\Carbon $ts): void
+    private function noteFetchedAt(Carbon $ts): void
     {
         if ($this->lastFetchedAt === null || $ts->lt($this->lastFetchedAt)) {
             $this->lastFetchedAt = $ts;
         }
     }
 
-    private function client(User $actor): PendingRequest
-    {
-        // The user's bearer token (set during the SSO callback). If the user
-        // logs out or rotates their token on Thaiprompt, every call will 401
-        // and we'll prompt the user to re-link.
-        $token = (string) $actor->thaiprompt_token;
-
-        // Tight timeout + ZERO retries when the API is offline — otherwise
-        // the page hangs ~24s while curl retries. We'd rather show empty
-        // data fast and let the user refresh.
-        $req = Http::acceptJson()->connectTimeout(3)->timeout(6);
-
-        if ($token !== '') {
-            $req = $req->withToken($token);
-        }
-        return $req;
-    }
-
     private function cachedGet(string $key, callable $fetch, int $ttl = self::CACHE_TTL): array
     {
         $wrapped = Cache::get($key);
 
-        if (!is_array($wrapped) || !array_key_exists('payload', $wrapped)) {
+        if (! is_array($wrapped) || ! array_key_exists('payload', $wrapped)) {
             $failed = false;
             try {
                 $data = $fetch();
-                if (!is_array($data)) {
-                    Log::warning("MlmApiClient: non-array response for $key");
-                    $data   = [];
+                if (! is_array($data)) {
+                    $data = [];
                     $failed = true;
                 }
             } catch (\Throwable $e) {
                 Log::warning("MlmApiClient call failed for $key", ['err' => $e->getMessage()]);
-                $data   = [];
+                $data = [];
                 $failed = true;
             }
-            // An empty payload is a failure in disguise (upstream 5xx bodies
-            // json-decode to null → []). Real stats/tree payloads always have
-            // keys; worst case a truly-empty payload just refetches sooner.
-            $failed  = $failed || $data === [];
+            // An empty payload is a failure in disguise. Real stats/tree payloads
+            // always have keys; worst case a truly-empty payload refetches sooner.
+            $failed = $failed || $data === [];
             $wrapped = ['payload' => $data, 'fetched_at' => now()->toIso8601String()];
             // A failed upstream call only lingers seconds — a Thaiprompt blip
             // must not pin zeroed-out totals on the dashboard for 5 minutes.
@@ -221,17 +183,11 @@ class MlmApiClient
         }
 
         // Record when this payload was actually pulled from upstream.
-        $ts = \Illuminate\Support\Carbon::make($wrapped['fetched_at'] ?? null);
+        $ts = Carbon::make($wrapped['fetched_at'] ?? null);
         if ($ts !== null) {
             $this->noteFetchedAt($ts);
         }
-        return is_array($wrapped['payload']) ? $wrapped['payload'] : [];
-    }
 
-    private function logFail($resp, string $endpoint): void
-    {
-        Log::warning("MlmApiClient: Thaiprompt $endpoint returned HTTP {$resp->status()}", [
-            'body' => $resp->body(),
-        ]);
+        return is_array($wrapped['payload']) ? $wrapped['payload'] : [];
     }
 }

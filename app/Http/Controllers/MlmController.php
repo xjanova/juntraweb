@@ -26,7 +26,7 @@ class MlmController extends Controller
         return view('pages.mlm.dashboard', [
             'auth'        => $auth,
             'isAdmin'     => $auth->isAdmin(),
-            'viewingSelf' => $targetId === null || $targetId === $auth->id,
+            'viewingSelf' => $targetId === null,
             'stats'       => $stats,
             'tree'        => $tree,
             'commissions' => $commissions,
@@ -110,14 +110,18 @@ class MlmController extends Controller
             ->withFragment($anchor);
     }
 
+    /**
+     * ผู้ใช้ที่จะดู: null = ตัวเอง · ตัวเลข = id ผู้ใช้ฝั่ง Thaiprompt (แอดมินเลือกจากรายชื่อ)
+     *
+     * id สองฝั่งเป็นคนละชุดกัน ห้ามเทียบกับ $auth->id — ไม่ใช่แอดมิน = ดูของตัวเองเสมอ
+     */
     private function resolveTarget(Request $request, User $auth): ?int
     {
         $explicit = $request->input('user_id');
-        if ($explicit !== null && (int) $explicit !== (int) $auth->id) {
-            // Only admin can target another user. If they aren't admin we
-            // just silently fall back to "self" — Thaiprompt will 403 too.
-            return $auth->isAdmin() ? (int) $explicit : null;
+        if ($explicit === null || $explicit === '' || ! $auth->isAdmin()) {
+            return null;
         }
-        return null;
+
+        return (int) $explicit > 0 ? (int) $explicit : null;
     }
 }

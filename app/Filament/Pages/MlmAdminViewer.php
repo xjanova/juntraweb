@@ -13,11 +13,11 @@ use Filament\Pages\Page;
  */
 class MlmAdminViewer extends Page
 {
-    protected static ?string $navigationIcon = 'heroicon-o-share';
-    protected static ?string $navigationLabel = 'ผังทีม MLM';
-    protected static ?string $title = 'ผังทีม MLM (จากดูดวง)';
-    protected static ?string $navigationGroup = 'ดูดวง';
-    protected static ?int $navigationSort = 80;
+    protected static ?string $navigationIcon = 'heroicon-o-eye';
+    protected static ?string $navigationLabel = 'หน้าสายงานแบบลูกค้า';
+    protected static ?string $title = 'หน้าสายงานแบบที่ลูกค้าเห็น';
+    protected static ?string $navigationGroup = 'ผังแม่หมอ';
+    protected static ?int $navigationSort = 5;
     protected static string $view = 'filament.pages.mlm-admin-viewer';
 
     public static function canAccess(): bool

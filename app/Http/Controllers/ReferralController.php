@@ -12,11 +12,8 @@ use Illuminate\Support\Facades\Cookie;
  * that 404'd (no route). This captures the referral code in a 30-day cookie and
  * lands the visitor on the homepage so the link works.
  *
- * NOTE: full commission attribution (crediting the inviter) lives upstream in
- * Thaiprompt's MLM — that requires Thaiprompt to (a) surface each user's
- * referral_code in /juntra/mlm/stats and (b) honor the code at registration.
- * The captured `juntra_ref` cookie is the juntra-side hook for when that wiring
- * lands; today it makes the invite link resolve + records intent.
+ * รหัสในคุกกี้ถูกย้ายไปเก็บฝั่งเซิร์ฟเวอร์ (users.pending_referral_code) ตอนสมัคร/ผูก Thaiprompt
+ * แล้วผังแม่หมอเป็นผู้ต่อสายใต้ผู้เชิญ (MaeMorAffiliate::ensureMember) — ค่าแนะนำคำนวณที่นั่นทั้งหมด
  */
 class ReferralController extends Controller
 {

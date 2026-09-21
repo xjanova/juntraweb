@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Affiliate\MaeMorAffiliate;
 use App\Services\Wallet\WalletService;
 use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
@@ -169,6 +170,12 @@ class AuthController extends Controller
         }
 
         $user = User::create($attributes);
+
+        // เข้าผังแม่หมอใต้ผู้เชิญหลังตอบแอพ — ไม่ต้องรอผูก Thaiprompt อีกแล้ว
+        //   (Thaiprompt ต่อไม่ได้ตอนนั้น → affiliate:sync-bills เก็บตกให้)
+        if (! empty($attributes['pending_referral_code'])) {
+            dispatch(fn () => app(MaeMorAffiliate::class)->ensureMember($user))->afterResponse();
+        }
 
         // Pre-create wallet so the first GET /wallet doesn't lazy-create
         // mid-request and leak the latency to the user.
