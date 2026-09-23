@@ -36,7 +36,7 @@ class ThaipromptSsoSignupTest extends TestCase
     }
 
     /** ยิง callback ด้วย state ที่ตรงกับใน session */
-    private function completeCallback(array $profile)
+    private function completeCallback(array $profile, array $session = [])
     {
         Http::fake([
             'tp.test/oauth/token' => Http::response([
@@ -50,7 +50,7 @@ class ThaipromptSsoSignupTest extends TestCase
 
         $state = Str::random(40);
 
-        return $this->withSession(['thaiprompt_oauth_state' => $state])
+        return $this->withSession(['thaiprompt_oauth_state' => $state] + $session)
             ->get('/auth/thaiprompt/callback?code=auth-code&state=' . $state);
     }
 
@@ -142,6 +142,117 @@ class ThaipromptSsoSignupTest extends TestCase
             ->assertRedirect();
 
         Http::assertNotSent(fn ($r) => str_contains($r->url(), '/affiliate/'));
+    }
+
+    /**
+     * 🔗 (2026-09-23) ลูกค้าที่ล็อกอินอยู่กดเชื่อม Thaiprompt ต้องผูกเข้าบัญชีนี้ — ไม่ใช่ได้บัญชีใหม่
+     *
+     * บั๊กที่ตรึง: callback หาผู้ใช้จากอีเมลอย่างเดียว ลูกค้าที่สมัครด้วยเบอร์โทร (อีเมลคนละอันกับ Thaiprompt)
+     *   ได้บัญชีจันทราใหม่อีกบัญชีแล้วถูกสลับไปล็อกอินบัญชีนั้น บัญชีเดิมไม่ถูกผูก → ผังแม่หมอไม่เคยรวม
+     *   บัญชีเงาของเขาเข้าบัญชี Thaiprompt ค่าแนะนำค้างอยู่ในกระเป๋าที่ไม่มีใครเข้าได้
+     */
+    public function test_logged_in_customer_links_their_own_account_instead_of_getting_a_new_one(): void
+    {
+        $customer = User::factory()->create([
+            'email' => '0812345678@phone.juntra.test',
+            'name' => 'ลูกค้าเบอร์โทร',
+            'role' => 'member',
+            'email_verified_at' => null,
+        ]);
+        $this->actingAs($customer);
+
+        $this->completeCallback(['id' => '9100', 'email' => 'real@thaiprompt.test', 'name' => 'somchai99'])
+            ->assertRedirect();
+
+        $this->assertSame(1, User::count(), 'ห้ามสร้างบัญชีจันทราใหม่');
+        $this->assertAuthenticatedAs($customer);
+        $customer->refresh();
+        $this->assertSame('9100', (string) $customer->thaiprompt_user_id);
+        $this->assertSame('ลูกค้าเบอร์โทร', $customer->name, 'ชื่อเป็นของลูกค้า — ไม่เอาชื่อ Thaiprompt มาทับ');
+        $this->assertSame('0812345678@phone.juntra.test', $customer->email);
+        $this->assertNull($customer->email_verified_at, 'อีเมลในบัญชีไม่ใช่อีเมลที่ Thaiprompt ยืนยัน');
+
+        // ผูกครั้งแรก = บอกผังแม่หมอให้รวมบัญชีเงาของลูกค้าคนนี้เข้าบัญชี Thaiprompt
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/affiliate/accounts')
+            && (int) $r['user_ref'] === $customer->id
+            && (string) $r['thaiprompt_user_id'] === '9100');
+    }
+
+    /** เชื่อมจากแอพ (mobile-start ล็อกอินให้ก่อน) → หน้า "กลับสู่แอพ" ของลูกค้าคนเดิม */
+    public function test_mobile_link_returns_to_the_app_for_the_same_customer(): void
+    {
+        $customer = User::factory()->create(['email' => '0822222222@phone.juntra.test', 'name' => 'ลูกค้าแอพ', 'role' => 'member']);
+        $this->actingAs($customer);
+
+        $this->completeCallback(['id' => '9150', 'email' => 'app@thaiprompt.test', 'name' => 'x'], ['thaiprompt_oauth_origin' => 'mobile'])
+            ->assertOk()
+            ->assertViewIs('pages.auth.oauth-mobile-success')
+            ->assertSee('ลูกค้าแอพ');
+
+        $this->assertSame('9150', (string) $customer->fresh()->thaiprompt_user_id);
+        $this->assertSame(1, User::count());
+    }
+
+    /** บัญชี Thaiprompt นี้เป็นของบัญชีจันทราอีกคนแล้ว — ไม่ย้ายมา และไม่สลับไปล็อกอินคนนั้นเงียบ ๆ */
+    public function test_linking_a_thaiprompt_account_that_belongs_to_another_customer_is_refused(): void
+    {
+        $owner = User::factory()->create(['email' => 'owner@example.com', 'role' => 'member', 'thaiprompt_user_id' => '9200']);
+        $customer = User::factory()->create(['email' => '0899999999@phone.juntra.test', 'role' => 'member']);
+        $this->actingAs($customer);
+
+        $this->completeCallback(['id' => '9200', 'email' => 'owner@example.com', 'name' => 'เจ้าของเดิม'])
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionHasErrors('thaiprompt');
+
+        $this->assertAuthenticatedAs($customer);
+        $this->assertNull($customer->fresh()->thaiprompt_user_id);
+        $this->assertSame('9200', (string) $owner->fresh()->thaiprompt_user_id);
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/affiliate/'));
+    }
+
+    /** ผูกไว้กับ Thaiprompt อีกบัญชีแล้ว — เปลี่ยนเองไม่ได้ (ผังแม่หมอผูกลูกค้ากับบัญชีแรกไว้ถาวร) */
+    public function test_account_linked_to_another_thaiprompt_account_is_not_relinked(): void
+    {
+        $customer = User::factory()->create(['email' => 'c@example.com', 'role' => 'member', 'thaiprompt_user_id' => '9300']);
+        $this->actingAs($customer);
+
+        $this->completeCallback(['id' => '9301', 'email' => 'other@example.com', 'name' => 'อีกบัญชี'])
+            ->assertSessionHasErrors('thaiprompt');
+
+        $this->assertSame('9300', (string) $customer->fresh()->thaiprompt_user_id);
+        $this->assertSame(1, User::count());
+    }
+
+    /**
+     * กดยกเลิกที่หน้า Thaiprompt ระหว่างเชื่อมบัญชี → กลับแดชบอร์ดพร้อมเหตุผล บัญชีเดิมไม่เปลี่ยน
+     *   (เดิมส่งไปหน้าเข้าสู่ระบบ ซึ่งไล่คนที่ล็อกอินอยู่ออกทันที ข้อความหายระหว่างทาง)
+     */
+    public function test_cancelling_at_thaiprompt_while_linking_keeps_the_customer_and_says_why(): void
+    {
+        $customer = User::factory()->create(['email' => '0833333333@phone.juntra.test', 'role' => 'member']);
+        $this->actingAs($customer);
+        $state = Str::random(40);
+
+        $this->withSession(['thaiprompt_oauth_state' => $state, 'thaiprompt_oauth_origin' => 'mobile'])
+            ->get('/auth/thaiprompt/callback?error=access_denied&state=' . $state)
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionHasErrors('thaiprompt')
+            ->assertSessionMissing('thaiprompt_oauth_origin');
+
+        $this->assertAuthenticatedAs($customer);
+        $this->assertNull($customer->fresh()->thaiprompt_user_id);
+    }
+
+    /** ยังไม่ล็อกอิน: บัญชีที่ผูก Thaiprompt คนนี้ไว้แล้วต้องมาก่อนบัญชีที่แค่อีเมลตรงกัน */
+    public function test_sign_in_prefers_the_linked_account_over_an_email_match(): void
+    {
+        User::factory()->create(['email' => 'same@thaiprompt.test', 'role' => 'member']);
+        $linked = User::factory()->create(['email' => '0811111111@phone.juntra.test', 'role' => 'member', 'thaiprompt_user_id' => '9400']);
+
+        $this->completeCallback(['id' => '9400', 'email' => 'same@thaiprompt.test', 'name' => 'x'])
+            ->assertRedirect();
+
+        $this->assertAuthenticatedAs($linked);
     }
 
     /** state ไม่ตรง = ต้องไม่สร้างบัญชีใด ๆ (กัน CSRF) */

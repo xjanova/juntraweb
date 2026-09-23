@@ -122,8 +122,14 @@
                             <td style="{{ $cell }};white-space:nowrap">
                                 {{ \Illuminate\Support\Carbon::parse($row['created_at'] ?? now())->timezone('Asia/Bangkok')->format('d/m/y H:i') }}
                             </td>
-                            <td style="{{ $cell }}">
-                                {{ $row['user']['name'] ?? '—' }}
+                            @php($central = \App\Filament\Pages\MaeMorCommissions::centralFallbackReason($row['notes'] ?? null))
+                            <td style="{{ $cell }}" title="{{ $row['notes'] ?? '' }}">
+                                @if ($central)
+                                    <x-filament::badge color="gray">กระเป๋ากลาง</x-filament::badge>
+                                    <div style="font-size:11px;opacity:.75;margin-top:2px">{{ $central }}</div>
+                                @else
+                                    {{ filled($row['user']['name'] ?? null) ? $row['user']['name'] : '—' }}
+                                @endif
                                 <div style="font-size:11px;opacity:.6">#{{ $row['user']['id'] ?? '' }}</div>
                             </td>
                             <td style="{{ $cell }}">

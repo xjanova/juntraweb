@@ -37,6 +37,16 @@ class MaeMorAdminPagesTest extends TestCase
         'created_at' => '2026-09-21T10:00:00+07:00',
     ];
 
+    /** ผู้เชิญไม่ active → แม่หมอโอนส่วนนั้นเข้ากระเป๋ากลาง (บัญชีกลางบน prod ไม่มีชื่อ) */
+    private const CENTRAL_ROW = [
+        'id' => 57, 'level' => 1, 'amount' => 3.9, 'commission_type' => 'percent', 'commission_rate' => 10,
+        'status' => 'paid', 'user' => ['id' => 1, 'name' => '', 'email' => 'root@thaiprompt.test'],
+        'from_user' => ['id' => 13, 'name' => 'ลูกค้าของผู้เชิญที่ไม่ active'],
+        'reading' => ['id' => 78, 'bill_reference' => 'JW-502', 'source' => 'juntra', 'amount' => 39],
+        'notes' => '[CENTRAL_FALLBACK:sponsor_inactive] ค่าแนะนำดูดวง L1 (สายตรง) 3.9 บาท — ผู้แนะนำไม่ active (ไม่ roll up)',
+        'created_at' => '2026-09-21T11:00:00+07:00',
+    ];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -59,7 +69,7 @@ class MaeMorAdminPagesTest extends TestCase
                 str_contains($url, '/admin/commissions/55/reject') => Http::response(['data' => ['status' => 'rejected']]),
                 str_contains($url, '/admin/commissions/manual') => Http::response(['data' => ['id' => 56]], 201),
                 str_contains($url, '/admin/commissions') => Http::response([
-                    'data' => [self::ROW], 'meta' => ['current_page' => 1, 'last_page' => 1, 'total' => 1],
+                    'data' => [self::ROW, self::CENTRAL_ROW], 'meta' => ['current_page' => 1, 'last_page' => 1, 'total' => 2],
                 ]),
                 str_contains($url, '/admin/settings') => Http::response(['data' => [
                     'fortune_affiliate_enabled' => true, 'fortune_central_fallback_enabled' => true,
@@ -75,6 +85,17 @@ class MaeMorAdminPagesTest extends TestCase
                         ['id' => 4, 'user_id' => 10, 'name' => 'ลูกค้าเบอร์โทร', 'is_juntra' => true, 'children' => []],
                         ['id' => 5, 'user_id' => 11, 'name' => 'สมาชิกบอทแม่หมอ', 'is_juntra' => false, 'children' => []],
                     ],
+                ]]),
+                // ลูกค้าที่สมัครโดยไม่มีผู้เชิญ — ตำแหน่งที่จันทราสร้าง อยู่ใต้ผู้แนะนำเริ่มต้นที่หลังบ้านนี้เปิดผังไม่ได้
+                str_contains($url, '/admin/users/12/stats') => Http::response([
+                    'user' => ['name' => 'ลูกค้าไม่มีผู้เชิญ'], 'totals' => ['this_month' => 0, 'all_time' => 0, 'reversed' => 0],
+                    'mlm' => ['member_code' => 'NOREF12', 'total_team_members' => 0, 'direct_referrals' => 0],
+                ]),
+                str_contains($url, '/admin/users/12/tree') => Http::response(['tree' => [
+                    'id' => 6, 'user_id' => 12, 'name' => 'ลูกค้าไม่มีผู้เชิญ', 'is_juntra' => true, 'children' => [],
+                ]]),
+                str_contains($url, '/admin/members/6/move') => Http::response(['data' => [
+                    'member_id' => 6, 'old_sponsor_id' => 77, 'new_sponsor_id' => 3,
                 ]]),
                 str_contains($url, '/admin/users') => Http::response(['data' => [['id' => 9, 'name' => 'ผู้เชิญ', 'email' => 'a@b.c', 'juntra_user_id' => 42]]]),
                 default => Http::response(null, 404),
@@ -170,8 +191,54 @@ class MaeMorAdminPagesTest extends TestCase
             ->assertSee('ลูกค้าเบอร์โทร')
             ->assertSee('สมาชิกบอทแม่หมอ');
 
-        // ปุ่มย้ายสายขึ้นเฉพาะลูกค้าจันทรา (สมาชิกบอทจัดการที่หลังบ้านแม่หมอ) — ไม่ขึ้นที่ต้นสายด้วย
+        // ปุ่มย้ายสายขึ้นเฉพาะลูกค้าจันทรา (สมาชิกบอทจัดการที่หลังบ้านแม่หมอ) — ต้นผังนี้ไม่ใช่ลูกค้าจันทรา
         $this->assertSame(1, substr_count($page->html(), 'ย้ายสาย'));
+    }
+
+    /**
+     * 🔧 (2026-09-23) ลูกค้าที่สมัครโดยไม่มีผู้เชิญอยู่ใต้ผู้แนะนำเริ่มต้น — หลังบ้านจันทราเปิดผังนั้นไม่ได้
+     *   เดิมซ่อนปุ่มย้ายสายที่ต้นผัง ลูกค้ากลุ่มนี้จึงย้ายจากหลังบ้านจันทราไม่ได้เลย ทั้งที่แม่หมออนุญาต
+     */
+    public function test_a_juntra_customer_at_the_root_of_the_view_can_be_moved(): void
+    {
+        $admin = $this->admin();
+        $this->actingAs($admin);
+
+        $page = Livewire::test(MaeMorTree::class)
+            ->call('show', 12)
+            ->assertSee('NOREF12');
+        $this->assertSame(1, substr_count($page->html(), 'ย้ายสาย'), 'ต้นผังที่เป็นลูกค้าจันทราต้องมีปุ่มย้ายสาย');
+
+        $page->callAction('move', ['new_sponsor_member_id' => 3, 'notes' => 'ลูกค้าบอกว่าผู้เชิญคือคนนี้'], arguments: ['member' => 6, 'name' => 'ลูกค้าไม่มีผู้เชิญ'])
+            ->assertHasNoActionErrors()
+            ->assertNotified();
+
+        Http::assertSent(fn (Request $r) => str_contains($r->url(), '/admin/members/6/move')
+            && (int) $r['new_sponsor_member_id'] === 3
+            && $r['actor']['juntra_user_id'] === $admin->id);
+    }
+
+    /** ผู้เชิญไม่ active → ส่วนของเขาเข้ากระเป๋ากลาง — แอดมินต้องเห็นว่าเข้ากระเป๋ากลางเพราะอะไร ไม่ใช่ช่องผู้รับว่าง */
+    public function test_central_wallet_rows_say_why_the_inviter_was_not_paid(): void
+    {
+        $this->actingAs($this->admin());
+
+        Livewire::test(MaeMorCommissions::class)
+            ->assertSee('JW-502')
+            ->assertSee('กระเป๋ากลาง')
+            ->assertSee('ผู้แนะนำไม่ active ตามเกณฑ์รักษายอดของแม่หมอ');
+    }
+
+    public function test_central_fallback_reason_reads_only_the_mae_mor_tag(): void
+    {
+        $this->assertNull(MaeMorCommissions::centralFallbackReason(null));
+        $this->assertNull(MaeMorCommissions::centralFallbackReason('ค่าแนะนำดูดวง L1 (สายตรง) 9.9 บาท'));
+        $this->assertNull(MaeMorCommissions::centralFallbackReason('[สร้างด้วยมือ] ชดเชย'));
+        $this->assertSame('ลูกค้าไม่มีผู้แนะนำ', MaeMorCommissions::centralFallbackReason('[CENTRAL_FALLBACK:no_referrer] ค่าแนะนำดูดวง L1'));
+        // ถูกดึงคืนภายหลัง หมายเหตุต่อท้ายเพิ่ม — ป้ายเดิมยังอยู่
+        $this->assertSame('ไม่มีผู้รับชั้นหลาน', MaeMorCommissions::centralFallbackReason('[CENTRAL_FALLBACK:no_grandparent] L2 | ⛔ REVERSED: void approval บิล #9'));
+        // เหตุผลใหม่ที่ยังไม่รู้จัก — แสดงรหัสตรง ๆ ดีกว่าเงียบ
+        $this->assertSame('some_new_reason', MaeMorCommissions::centralFallbackReason('[CENTRAL_FALLBACK:some_new_reason] L1'));
     }
 
     public function test_failed_bills_can_be_queued_again(): void

@@ -117,32 +117,32 @@ class ThaipromptController extends Controller
     public function callback(Request $request, ThaipromptClient $client)
     {
         if (!$client->isEnabled()) {
-            return redirect()->route('login')->withErrors(['email' => 'Thaiprompt SSO ปิดอยู่']);
+            return $this->fail($request, 'Thaiprompt SSO ปิดอยู่');
         }
 
         // CSRF — match state we put in session
         $expected = $request->session()->pull('thaiprompt_oauth_state');
         if (!$expected || !hash_equals($expected, (string) $request->query('state', ''))) {
-            return redirect()->route('login')->withErrors(['email' => 'state ไม่ตรง — กรุณาลองใหม่อีกครั้ง']);
+            return $this->fail($request, 'state ไม่ตรง — กรุณาลองใหม่อีกครั้ง');
         }
 
         if ($err = $request->query('error')) {
-            return redirect()->route('login')->withErrors(['email' => 'Thaiprompt ปฏิเสธ: ' . $err]);
+            return $this->fail($request, 'Thaiprompt ปฏิเสธ: ' . $err);
         }
 
         $code = (string) $request->query('code', '');
         if ($code === '') {
-            return redirect()->route('login')->withErrors(['email' => 'ไม่ได้รับ authorization code']);
+            return $this->fail($request, 'ไม่ได้รับ authorization code');
         }
 
         $token = $client->exchangeCode($code);
         if (!$token || empty($token['access_token'])) {
-            return redirect()->route('login')->withErrors(['email' => 'แลก token ไม่สำเร็จ']);
+            return $this->fail($request, 'แลก token ไม่สำเร็จ');
         }
 
         $profile = $client->fetchUser($token['access_token']);
         if (!$profile || empty($profile['email'])) {
-            return redirect()->route('login')->withErrors(['email' => 'ดึงข้อมูลผู้ใช้จาก Thaiprompt ไม่สำเร็จ']);
+            return $this->fail($request, 'ดึงข้อมูลผู้ใช้จาก Thaiprompt ไม่สำเร็จ');
         }
 
         $email = strtolower((string) $profile['email']);
@@ -157,7 +157,24 @@ class ThaipromptController extends Controller
         $fbId    = (string) ($profile['facebook_user_id'] ?? $profile['fb_psid'] ?? '');
         $signup  = (string) ($profile['signup_via'] ?? '');
 
-        $user = User::where('email', $email)->orWhere('thaiprompt_user_id', $tpId)->first();
+        // 🔗 (2026-09-23) ล็อกอินอยู่แล้ว (แอพส่งมาทาง mobile-start / ปุ่มในหน้าเว็บ) = ผูก Thaiprompt เข้าบัญชีนี้
+        //   ห้ามหาจากอีเมลแล้วสลับคน: ลูกค้าที่สมัครด้วยเบอร์โทรมีอีเมลคนละอันกับ Thaiprompt — เดิมกดเชื่อมแล้ว
+        //   ได้บัญชีจันทราใหม่อีกบัญชี ถูกสลับไปล็อกอินบัญชีนั้น บัญชีเดิมไม่ถูกผูก ผังแม่หมอจึงไม่รวมบัญชีเงา
+        //   ของเขาเข้าบัญชี Thaiprompt และค่าแนะนำค้างในกระเป๋าที่ไม่มีใครเข้าได้
+        $current = $request->user();
+        if ($current) {
+            $refusal = $this->linkRefusal($current, $tpId);
+            if ($refusal !== null) {
+                Log::info('Thaiprompt link refused', ['user_id' => $current->id, 'thaiprompt_user_id' => $tpId]);
+
+                return $this->fail($request, $refusal);
+            }
+            $user = $current;
+        } else {
+            // บัญชีที่ผูก Thaiprompt คนนี้ไว้แล้วมาก่อน — อีเมลซ้ำกับอีกบัญชีต้องไม่พาไปล็อกอินผิดคน
+            $user = ($tpId !== '' ? User::where('thaiprompt_user_id', $tpId)->first() : null)
+                ?? User::where('email', $email)->first();
+        }
         if (!$user) {
             $user = new User();
             $user->email = $email;
@@ -170,7 +187,10 @@ class ThaipromptController extends Controller
             // ส่วนคนเก่าไม่เจอ เพราะ query ด้านบนหาเจอแล้วไม่แตะ role
         }
 
-        $user->name = $name;
+        // ผูกเข้าบัญชีที่ล็อกอินอยู่ = ชื่อและช่องทางสมัครเป็นของลูกค้าเอง ไม่เอาของ Thaiprompt มาทับ
+        if (! $current) {
+            $user->name = $name;
+        }
         $user->thaiprompt_user_id = $tpId !== '' ? $tpId : $user->thaiprompt_user_id;
         $user->thaiprompt_token   = $token['access_token'];
         // Keep the refresh token + expiry so a stale access token can be
@@ -187,20 +207,25 @@ class ThaipromptController extends Controller
         if ($fbId   !== '') $user->facebook_user_id = $fbId;
 
         // Derive signup_via if upstream didn't set one explicitly.
-        if ($signup !== '') {
+        if ($signup !== '' && ! $current) {
             $user->signup_via = $signup;
         } elseif (!$user->signup_via) {
             $user->signup_via = $fbId !== '' ? 'facebook'
                               : ($lineId !== '' ? 'line' : 'thaiprompt');
         }
 
-        if (!$user->email_verified_at) {
+        // Thaiprompt ยืนยันอีเมลของบัญชีนั้นแล้ว — นับเป็นยืนยันเฉพาะเมื่อเป็นอีเมลเดียวกัน
+        //   (บัญชีเบอร์โทรที่มาผูก มีอีเมลที่ระบบสร้างให้ ไม่ใช่อีเมลที่ Thaiprompt ยืนยัน)
+        if (!$user->email_verified_at && strtolower((string) $user->email) === $email) {
             $user->email_verified_at = now();
         }
         $user->save();
 
-        Auth::login($user, true);
-        $request->session()->regenerate();
+        // ผูกเข้าบัญชีที่ล็อกอินอยู่ = ไม่ล็อกอินซ้ำ (เซสชันจากแอพตั้งใจให้สั้น — ห้ามติด remember)
+        if (! $current) {
+            Auth::login($user, true);
+            $request->session()->regenerate();
+        }
 
         // Referral attribution — the จันทรา.online/r/{code} landing stored the
         // inviter's member_code in a 30-day cookie. Now that this user has a
@@ -226,6 +251,45 @@ class ThaipromptController extends Controller
             $redirect->with('status', $referralStatus);
         }
         return $redirect;
+    }
+
+    /**
+     * SSO ไม่สำเร็จ — ล็อกอินอยู่ (กำลังเชื่อมบัญชี) กลับแดชบอร์ดพร้อมเหตุผล · ยังไม่ล็อกอิน ไปหน้าเข้าสู่ระบบแบบเดิม
+     *
+     * หน้าเข้าสู่ระบบไล่คนที่ล็อกอินอยู่ออกทันที (middleware guest) ข้อความจะหายไประหว่างทาง
+     */
+    private function fail(Request $request, string $message): RedirectResponse
+    {
+        if ($request->user()) {
+            $request->session()->forget('thaiprompt_oauth_origin');
+
+            return redirect()->route('dashboard')->withErrors(['thaiprompt' => $message]);
+        }
+
+        return redirect()->route('login')->withErrors(['email' => $message]);
+    }
+
+    /**
+     * ผูก Thaiprompt เข้าบัญชีที่ล็อกอินอยู่ได้ไหม — null = ได้ · ข้อความ = เหตุที่ไม่ให้ผูก
+     *
+     * ไม่ย้ายบัญชี Thaiprompt ข้ามบัญชีจันทรา และไม่สลับไปล็อกอินบัญชีอื่นเงียบ ๆ —
+     * ผังแม่หมอผูกลูกค้าจันทรากับบัญชี Thaiprompt ที่ผูกครั้งแรกไว้ถาวร ย้ายเองแล้วสองฝั่งจะไม่ตรงกัน
+     */
+    private function linkRefusal(User $current, string $tpId): ?string
+    {
+        if ($tpId === '') {
+            return 'ดึงข้อมูลบัญชี Thaiprompt ไม่ครบ — กรุณาลองใหม่อีกครั้ง';
+        }
+
+        if ($current->thaiprompt_user_id && (string) $current->thaiprompt_user_id !== $tpId) {
+            return 'บัญชีนี้ผูกกับบัญชี Thaiprompt อื่นอยู่แล้ว — ใช้บัญชี Thaiprompt เดิมเข้าสู่ระบบ หรือติดต่อแอดมิน';
+        }
+
+        if (User::where('thaiprompt_user_id', $tpId)->whereKeyNot($current->id)->exists()) {
+            return 'บัญชี Thaiprompt นี้ผูกกับบัญชีจันทราอื่นอยู่แล้ว — ถ้าจะใช้บัญชีนั้นให้ออกจากระบบแล้วเข้าด้วย Thaiprompt หรือติดต่อแอดมินเพื่อรวมบัญชี';
+        }
+
+        return null;
     }
 
     /**

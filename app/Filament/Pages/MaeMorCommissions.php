@@ -180,6 +180,29 @@ class MaeMorCommissions extends Page
         ];
     }
 
+    /**
+     * ค่าแนะนำที่แม่หมอโอนเข้ากระเป๋ากลางแทนผู้แนะนำ → เหตุผลภาษาไทย · null = จ่ายผู้แนะนำตามปกติ
+     *
+     * แม่หมอบอกผ่านหมายเหตุ "[CENTRAL_FALLBACK:เหตุผล] …" (FortuneCommissionService::payToCentralWallet)
+     *   ไม่แปลไว้ ช่องผู้รับจะเป็นชื่อบัญชีกลาง (ว่างอยู่) แอดมินไม่รู้ว่าทำไมผู้เชิญไม่ได้ค่าแนะนำ
+     */
+    public static function centralFallbackReason(?string $notes): ?string
+    {
+        if (! preg_match('/\[CENTRAL_FALLBACK:([a-z_]+)\]/', (string) $notes, $m)) {
+            return null;
+        }
+
+        return match ($m[1]) {
+            'no_referrer' => 'ลูกค้าไม่มีผู้แนะนำ',
+            'sponsor_missing' => 'ไม่พบผู้แนะนำในผัง',
+            'sponsor_inactive' => 'ผู้แนะนำไม่ active ตามเกณฑ์รักษายอดของแม่หมอ',
+            'no_grandparent' => 'ไม่มีผู้รับชั้นหลาน',
+            'grandparent_missing' => 'ไม่พบผู้รับชั้นหลานในผัง',
+            'grandparent_inactive' => 'ผู้รับชั้นหลานไม่ active ตามเกณฑ์รักษายอดของแม่หมอ',
+            default => $m[1],
+        };
+    }
+
     /* ============================================================ */
 
     private function bulk(callable $call, string $verb): void
