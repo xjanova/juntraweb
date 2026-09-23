@@ -75,11 +75,42 @@
   }
   .spread-card.is-selected::before { opacity: 1; }
 
+  /* ภาพประจำแพ็กเกจ (images/juntra/art/tarot/{key}.webp) — ไม่มีไฟล์ = การ์ดแบบเดิม */
+  .spread-art {
+    position: relative;
+    margin: -24px -22px 0;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line-soft);
+    transition: border-color .35s;
+  }
+  .spread-art img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform .6s cubic-bezier(.2,.7,.2,1);
+  }
+  /* ไล่มืดลงล่าง — เหรียญตรากับราคาที่ซ้อนขอบล่างอ่านง่าย และภาพกลืนกับการ์ด */
+  .spread-art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(7,4,26,0) 45%, rgba(7,4,26,.88));
+    pointer-events: none;
+  }
+  .spread-card:hover .spread-art img { transform: scale(1.04); }
+  .spread-card.is-selected .spread-art { border-bottom-color: var(--gold); }
+
   .spread-card__top {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+  }
+  .spread-art + .spread-card__top {
+    position: relative;
+    margin-top: -40px;
   }
   .spread-medallion {
     display: grid;
@@ -220,6 +251,14 @@
       @foreach ($spreads as $s)
         <label class="spread-card" :class="spread === '{{ $s['key'] }}' ? 'is-selected' : ''">
           <input type="radio" name="spread_radio" value="{{ $s['key'] }}" x-model="spread" class="spread-radio">
+
+          {{-- ภาพประกอบแพ็กเกจ (เจนด้วย ChatGPT ชุดเดียวกันทั้ง 8 ใบ) — แพ็กเกจใหม่ที่ยังไม่มีภาพ = การ์ดแบบเดิม --}}
+          @php($art = 'images/juntra/art/tarot/'.$s['key'].'.webp')
+          @if (file_exists(public_path($art)))
+            <div class="spread-art" aria-hidden="true">
+              <img src="{{ asset($art) }}" alt="" width="800" height="450" loading="lazy" decoding="async">
+            </div>
+          @endif
 
           <div class="spread-card__top">
             <span class="spread-medallion" aria-hidden="true">

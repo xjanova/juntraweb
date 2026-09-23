@@ -45,8 +45,21 @@
       'key' => $k, 'name' => $m['name_th'], 'en' => $m['name_en'], 'eyebrow' => $m['eyebrow'],
       'tagline' => $m['tagline'], 'count' => count($m['positions']),
       'price' => \App\Support\Pricing::for(\App\Support\TarotSpreads::priceKey($k)),
+      // ภาพประจำแพ็กเกจชุดเดียวกับหน้าไพ่ — ไม่มีไฟล์ = การ์ดไอคอนแบบเดิม
+      'art' => file_exists(public_path("images/juntra/art/tarot/{$k}.webp")) ? "images/juntra/art/tarot/{$k}.webp" : null,
   ])->values();
 @endphp
+@push('head')
+<style>
+  /* ภาพเต็มขอบบนของการ์ด (การ์ด padding 36px 28px ในธีม) — ไล่มืดลงล่างให้กลืนกับตัวการ์ด */
+  .service-art { position: relative; margin: -36px -28px 22px; aspect-ratio: 16 / 9; overflow: hidden; border-bottom: 1px solid rgba(231,201,122,.18); }
+  .service-art img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .7s cubic-bezier(.2,.7,.3,1); }
+  .service-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(15,8,28,0) 50%, rgba(15,8,28,.85)); pointer-events: none; }
+  .service:hover .service-art img { transform: scale(1.05); }
+  /* ป้ายราคาลอยบนภาพ — ต้องมีพื้นให้อ่านออก */
+  .service.has-art .price-tag { z-index: 1; background: rgba(15,8,28,.72); backdrop-filter: blur(4px); }
+</style>
+@endpush
 <section class="section" id="services">
   <div class="section-head reveal">
     <div class="section-eyebrow">Tarot · {{ $homeSpreads->count() }} แพ็กเกจ</div>
@@ -56,9 +69,15 @@
 
   <div class="services">
     @foreach ($homeSpreads as $s)
-      <div class="service reveal">
+      <div class="service reveal {{ $s['art'] ? 'has-art' : '' }}">
         <span class="price-tag">{{ $s['price'] > 0 ? '฿'.number_format($s['price'], $s['price'] == intval($s['price']) ? 0 : 2) : 'ฟรี' }}</span>
-        <div class="icon"><x-glyph name="tarot" :size="30" /></div>
+        @if ($s['art'])
+          <div class="service-art" aria-hidden="true">
+            <img src="{{ asset($s['art']) }}" alt="" width="800" height="450" loading="lazy" decoding="async">
+          </div>
+        @else
+          <div class="icon"><x-glyph name="tarot" :size="30" /></div>
+        @endif
         <h3>{{ $s['name'] }}</h3>
         <div class="duration">{{ $s['count'] }} ใบ · {{ $s['en'] }}</div>
         <p>{{ $s['tagline'] }}</p>
