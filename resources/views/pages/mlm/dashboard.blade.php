@@ -5,6 +5,8 @@
 @push('head')
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  {{-- ผังสายงาน: ลาก · ลูกกลิ้งเมาส์ซูม · สองนิ้ว · เต็มจอ (ตัวเดียวกับหน้าผังในหลังบ้าน) --}}
+  <script src="{{ asset('js/org-chart-panzoom.js') }}?v={{ @filemtime(public_path('js/org-chart-panzoom.js')) }}"></script>
 @endpush
 
 @php
@@ -231,7 +233,7 @@
 
         {{-- view toggle --}}
         <div class="mlm-seg">
-          <button :class="view === 'chart' && 'on'" @click="view = 'chart'">ผัง</button>
+          <button :class="view === 'chart' && 'on'" @click="view = 'chart'; $nextTick(() => zoomFit())">ผัง</button>
           <button :class="view === 'list' && 'on'" @click="view = 'list'">รายชื่อ</button>
         </div>
 
@@ -240,15 +242,19 @@
             <button class="mlm-ctl" @click="expandAll()" title="ขยายทุกชั้น">⊞</button>
             <button class="mlm-ctl" @click="collapseAll()" title="ย่อเหลือสายตรง">⊟</button>
             <span style="width:10px"></span>
-            <button class="mlm-ctl" @click="zoomBy(-0.15)" title="ซูมออก">−</button>
+            <button class="mlm-ctl" @click="zoomBy(1 / 1.2)" title="ซูมออก">−</button>
             <button class="mlm-ctl" @click="zoomFit()" title="พอดีจอ" style="font-size:10px;width:auto;padding:0 10px" x-text="`${Math.round(zoom*100)}%`"></button>
-            <button class="mlm-ctl" @click="zoomBy(0.15)" title="ซูมเข้า">+</button>
+            <button class="mlm-ctl" @click="zoomBy(1.2)" title="ซูมเข้า">+</button>
+            <button class="mlm-ctl" @click="toggleFullscreen()" :title="fullscreen ? 'ออกจากเต็มจอ (Esc)' : 'ดูเต็มจอ'" :aria-label="fullscreen ? 'ออกจากเต็มจอ' : 'ดูเต็มจอ'">
+              <svg x-show="!fullscreen" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+              <svg x-show="fullscreen" x-cloak viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+            </button>
           </div>
         </template>
       </div>
 
       <div style="font-size:11.5px;color:var(--ink-faint);margin-bottom:16px">
-        <template x-if="hasTree"><span>คลิกการ์ดเพื่อดูรายละเอียด · คลิกป้าย "ทีม" เพื่อย่อ/ขยายสาย · ลากเพื่อเลื่อนผัง</span></template>
+        <template x-if="hasTree"><span>คลิกการ์ดเพื่อดูรายละเอียด · คลิกป้าย "ทีม" เพื่อย่อ/ขยายสาย · ลากเพื่อเลื่อนผัง · หมุนลูกกลิ้งเมาส์เพื่อซูม · ปุ่มมุมขวาเพื่อดูเต็มจอ</span></template>
       </div>
 
       {{-- legend --}}
@@ -261,7 +267,7 @@
       </div>
 
       {{-- chart view --}}
-      <div x-show="view === 'chart'" style="position:relative">
+      <div x-show="view === 'chart'" class="mlm-chart-wrap" style="position:relative">
         <template x-if="!hasTree">
           <div style="text-align:center;padding:56px 20px">
             <div style="font-size:44px;margin-bottom:12px">🌙</div>
@@ -378,6 +384,8 @@
   @media (max-width: 900px) {
     .mlm-two-col { grid-template-columns: 1fr !important; }
   }
+  /* กราฟรายได้ (canvas) ดันคอลัมน์ให้กว้างเกินจอมือถือ ~14px จนหน้าเลื่อนข้างได้ — ให้หดตามกรอบ */
+  .mlm-two-col > * { min-width: 0; }
 
   .mlm-kpi { position: relative; overflow: hidden; }
   .mlm-kpi::after {
@@ -417,19 +425,31 @@
   }
   .mlm-lg::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 
-  /* ── org chart ── */
+  /* ── org chart ──
+     ลาก · ลูกกลิ้งเมาส์ซูมตรงจุดที่ชี้ · สองนิ้วซูม · เต็มจอ → public/js/org-chart-panzoom.js
+     ผังเลื่อนด้วย transform ในกรอบที่ไม่เลื่อน (overflow:hidden) — ซูมแล้วขอบเขตเลื่อนไม่เพี้ยน
+     มือถือนอกโหมดเต็มจอ: ปัดขึ้นลง = เลื่อนหน้าเว็บ (pan-y) ไม่ติดอยู่ในผัง */
   .mlm-viewport {
-    overflow: auto; border-radius: 16px; border: 1px solid var(--line-soft);
+    position: relative; overflow: hidden; border-radius: 16px; border: 1px solid var(--line-soft);
     background:
       radial-gradient(1.5px 1.5px at 18% 30%, rgba(246,239,224,.25) 45%, transparent 55%),
       radial-gradient(1px 1px at 66% 12%, rgba(246,239,224,.2) 45%, transparent 55%),
       radial-gradient(1.5px 1.5px at 84% 64%, rgba(244,207,106,.25) 45%, transparent 55%),
       radial-gradient(1px 1px at 38% 78%, rgba(246,239,224,.18) 45%, transparent 55%),
       linear-gradient(180deg, rgba(7,4,26,.55), rgba(7,4,26,.75));
-    max-height: 560px; min-height: 300px; cursor: grab; user-select: none;
+    height: clamp(340px, 62vh, 640px); cursor: grab; user-select: none; touch-action: pan-y;
   }
-  .mlm-viewport.dragging { cursor: grabbing; }
-  .mlm-canvas { transform-origin: top left; padding: 34px 40px 48px; width: max-content; margin: 0 auto; }
+  .mlm-viewport.is-panning { cursor: grabbing; }
+  .mlm-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; padding: 34px 40px 48px; width: max-content; }
+
+  /* เต็มจอ (Fullscreen API หรือขยายเต็มหน้าบนเบราว์เซอร์ที่ไม่รองรับ) — ผังกินพื้นที่ที่เหลือทั้งหมด */
+  #team.is-fullscreen {
+    display: flex; flex-direction: column; width: 100vw; height: 100vh; max-width: none;
+    margin: 0 !important; padding: 16px 20px !important; border-radius: 0;
+    background: #0a0612 !important; overflow: auto;
+  }
+  #team.is-fullscreen .mlm-chart-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #team.is-fullscreen .mlm-viewport { flex: 1; height: auto; min-height: 0; touch-action: none; }
 
   .mlm-chart ul { display: flex; justify-content: center; list-style: none; margin: 0; padding: 26px 0 0; position: relative; }
   .mlm-chart li { display: flex; flex-direction: column; align-items: center; position: relative; padding: 26px 9px 0; }
@@ -542,6 +562,7 @@
 
 <script>
 const monthlySeries = @js($stats['monthly_series'] ?? []);
+let mlmPanZoom = null; // ตัวเลื่อน/ซูมของผังสายงาน (หน้าเดียวมีผังเดียว)
 
 document.addEventListener('alpine:init', () => {
   Alpine.data('mlmDashboard', (init) => ({
@@ -559,6 +580,7 @@ document.addEventListener('alpine:init', () => {
     // network chart state
     view: 'chart',
     zoom: 1,
+    fullscreen: false,
     hasTree: false,
     flat: [],       // flattened nodes for the list view
     selected: null, // node detail card
@@ -768,35 +790,23 @@ document.addEventListener('alpine:init', () => {
         if (card) this.selected = this.nodeMap.get(card.dataset.node) || null;
       });
 
-      // drag-to-pan (mouse; touch scrolls natively)
-      let drag = null;
-      vp.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.mlm-node, .mlm-toggle')) return;
-        drag = { x: e.clientX, y: e.clientY, l: vp.scrollLeft, t: vp.scrollTop };
-        vp.classList.add('dragging');
-      });
-      window.addEventListener('mousemove', (e) => {
-        if (!drag) return;
-        vp.scrollLeft = drag.l - (e.clientX - drag.x);
-        vp.scrollTop  = drag.t - (e.clientY - drag.y);
-      });
-      window.addEventListener('mouseup', () => { drag = null; vp.classList.remove('dragging'); });
+      // ลาก · ลูกกลิ้งเมาส์ซูมตรงจุดที่ชี้ · สองนิ้ว · เต็มจอ (public/js/org-chart-panzoom.js)
+      //   ลากจากบนการ์ดก็ได้ — ขยับไม่ถึง 4px ยังนับเป็นคลิกเปิดรายละเอียด
+      //   ตัวควบคุมเก็บนอก Alpine (mlmPanZoom) ไม่ให้ถูกห่อเป็น reactive proxy
+      if (window.OrgPanZoom) {
+        mlmPanZoom = window.OrgPanZoom(vp, document.getElementById('mlmCanvas'), {
+          fitMin: 0.35, // เท่าเดิมก่อนมีตัวนี้ (ปุ่มพอดีจอเดิมไม่ย่อต่ำกว่า 35%)
+          noPan: '.mlm-toggle, a, button, input, select',
+          fullscreenTarget: document.getElementById('team'),
+          onChange: (z) => { this.zoom = z; },
+          onFullscreen: (on) => { this.fullscreen = on; },
+        });
+      }
     },
 
-    setZoom(z) {
-      this.zoom = Math.min(1.6, Math.max(0.35, z));
-      const c = document.getElementById('mlmCanvas');
-      if (c) c.style.transform = `scale(${this.zoom})`;
-    },
-    zoomBy(dz) { this.setZoom(this.zoom + dz); },
-    zoomFit() {
-      const vp = document.getElementById('mlmViewport');
-      const c = document.getElementById('mlmCanvas');
-      if (!vp || !c) return;
-      c.style.transform = 'scale(1)';
-      const w = c.scrollWidth || 1;
-      this.setZoom(Math.min(1, (vp.clientWidth - 24) / w));
-    },
+    zoomBy(factor) { mlmPanZoom?.zoomBy(factor); },
+    zoomFit() { mlmPanZoom?.fit(); },
+    toggleFullscreen() { mlmPanZoom?.toggleFullscreen(); },
     expandAll() {
       document.querySelectorAll('#mlmChart li.collapsed').forEach(li => {
         li.classList.remove('collapsed');

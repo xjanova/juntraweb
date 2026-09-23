@@ -159,6 +159,12 @@ class MlmSyncTest extends TestCase
             ->assertSee('TEST123')          // referral code surfaced
             ->assertSee('ดึงยอดสด')          // live-refresh button
             ->assertSee(route('referral', ['code' => 'TEST123']), false);
+
+        // 🔍 (2026-09-23) เจ้าของสั่ง: ผังดูเต็มจอได้ และซูมด้วยลูกกลิ้งเมาส์ — ตัวสั่งงานต้องมากับหน้า
+        $this->assertFileExists(public_path('js/org-chart-panzoom.js'));
+        $r->assertSee('js/org-chart-panzoom.js', false)
+            ->assertSee('toggleFullscreen()', false)
+            ->assertSee('หมุนลูกกลิ้งเมาส์เพื่อซูม');
     }
 
     /**

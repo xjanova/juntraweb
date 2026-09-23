@@ -94,6 +94,18 @@ class MaeMorAdminPagesTest extends TestCase
                 str_contains($url, '/admin/users/12/tree') => Http::response(['tree' => [
                     'id' => 6, 'user_id' => 12, 'name' => 'ลูกค้าไม่มีผู้เชิญ', 'is_juntra' => true, 'children' => [],
                 ]]),
+                // สายใหญ่: ต้นสาย + สายตรง 6 คน คนละ 8 = 55 คน
+                str_contains($url, '/admin/users/14/stats') => Http::response([
+                    'user' => ['name' => 'แม่ทีมใหญ่'], 'totals' => ['this_month' => 0, 'all_time' => 0, 'reversed' => 0],
+                    'mlm' => ['member_code' => 'BIG14', 'total_team_members' => 54, 'direct_referrals' => 6],
+                ]),
+                str_contains($url, '/admin/users/14/tree') => Http::response(['tree' => [
+                    'id' => 100, 'user_id' => 14, 'name' => 'แม่ทีมใหญ่',
+                    'children' => array_map(fn ($i) => [
+                        'id' => 200 + $i, 'user_id' => 300 + $i, 'name' => "สายตรง {$i}",
+                        'children' => array_map(fn ($j) => ['id' => 1000 + $i * 10 + $j, 'user_id' => 2000 + $i * 10 + $j, 'name' => "หลาน {$i}-{$j}", 'children' => []], range(1, 8)),
+                    ], range(1, 6)),
+                ]]),
                 str_contains($url, '/admin/members/6/move') => Http::response(['data' => [
                     'member_id' => 6, 'old_sponsor_id' => 77, 'new_sponsor_id' => 3,
                 ]]),
@@ -193,6 +205,55 @@ class MaeMorAdminPagesTest extends TestCase
 
         // ปุ่มย้ายสายขึ้นเฉพาะลูกค้าจันทรา (สมาชิกบอทจัดการที่หลังบ้านแม่หมอ) — ต้นผังนี้ไม่ใช่ลูกค้าจันทรา
         $this->assertSame(1, substr_count($page->html(), 'ย้ายสาย'));
+    }
+
+    /**
+     * 🔍 (2026-09-23) เจ้าของสั่ง: "ผังสายงานแม่หมอ ควรดูเต็มจอได้ ซูม ขยาย/ย่อ ได้ด้วยลูกกลิ้งเมาส์"
+     *   ผังเป็นกล่องต่อกันแบบผังองค์กร (ลูกทีมอยู่ใต้ผู้แนะนำ) ในกรอบที่ลาก/ซูม/เต็มจอได้
+     *   ตัวสั่งงานอยู่ที่ public/js/org-chart-panzoom.js ตัวเดียวกับหน้า /mlm ของลูกค้า
+     */
+    public function test_tree_page_draws_an_org_chart_that_zooms_and_goes_fullscreen(): void
+    {
+        $this->actingAs($this->admin());
+
+        // สคริปต์ต้องมาพร้อมหน้าตั้งแต่โหลดครั้งแรก — ผังโผล่ทีหลังตอนกดเลือกคน (Livewire ไม่โหลดสคริปต์ให้ตอนนั้น)
+        $this->assertFileExists(public_path('js/org-chart-panzoom.js'));
+        $this->get(MaeMorTree::getUrl())->assertOk()->assertSee('js/org-chart-panzoom.js', false);
+
+        $page = Livewire::test(MaeMorTree::class)
+            ->call('show', 9)
+            ->assertSeeHtml('class="maemor-oc__viewport"')
+            ->assertSeeHtml('window.OrgPanZoom')
+            ->assertSee('หมุนลูกกลิ้งเมาส์เพื่อซูม')
+            ->assertSee('ดูเต็มจอ')
+            ->assertSeeHtml('wire:key="oc-9-3"');
+
+        // ต้นผังหนึ่งกล่อง ลูกทีมสองคนอยู่ในชั้นถัดลงไป (ul ซ้อนใต้ li ของผู้แนะนำ)
+        $html = $page->html();
+        $this->assertSame(1, substr_count($html, 'maemor-oc__card is-root'));
+        $this->assertSame(3, substr_count($html, 'class="maemor-oc__card'));
+        $this->assertMatchesRegularExpression('/ผู้เชิญ.*?<ul x-bind:hidden="! open">.*?ลูกค้าเบอร์โทร.*?สมาชิกบอทแม่หมอ.*?<\/ul>/su', $html);
+
+        // เปลี่ยนความลึก = ผังชุดใหม่ (กล่องใหม่ เริ่มพอดีจอใหม่) ไม่ค้างซูมของผังเก่า
+        $page->set('depth', 5)->assertSeeHtml('wire:key="oc-9-5"')->assertDontSeeHtml('wire:key="oc-9-3"');
+
+        // ผังเล็ก (3 คน) กางหมดตั้งแต่แรก
+        $this->assertStringNotContainsString('open: false', $page->html());
+    }
+
+    /** ผังเกิน 40 คน กางหมดแล้วย่อให้พอดีกรอบจะเล็กจนอ่านไม่ออก — เปิดมาเห็นต้นสายกับสายตรง แล้วกางต่อทีละสาย */
+    public function test_a_big_line_opens_folded_to_the_direct_recruits(): void
+    {
+        $this->actingAs($this->admin());
+
+        $html = Livewire::test(MaeMorTree::class)->call('show', 14)->assertSee('BIG14')->html();
+
+        $this->assertSame(1, substr_count($html, 'x-data="{ open: true }"'), 'ต้นสายกางอยู่');
+        $this->assertSame(6, substr_count($html, 'x-data="{ open: false }"'), 'สายตรง 6 คนพับไว้');
+        $this->assertSame(6, substr_count($html, 'x-bind:hidden="! open" hidden>'), 'หลานทั้ง 48 คนซ่อนอยู่ใต้สายตรงที่พับ');
+        $this->assertSame(6, substr_count($html, '▸ สาย 8'));
+        $this->assertSame(55, substr_count($html, 'class="maemor-oc__card'), 'ข้อมูลครบทุกคน แค่ซ่อนไว้ กางแล้วไม่ต้องโหลดใหม่');
+        $this->assertStringContainsString('กางทั้งหมด', $html);
     }
 
     /**
