@@ -51,10 +51,14 @@ class AffiliateSyncBillsTest extends TestCase
                     return Http::response(['reason_code' => $this->billsStatus === 422 ? null : 'busy', 'message' => 'x'], $this->billsStatus);
                 }
 
+                // แม่หมอไม่แจกค่าแนะนำจากบิลก่อนเปิดระบบ (history_only)
+                $history = ! empty($request->data()['history_only']);
+
                 return Http::response(['data' => [
                     'bill_reference' => 'JW-' . $request['bill_id'],
                     'member_code' => 'MLMBUYER01',
-                    'commissions' => [['level' => 1, 'amount' => 9.9], ['level' => 2, 'amount' => 4.95]],
+                    'history_only' => $history,
+                    'commissions' => $history ? [] : [['level' => 1, 'amount' => 9.9], ['level' => 2, 'amount' => 4.95]],
                 ]], $this->billsStatus);
             }
             if (str_contains($url, '/affiliate/accounts')) {
@@ -80,7 +84,8 @@ class AffiliateSyncBillsTest extends TestCase
             && (int) $r['bill_id'] === $tx->id
             && (int) $r['user_ref'] === $user->id
             && $r['amount'] === '99.00'
-            && $r['product'] === 'เปิดไพ่: Celtic Cross');
+            && $r['product'] === 'เปิดไพ่: Celtic Cross'
+            && ! isset($r['history_only'])); // บิลหลังเปิดระบบ = แจกค่าแนะนำตามปกติ
 
         // รอบถัดไปไม่ส่งซ้ำ
         $this->artisan('affiliate:sync-bills')->assertSuccessful();
@@ -110,16 +115,29 @@ class AffiliateSyncBillsTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_bills_before_launch_are_left_alone(): void
+    /**
+     * บิลก่อนเปิดระบบ — ไม่มีค่าแนะนำย้อนหลัง (เจ้าของสั่ง 2026-09-21) แต่ต้องบอกแม่หมอว่าลูกค้า "เคยมีบิลที่ชำระแล้ว"
+     *   (เจ้าของสั่ง 2026-09-23: ผู้เชิญต้องเคยมีบิลที่ชำระแล้วจึงได้ค่าแนะนำ) · บิลที่คืนเงินไปแล้วไม่นับ ไม่ส่ง
+     */
+    public function test_bills_before_launch_are_sent_only_to_count_as_paid(): void
     {
-        [, $tx] = $this->bill(99, 'เปิดไพ่', ageMinutes: 60 * 48);
+        [, $old] = $this->bill(99, 'เปิดไพ่', ageMinutes: 60 * 48);
+        [, $refunded] = $this->bill(39, 'ดูดวงเชิงลึก', ageMinutes: 60 * 50);
+        app(WalletService::class)->refund($refunded, 'อ่านไม่สำเร็จ');
 
         $this->artisan('affiliate:sync-bills')->assertSuccessful();
-        $this->assertSame(0, AffiliateBill::count());
 
-        // เจ้าของสั่งส่งย้อนหลังเองได้
-        $this->artisan('affiliate:sync-bills', ['--since' => now()->subDays(3)->toDateString()])->assertSuccessful();
-        $this->assertSame(AffiliateBill::STATUS_SENT, AffiliateBill::where('wallet_transaction_id', $tx->id)->value('status'));
+        $bill = AffiliateBill::where('wallet_transaction_id', $old->id)->firstOrFail();
+        $this->assertTrue($bill->history_only);
+        $this->assertSame(AffiliateBill::STATUS_SENT, $bill->status);
+        $this->assertEquals(0, (float) $bill->commission_total);
+        $this->assertFalse(AffiliateBill::where('wallet_transaction_id', $refunded->id)->exists());
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/affiliate/bills')
+            && (int) $r['bill_id'] === $old->id && ($r->data()['history_only'] ?? null) === true);
+
+        // รอบถัดไปไม่ส่งซ้ำ
+        $this->artisan('affiliate:sync-bills')->assertSuccessful();
+        $this->assertSame(1, AffiliateBill::count());
     }
 
     public function test_refund_before_sending_is_skipped(): void

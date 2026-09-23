@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Setting;
 use App\Models\User;
 use App\Services\Mlm\MlmApiClient;
 use Illuminate\Http\Request;
@@ -32,6 +33,8 @@ class MlmController extends Controller
             'commissions' => $commissions,
             'targetId'    => $targetId,
             'fetchedAt'   => $this->api->lastFetchedAt()?->toIso8601String(),
+            // เจ้าของสั่ง (2026-09-23): ถอนค่าแนะนำที่เว็บ Thaiprompt ที่เดียว (ต้องยืนยันตัวตนที่นั่น)
+            'withdrawUrl' => rtrim((string) Setting::get('thaiprompt_base_url', 'https://main.thaiprompt.online'), '/').'/user/wallet/withdraw',
         ]);
     }
 

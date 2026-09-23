@@ -29,11 +29,13 @@ class AffiliateBill extends Model
     public const STATUS_FAILED = 'failed';
 
     protected $fillable = [
-        'wallet_transaction_id', 'user_id', 'amount', 'product', 'status', 'attempts',
+        'wallet_transaction_id', 'user_id', 'amount', 'product', 'history_only', 'status', 'attempts',
         'next_attempt_at', 'last_error', 'bill_reference', 'commission_total', 'sent_at', 'voided_at',
     ];
 
     protected $casts = [
+        // บิลก่อนเปิดระบบค่าแนะนำ — แม่หมอนับว่าลูกค้า "เคยมีบิลที่ชำระแล้ว" แต่ไม่แจกค่าแนะนำ
+        'history_only' => 'boolean',
         'amount' => 'decimal:2',
         'commission_total' => 'decimal:2',
         'next_attempt_at' => 'datetime',

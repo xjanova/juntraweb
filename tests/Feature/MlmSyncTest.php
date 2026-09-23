@@ -32,6 +32,11 @@ class MlmSyncTest extends TestCase
     /** user_ref ที่แม่หมอรู้จักแล้ว (อ่านได้เลย) — คนอื่นได้ 404 not_enrolled จนกว่าจะเรียก /accounts */
     private array $enrolled = [];
 
+    /** สิทธิ์รับค่าแนะนำ + ยอดกระเป๋า Thaiprompt ที่แม่หมอตอบ (null = แม่หมอรุ่นเก่ายังไม่ส่งมา) */
+    private ?bool $upstreamEligible = null;
+
+    private ?float $upstreamWallet = null;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -75,10 +80,12 @@ class MlmSyncTest extends TestCase
                 return Http::response(['reason_code' => 'not_enrolled', 'message' => 'x'], 404);
             }
             if (str_contains($url, '/stats')) {
-                return Http::response([
+                return Http::response(array_filter([
                     'user' => ['name' => 'ทดสอบ', 'referral_code' => 'TEST123'],
                     'totals' => ['today' => 10, 'this_month' => 100, 'all_time' => $this->upstreamAllTime],
-                ]);
+                    'mlm' => $this->upstreamEligible === null ? null : ['member_code' => 'TEST123', 'commission_eligible' => $this->upstreamEligible],
+                    'wallet' => $this->upstreamWallet === null ? null : ['balance' => $this->upstreamWallet, 'currency' => 'THB'],
+                ], fn ($v) => $v !== null));
             }
             if (str_contains($url, '/tree')) {
                 return Http::response(['tree' => ['id' => 1, 'name' => 'ทดสอบ', 'children' => []]]);
@@ -152,6 +159,47 @@ class MlmSyncTest extends TestCase
             ->assertSee('TEST123')          // referral code surfaced
             ->assertSee('ดึงยอดสด')          // live-refresh button
             ->assertSee(route('referral', ['code' => 'TEST123']), false);
+    }
+
+    /**
+     * 🌙 (2026-09-23) เจ้าของสั่ง: ผู้เชิญต้องเคยมีบิลที่ชำระแล้วจึงได้ค่าแนะนำ · ถอนที่เว็บ Thaiprompt
+     *   ลูกค้าที่ผูก Thaiprompt แล้ว → เห็นสิทธิ์ ยอดในกระเป๋า Thaiprompt และปุ่มไปถอนที่นั่น
+     */
+    public function test_linked_customer_sees_eligibility_balance_and_the_thaiprompt_withdraw_page(): void
+    {
+        $u = User::factory()->create(['thaiprompt_user_id' => '4242']);
+        $this->enrolled[$u->id] = true;
+        $this->upstreamEligible = true;
+        $this->upstreamWallet = 123.5;
+        $this->fakeUpstream();
+
+        $this->actingAs($u)->get(route('mlm.dashboard'))
+            ->assertOk()
+            ->assertSee('มีสิทธิ์รับค่าแนะนำแล้ว')
+            ->assertSee('฿123.50')
+            ->assertSee('ถอนที่เว็บ Thaiprompt')
+            ->assertSee(self::TP.'/user/wallet/withdraw', false)
+            ->assertDontSee('เชื่อมบัญชี Thaiprompt เพื่อถอน')
+            // จ่ายแค่ 2 ชั้นและต้องเคยมีบิล — ห้ามโฆษณาว่า "ทุกบิลของทีม"
+            ->assertDontSee('ทุกบิลดูดวงของทีม')
+            ->assertSee('เมื่อคุณเคยมีบิลดูดวงที่ชำระแล้วอย่างน้อย 1 บิล');
+    }
+
+    /** ยังไม่ผูก Thaiprompt → ต้องเชื่อมบัญชีก่อนถอน (ยอดที่สะสมย้ายตามไป) · ยังไม่เคยมีบิล → บอกว่ายังไม่มีสิทธิ์ */
+    public function test_unlinked_customer_is_told_to_link_thaiprompt_before_withdrawing(): void
+    {
+        $u = $this->customer();
+        $this->enrolled[$u->id] = true;
+        $this->upstreamEligible = false;
+        $this->upstreamWallet = 0.0;
+        $this->fakeUpstream();
+
+        $this->actingAs($u)->get(route('mlm.dashboard'))
+            ->assertOk()
+            ->assertSee('ยังไม่มีสิทธิ์รับค่าแนะนำ')
+            ->assertSee('เชื่อมบัญชี Thaiprompt เพื่อถอน')
+            ->assertSee(route('thaiprompt.redirect', ['to' => '/mlm']), false)
+            ->assertDontSee(self::TP.'/user/wallet/withdraw', false);
     }
 
     /** Web refresh endpoint busts the cache and lands back on the dashboard. */

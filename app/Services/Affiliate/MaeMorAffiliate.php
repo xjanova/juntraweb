@@ -93,6 +93,8 @@ class MaeMorAffiliate
             'paid_at' => $tx->created_at?->toIso8601String(),
             'thaiprompt_user_id' => $user->thaiprompt_user_id ?: null,
             'referral_code' => $user->pending_referral_code ?: null,
+            // บิลก่อนเปิดระบบ — แม่หมอนับสิทธิ์ "เคยมีบิลที่ชำระแล้ว" แต่ไม่แจกค่าแนะนำ
+            'history_only' => $bill->history_only ? true : null,
         ], fn ($v) => $v !== null), timeout: 15);
 
         if ($res['status'] === 'ok') {

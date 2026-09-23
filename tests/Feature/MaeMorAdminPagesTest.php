@@ -37,13 +37,13 @@ class MaeMorAdminPagesTest extends TestCase
         'created_at' => '2026-09-21T10:00:00+07:00',
     ];
 
-    /** ผู้เชิญไม่ active → แม่หมอโอนส่วนนั้นเข้ากระเป๋ากลาง (บัญชีกลางบน prod ไม่มีชื่อ) */
+    /** ผู้เชิญยังไม่เคยมีบิลที่ชำระแล้ว → แม่หมอโอนส่วนนั้นเข้ากระเป๋ากลาง (บัญชีกลางบน prod ไม่มีชื่อ) */
     private const CENTRAL_ROW = [
         'id' => 57, 'level' => 1, 'amount' => 3.9, 'commission_type' => 'percent', 'commission_rate' => 10,
         'status' => 'paid', 'user' => ['id' => 1, 'name' => '', 'email' => 'root@thaiprompt.test'],
         'from_user' => ['id' => 13, 'name' => 'ลูกค้าของผู้เชิญที่ไม่ active'],
         'reading' => ['id' => 78, 'bill_reference' => 'JW-502', 'source' => 'juntra', 'amount' => 39],
-        'notes' => '[CENTRAL_FALLBACK:sponsor_inactive] ค่าแนะนำดูดวง L1 (สายตรง) 3.9 บาท — ผู้แนะนำไม่ active (ไม่ roll up)',
+        'notes' => '[CENTRAL_FALLBACK:sponsor_no_paid_bill] ค่าแนะนำดูดวง L1 (สายตรง) 3.9 บาท — ผู้แนะนำยังไม่เคยมีบิลที่ชำระแล้ว (ไม่ roll up)',
         'created_at' => '2026-09-21T11:00:00+07:00',
     ];
 
@@ -218,7 +218,7 @@ class MaeMorAdminPagesTest extends TestCase
             && $r['actor']['juntra_user_id'] === $admin->id);
     }
 
-    /** ผู้เชิญไม่ active → ส่วนของเขาเข้ากระเป๋ากลาง — แอดมินต้องเห็นว่าเข้ากระเป๋ากลางเพราะอะไร ไม่ใช่ช่องผู้รับว่าง */
+    /** ผู้เชิญยังไม่มีสิทธิ์ → ส่วนของเขาเข้ากระเป๋ากลาง — แอดมินต้องเห็นว่าเพราะอะไร ไม่ใช่ช่องผู้รับว่าง */
     public function test_central_wallet_rows_say_why_the_inviter_was_not_paid(): void
     {
         $this->actingAs($this->admin());
@@ -226,7 +226,7 @@ class MaeMorAdminPagesTest extends TestCase
         Livewire::test(MaeMorCommissions::class)
             ->assertSee('JW-502')
             ->assertSee('กระเป๋ากลาง')
-            ->assertSee('ผู้แนะนำไม่ active ตามเกณฑ์รักษายอดของแม่หมอ');
+            ->assertSee('ผู้แนะนำยังไม่เคยมีบิลที่ชำระแล้ว');
     }
 
     public function test_central_fallback_reason_reads_only_the_mae_mor_tag(): void
@@ -235,6 +235,9 @@ class MaeMorAdminPagesTest extends TestCase
         $this->assertNull(MaeMorCommissions::centralFallbackReason('ค่าแนะนำดูดวง L1 (สายตรง) 9.9 บาท'));
         $this->assertNull(MaeMorCommissions::centralFallbackReason('[สร้างด้วยมือ] ชดเชย'));
         $this->assertSame('ลูกค้าไม่มีผู้แนะนำ', MaeMorCommissions::centralFallbackReason('[CENTRAL_FALLBACK:no_referrer] ค่าแนะนำดูดวง L1'));
+        $this->assertSame('ผู้รับชั้นหลานยังไม่เคยมีบิลที่ชำระแล้ว', MaeMorCommissions::centralFallbackReason('[CENTRAL_FALLBACK:grandparent_no_paid_bill] L2'));
+        // แถวเก่าก่อน 2026-09-23 (เกณฑ์รักษายอดรายเดือน) ใช้รหัส inactive — ยังอ่านออก
+        $this->assertSame('ผู้แนะนำไม่ active หรือตำแหน่งถูกปิด', MaeMorCommissions::centralFallbackReason('[CENTRAL_FALLBACK:sponsor_inactive] L1'));
         // ถูกดึงคืนภายหลัง หมายเหตุต่อท้ายเพิ่ม — ป้ายเดิมยังอยู่
         $this->assertSame('ไม่มีผู้รับชั้นหลาน', MaeMorCommissions::centralFallbackReason('[CENTRAL_FALLBACK:no_grandparent] L2 | ⛔ REVERSED: void approval บิล #9'));
         // เหตุผลใหม่ที่ยังไม่รู้จัก — แสดงรหัสตรง ๆ ดีกว่าเงียบ

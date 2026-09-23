@@ -92,7 +92,8 @@
                 style="flex:1;min-width:240px;max-width:380px;padding:10px 14px;background:rgba(7,4,26,.6);border:1px solid var(--line);color:var(--ink);border-radius:10px;font-family:var(--thai);font-size:14px;outline:none">
           <option value="">— ตัวเอง —</option>
           <template x-for="u in adminUsers" :key="u.id">
-            <option :value="u.id" x-text="`${u.name} (${u.email})`"></option>
+            {{-- อีเมลที่ระบบสร้างให้ลูกค้าที่ไม่ได้ผูก Thaiprompt (@thaiprompt.local) ไม่มีความหมาย — ไม่ต้องโชว์ --}}
+            <option :value="u.id" x-text="u.email && !u.email.endsWith('@thaiprompt.local') ? `${u.name} (${u.email})` : u.name"></option>
           </template>
         </select>
         <button @click="loadAdminUsers()" class="btn btn-ghost" style="padding:10px 18px;font-size:11px">
@@ -124,6 +125,53 @@
         <div style="font-size:12px;color:var(--ink-dim);margin-top:6px">ตรง {{ $stats['mlm']['direct_referrals'] ?? 0 }} คน · PV {{ number_format((float) ($stats['mlm']['total_team_pv'] ?? 0)) }}</div>
       </div>
     </div>
+
+    {{-- ── สิทธิ์รับค่าแนะนำ + ถอนเงิน ────────────────────────── --}}
+    {{-- เจ้าของสั่ง (2026-09-23): ผู้เชิญต้องเคยมีบิลที่ชำระแล้วจึงได้ค่าแนะนำ · ถอนที่เว็บ Thaiprompt
+         สิทธิ์และยอดกระเป๋ามาจากผังแม่หมอ (กติกาเดียวกับตอนแจกจริง) — เว็บนี้แสดงอย่างเดียว --}}
+    @php
+      $eligible = $stats['mlm']['commission_eligible'] ?? null;
+      $walletBalance = $stats['wallet']['balance'] ?? null;
+    @endphp
+    @if (!empty($stats))
+      <div class="panel" style="padding:22px 26px;margin-bottom:24px;display:flex;gap:22px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px">
+          <div class="eyebrow" style="display:inline-flex;margin-bottom:10px">ค่าแนะนำของ{{ $viewingSelf ? 'คุณ' : 'สมาชิกคนนี้' }}</div>
+          @if ($eligible === true)
+            <div style="font-size:14px;color:var(--ink)">✓ มีสิทธิ์รับค่าแนะนำแล้ว — เคยมีบิลดูดวงที่ชำระแล้ว</div>
+          @elseif ($eligible === false)
+            <div style="font-size:14px;color:var(--ink)">ยังไม่มีสิทธิ์รับค่าแนะนำ</div>
+            <div style="font-size:12.5px;color:var(--ink-dim);margin-top:4px;line-height:1.6">
+              ต้องเคยมีบิลดูดวงที่ชำระแล้วอย่างน้อย 1 บิล — ค่าแนะนำจากทีมที่เกิดก่อนหน้านั้นจะเข้ากระเป๋ากลาง
+              @if ($viewingSelf)
+                · <a href="{{ route('tarot.index') }}" style="color:var(--gold);text-decoration:underline">เปิดไพ่บิลแรก</a>
+              @endif
+            </div>
+          @endif
+        </div>
+
+        @if ($walletBalance !== null)
+          <div style="min-width:170px">
+            <div style="font-size:12px;color:var(--ink-faint)">ยอดในกระเป๋า Thaiprompt</div>
+            <div class="mlm-kpi-num" style="font-size:28px;margin-top:4px">฿{{ $money($walletBalance) }}</div>
+          </div>
+        @endif
+
+        @if ($viewingSelf)
+          <div style="min-width:220px;max-width:340px">
+            @if ($auth->isThaipromptLinked())
+              <a href="{{ $withdrawUrl }}" target="_blank" rel="noopener" class="btn btn-primary" style="padding:12px 22px;font-size:12px">ถอนที่เว็บ Thaiprompt</a>
+              <div style="font-size:11.5px;color:var(--ink-faint);margin-top:8px;line-height:1.6">ถอนต้องยืนยันตัวตน (KYC) ที่เว็บ Thaiprompt</div>
+            @else
+              <a href="{{ route('thaiprompt.redirect', ['to' => '/mlm']) }}" class="btn btn-primary" style="padding:12px 22px;font-size:12px">เชื่อมบัญชี Thaiprompt เพื่อถอน</a>
+              <div style="font-size:11.5px;color:var(--ink-faint);margin-top:8px;line-height:1.6">
+                ค่าแนะนำถอนได้ที่เว็บ Thaiprompt — เชื่อมบัญชีก่อน ยอดที่สะสมไว้จะย้ายเข้าบัญชีนั้นให้อัตโนมัติ
+              </div>
+            @endif
+          </div>
+        @endif
+      </div>
+    @endif
 
     {{-- ── Earnings chart + Referral box ────────────────────── --}}
     <div class="mlm-two-col" style="display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-bottom:24px">
@@ -158,8 +206,10 @@
               </div>
             </div>
           </div>
+          {{-- จ่ายแค่ 2 ชั้น และผู้เชิญต้องเคยมีบิลที่ชำระแล้ว (กติกาผังแม่หมอ) — ห้ามเขียนว่า "ทุกบิลของทีม" --}}
           <p style="font-size:11.5px;color:var(--ink-faint);margin:14px 0 0;line-height:1.6">
-            เพื่อนที่สมัครผ่านลิงก์นี้จะเข้าสายงานของคุณ — ทุกบิลดูดวงของทีมสร้างคอมมิชชั่นให้อัตโนมัติ
+            เพื่อนที่สมัครผ่านลิงก์นี้จะเข้าสายงานของคุณ — บิลดูดวงของสายตรงและชั้นหลานสร้างค่าแนะนำให้คุณ
+            เมื่อคุณเคยมีบิลดูดวงที่ชำระแล้วอย่างน้อย 1 บิล
           </p>
         @else
           <div style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:10px;padding:16px 0">

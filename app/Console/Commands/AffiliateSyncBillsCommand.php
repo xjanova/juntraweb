@@ -22,14 +22,15 @@ use Illuminate\Support\Str;
  *   1. เก็บตกรหัสเชิญที่ค้าง (สมัครแล้วแต่ Thaiprompt ล่มตอนนั้น) → เข้าผังใต้ผู้เชิญ
  *   2. บิลใหม่ที่เกิน --delay นาที → ลงสมุด (รอให้พ้นช่วงที่ไพ่อ่านไม่สำเร็จแล้วระบบคืนเงินเอง
  *      ไม่งั้นแจกค่าแนะนำแล้วต้องดึงคืนทันที — ผู้แนะนำอาจถอนไปแล้ว)
- *   3. ส่งบิลที่รอส่ง/ส่งไม่ผ่าน (ถอยเวลาเพิ่มขึ้นเรื่อย ๆ)
- *   4. บิลที่ส่งแล้วแต่ลูกค้าได้เงินคืนภายหลัง → ให้แม่หมอดึงค่าแนะนำคืน
+ *   3. บิลก่อนเปิดระบบ → ลงสมุดแบบนับสิทธิ์อย่างเดียว (ไม่มีค่าแนะนำ) ครั้งเดียว
+ *   4. ส่งบิลที่รอส่ง/ส่งไม่ผ่าน (ถอยเวลาเพิ่มขึ้นเรื่อย ๆ)
+ *   5. บิลที่ส่งแล้วแต่ลูกค้าได้เงินคืนภายหลัง → ให้แม่หมอดึงค่าแนะนำคืน (บิลประวัติ = ถอนสิทธิ์ที่นับไว้)
  */
 class AffiliateSyncBillsCommand extends Command
 {
     protected $signature = 'affiliate:sync-bills
         {--delay=15 : ส่งบิลที่เกิดมาแล้วอย่างน้อยกี่นาที}
-        {--since= : ส่งบิลตั้งแต่วันที่นี้ (ค่าเริ่มต้น = วันที่เปิดระบบ) — ย้อนหลัง = จ่ายค่าแนะนำย้อนหลังด้วยเงินจริง}
+        {--since= : บิลตั้งแต่วันที่นี้ได้ค่าแนะนำ (ค่าเริ่มต้น = วันที่เปิดระบบ) — บิลก่อนหน้าส่งแบบนับสิทธิ์อย่างเดียว ไม่มีค่าแนะนำ}
         {--limit=100 : จำนวนสูงสุดต่อรอบของแต่ละขั้น}';
 
     protected $description = 'Send paid reading bills to the Mae Mor (Thaiprompt) affiliate tree and claw back refunded ones';
@@ -70,10 +71,12 @@ class AffiliateSyncBillsCommand extends Command
 
         $enrolled = $this->retryPendingReferrals($affiliate, $limit);
         $queued = $this->discover($since, max(1, (int) $this->option('delay')), $limit);
+        // deploy ดึงโค้ดก่อน migrate เสร็จ — คอลัมน์ยังไม่มี = ข้ามบิลประวัติรอบนี้ (รอบหน้าเก็บเอง)
+        $history = Schema::hasColumn('affiliate_bills', 'history_only') ? $this->discoverHistory($since, $limit) : 0;
         [$sent, $failed, $skipped] = $this->sendDue($affiliate, $limit);
         $voided = $this->voidRefunded($affiliate, $limit);
 
-        $this->info("enrolled {$enrolled} · queued {$queued} · sent {$sent} · failed {$failed} · skipped {$skipped} · voided {$voided}");
+        $this->info("enrolled {$enrolled} · queued {$queued} · history {$history} · sent {$sent} · failed {$failed} · skipped {$skipped} · voided {$voided}");
 
         return self::SUCCESS;
     }
@@ -141,6 +144,43 @@ class AffiliateSyncBillsCommand extends Command
                     'user_id' => $tx->user_id,
                     'amount' => abs((float) $tx->amount),
                     'product' => Str::limit((string) ($tx->description ?: 'reading'), 60, ''),
+                    'status' => AffiliateBill::STATUS_PENDING,
+                ],
+            );
+        }
+
+        return $rows->count();
+    }
+
+    /**
+     * 🌙 (2026-09-23) บิลที่จ่ายก่อนเปิดระบบค่าแนะนำ → ส่งแบบนับสิทธิ์อย่างเดียว ไม่แจกค่าแนะนำ
+     *
+     * เจ้าของสั่ง: "ผู้เชิญต้องเคยเปิดบิลที่ชำระบิลแล้ว จึงจะได้รับค่าคอมทุกช่องทาง"
+     *   ลูกค้าที่ซื้อบนเว็บก่อนเปิดระบบก็ "เคย" แล้ว แต่ผังแม่หมอไม่เคยได้บิลเหล่านั้น — ไม่ส่งไป
+     *   ค่าแนะนำจากทีมของเขาจะเข้ากระเป๋ากลางทั้งที่เขามีสิทธิ์ · บิลที่คืนเงินไปแล้วไม่นับ ไม่ส่ง
+     *   (ไม่จ่ายค่าแนะนำย้อนหลัง — เจ้าของสั่ง 2026-09-21 · แม่หมอตัดสินจาก history_only)
+     */
+    private function discoverHistory(Carbon $since, int $limit): int
+    {
+        $rows = WalletTransaction::query()
+            ->where('type', 'debit')
+            ->where('reference_type', 'reading')
+            ->where('status', 'success')
+            ->where('created_at', '<', $since)
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('affiliate_bills')
+                ->whereColumn('affiliate_bills.wallet_transaction_id', 'wallet_transactions.id'))
+            ->orderBy('id')
+            ->limit($limit)
+            ->get();
+
+        foreach ($rows as $tx) {
+            AffiliateBill::firstOrCreate(
+                ['wallet_transaction_id' => $tx->id],
+                [
+                    'user_id' => $tx->user_id,
+                    'amount' => abs((float) $tx->amount),
+                    'product' => Str::limit((string) ($tx->description ?: 'reading'), 60, ''),
+                    'history_only' => true,
                     'status' => AffiliateBill::STATUS_PENDING,
                 ],
             );

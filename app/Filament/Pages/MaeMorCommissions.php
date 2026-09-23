@@ -192,13 +192,17 @@ class MaeMorCommissions extends Page
             return null;
         }
 
+        // *_no_paid_bill = กติกาปัจจุบัน (2026-09-23): ผู้รับต้องเคยมีบิลที่ชำระแล้ว
+        // *_inactive = ตำแหน่งถูกปิด/ตัดสิทธิ์ — แถวเก่าก่อน 2026-09-23 ใช้รหัสนี้กับเกณฑ์รักษายอดรายเดือนด้วย
         return match ($m[1]) {
             'no_referrer' => 'ลูกค้าไม่มีผู้แนะนำ',
             'sponsor_missing' => 'ไม่พบผู้แนะนำในผัง',
-            'sponsor_inactive' => 'ผู้แนะนำไม่ active ตามเกณฑ์รักษายอดของแม่หมอ',
+            'sponsor_no_paid_bill' => 'ผู้แนะนำยังไม่เคยมีบิลที่ชำระแล้ว',
+            'sponsor_inactive' => 'ผู้แนะนำไม่ active หรือตำแหน่งถูกปิด',
             'no_grandparent' => 'ไม่มีผู้รับชั้นหลาน',
             'grandparent_missing' => 'ไม่พบผู้รับชั้นหลานในผัง',
-            'grandparent_inactive' => 'ผู้รับชั้นหลานไม่ active ตามเกณฑ์รักษายอดของแม่หมอ',
+            'grandparent_no_paid_bill' => 'ผู้รับชั้นหลานยังไม่เคยมีบิลที่ชำระแล้ว',
+            'grandparent_inactive' => 'ผู้รับชั้นหลานไม่ active หรือตำแหน่งถูกปิด',
             default => $m[1],
         };
     }

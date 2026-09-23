@@ -68,7 +68,9 @@ class AffiliateBillResource extends Resource
                 Tables\Columns\TextColumn::make('created_at')->label('ลงสมุด')->dateTime('d/m/y H:i')->sortable(),
                 Tables\Columns\TextColumn::make('user.name')->label('ลูกค้า')->searchable()
                     ->description(fn (AffiliateBill $b) => $b->user?->maemor_member_code),
-                Tables\Columns\TextColumn::make('product')->label('รายการ')->limit(30),
+                Tables\Columns\TextColumn::make('product')->label('รายการ')->limit(30)
+                    // จ่ายก่อนเปิดระบบค่าแนะนำ — ส่งให้แม่หมอนับว่าลูกค้า "เคยมีบิลที่ชำระแล้ว" เท่านั้น
+                    ->description(fn (AffiliateBill $b) => $b->history_only ? 'บิลก่อนเปิดระบบ · นับสิทธิ์ ไม่มีค่าแนะนำ' : null),
                 Tables\Columns\TextColumn::make('amount')->label('ยอดบิล')->money('THB')->alignEnd(),
                 Tables\Columns\TextColumn::make('status')->label('สถานะ')->badge()
                     ->formatStateUsing(fn (string $state) => AffiliateBill::statusLabel($state))
