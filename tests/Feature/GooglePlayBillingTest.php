@@ -215,6 +215,22 @@ class GooglePlayBillingTest extends TestCase
         $this->assertNotNull(GooglePlayPurchase::sole()->consumed_at);
     }
 
+    public function test_a_purchase_the_app_already_consumed_is_marked_done_not_retried_forever(): void
+    {
+        $u = $this->member();
+        Sanctum::actingAs($u);
+        $this->paid($u);
+        $this->consumeFails = true;   // Google ปฏิเสธการ consume ของเรา…
+        $this->redeem('tok-app-consumed')->assertCreated()->assertJsonPath('data.consumed', false);
+
+        // …เพราะแอพ consume ในเครื่องไปแล้ว (consumptionState = 1)
+        $this->purchase['consumptionState'] = 1;
+        $this->artisan('googleplay:consume-pending')->assertSuccessful();
+
+        $this->assertNotNull(GooglePlayPurchase::sole()->consumed_at);
+        $this->assertSame(110.0, $this->balance($u), 'ไม่มีผลกับเครดิต');
+    }
+
     public function test_a_refund_on_google_play_claws_the_credits_back_without_going_negative(): void
     {
         $u = $this->member();

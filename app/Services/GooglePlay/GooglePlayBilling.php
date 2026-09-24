@@ -179,6 +179,18 @@ class GooglePlayBilling
 
             return true;
         } catch (GooglePlayException $e) {
+            // แอพ consume ในเครื่องไปก่อนแล้ว (ทำหลังเราเติมเครดิตเสมอ) — Google ปฏิเสธการ consume ซ้ำ
+            // ถามสถานะจริง: consumptionState = 1 แปลว่าเสร็จแล้ว ไม่ต้องลองซ้ำไปเรื่อย ๆ
+            try {
+                $state = $this->client->getProductPurchase($purchase->product_id, $purchase->purchase_token);
+                if ((int) ($state['consumptionState'] ?? 0) === 1) {
+                    $purchase->forceFill(['consumed_at' => now(), 'last_error' => null])->save();
+
+                    return true;
+                }
+            } catch (GooglePlayException) {
+                // ถามไม่ได้ก็เก็บไว้ลองรอบหน้า
+            }
             $purchase->forceFill([
                 'consume_attempts' => $purchase->consume_attempts + 1,
                 'last_error'       => mb_substr($e->getMessage(), 0, 255),
