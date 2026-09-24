@@ -574,9 +574,40 @@ class HistoryController extends Controller
             'type'       => $r->type,
             'title'      => TarotSpreads::nameForType((string) $r->type),
             'status'     => self::statusOf($r),
-            'preview'    => mb_substr((string) ($r->result ?? ''), 0, 140),
+            'preview'    => self::previewOf($r->result),
             'created_at' => optional($r->created_at)->toIso8601String(),
         ];
+    }
+
+    /**
+     * ข้อความตัวอย่างหนึ่งบรรทัดของรายการประวัติ — คำทำนายเป็น markdown
+     * ถ้าตัด 140 ตัวแรกตรง ๆ ลูกค้าจะเห็น "## 🎯 ฟันธง" แทนคำตอบ
+     * จึงเก็บเฉพาะบรรทัดเนื้อความ (ข้ามหัวข้อ/ตาราง/เส้นคั่น ตัดเครื่องหมาย bullet และตัวหนา)
+     */
+    private static function previewOf(?string $result): string
+    {
+        $prose = [];
+        $headings = [];
+        foreach (preg_split('/\R/u', (string) $result) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '|') || preg_match('/^[-*_]{3,}$/', $line)) {
+                continue;
+            }
+            if (str_starts_with($line, '#')) {
+                $headings[] = trim(ltrim($line, '#'));
+                continue;
+            }
+            $line = trim(str_replace(['**', '__', '`'], '', (string) preg_replace('/^(?:[-*+>]\s+|\d+[.)]\s+)/u', '', $line)));
+            if ($line !== '') {
+                $prose[] = $line;
+            }
+            if (mb_strlen(implode(' ', $prose)) >= 140) {
+                break;
+            }
+        }
+
+        // มีแต่หัวข้อ (คำทำนายสั้นผิดปกติ) ก็ยังบอกได้ว่าเป็นเรื่องอะไร
+        return mb_substr(implode(' ', $prose ?: $headings), 0, 140);
     }
 
     /** แพ็กเกจไพ่ของรายการนี้ (ชื่อ + ภาพประกอบ) — แพ็กเกจที่ปิดขายไปแล้วก็ยังตอบ */

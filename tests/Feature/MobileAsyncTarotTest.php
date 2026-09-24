@@ -229,4 +229,15 @@ class MobileAsyncTarotTest extends TestCase
             ->assertJsonPath('data.0.status', 'pending')
             ->assertJsonPath('data.0.title', 'ไพ่ใบเดียว');
     }
+
+    public function test_history_preview_is_the_answer_not_the_markdown_heading(): void
+    {
+        Sanctum::actingAs($this->member());
+        $this->buy('tarot_single', ['card-2'])->assertStatus(202);
+
+        // เดิมตัด 140 ตัวแรกตรง ๆ → หน้าแรก/ประวัติของแอพขึ้น "## 🎯 ฟันธง"
+        $this->getJson('/api/v1/history/readings')->assertOk()
+            ->assertJsonPath('data.0.status', 'done')
+            ->assertJsonPath('data.0.preview', 'ผล: ใช่ค่ะ ไพ่หนุนค่ะลูก ดวงอาทิตย์ส่องทาง ลงมือเลย');
+    }
 }
