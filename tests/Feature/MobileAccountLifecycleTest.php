@@ -176,6 +176,34 @@ class MobileAccountLifecycleTest extends TestCase
         $this->assertSame(1, ContentReport::count());
     }
 
+    /**
+     * แอพถาม /status ทุก 3 วินาทีระหว่างแม่หมออ่านไพ่ (~20 ครั้งต่อนาที) แล้วลูกค้ามักกดรายงานคำทำนายนั้นทันที
+     * throttle:N,M ที่ไม่ใส่ prefix ใช้ตัวนับเดียวกันทั้งแอพต่อผู้ใช้ — เส้นใหม่ของแอพต้องมีตัวนับของตัวเอง
+     * ไม่งั้นการ poll กินโควตาของรายงาน/เติมเครดิต/เปลี่ยนรหัส/ลบบัญชี จนตอบ 429
+     */
+    public function test_polling_a_reading_does_not_use_up_the_other_app_limits(): void
+    {
+        [$u, $token] = $this->userWithToken();
+        $reading = Reading::create([
+            'user_id' => $u->id, 'session_token' => (string) Str::uuid(), 'type' => 'tarot_three', 'result' => 'คำทำนาย',
+        ]);
+
+        for ($i = 0; $i < 20; $i++) {
+            $this->withToken($token)->getJson("/api/v1/history/readings/{$reading->id}/status")->assertOk();
+        }
+
+        $this->withToken($token)->postJson('/api/v1/reports', [
+            'subject_type' => 'reading', 'subject_id' => $reading->id, 'reason' => 'inaccurate',
+        ])->assertCreated();
+        $this->withToken($token)->putJson('/api/v1/auth/password', [
+            'current_password' => 'wrong-pass', 'password' => 'new-pass-123', 'password_confirmation' => 'new-pass-123',
+        ])->assertStatus(422);
+        $this->withToken($token)->postJson('/api/v1/account/delete', ['password' => 'wrong-pass'])->assertStatus(422);
+        $this->assertNotSame(429, $this->withToken($token)->postJson('/api/v1/wallet/google-play/redeem', [
+            'product_id' => 'juntra_credits_50', 'purchase_token' => str_repeat('t', 20),
+        ])->status());
+    }
+
     public function test_only_my_own_ai_content_can_be_reported(): void
     {
         [$u, $token] = $this->userWithToken();

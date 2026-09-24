@@ -54,7 +54,7 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     // สิ่งที่แอพต้องรู้ก่อนวาดหน้าแรก — บริการที่เปิด/ปิดขาย (ServiceGate) · ลิงก์นโยบาย/ลบบัญชี
     // · สวิตช์เติมเครดิตผ่าน Google Play — แอพซ่อนบริการที่ปิดเหมือนหน้าเว็บ
     Route::get('app/config', [AppConfigController::class, 'show'])
-        ->middleware('throttle:60,1')->name('app.config');
+        ->middleware('throttle:60,1,app-config')->name('app.config');
 
     // ปฏิทินโหรของวันนี้ (ดิถี · ราศีที่จันทร์เสวย · ยาม) — คำนวณจาก ThaiAstro
     // ตัวเดียวกับเว็บ ใช้แทนข้อความดวงจันทร์ที่เคย hardcode ไว้ในหน้าแรกของแอพ
@@ -95,13 +95,13 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         // เปลี่ยนรหัสผ่าน / ลบบัญชี จากในแอพ (Google Play บังคับให้ลบบัญชีได้ในแอพ)
         // throttle แคบ: ทั้งสองเส้นตรวจรหัสผ่านปัจจุบัน — ห้ามกลายเป็นช่องเดารหัส
         Route::put('auth/password', [AuthController::class, 'changePassword'])
-            ->middleware('throttle:6,1')->name('auth.password');
+            ->middleware('throttle:6,1,auth-password')->name('auth.password');
         Route::post('account/delete', [AuthController::class, 'deleteAccount'])
-            ->middleware('throttle:5,1')->name('account.delete');
+            ->middleware('throttle:5,1,account-delete')->name('account.delete');
 
         // รายงานคำทำนาย/ข้อความแชทที่ AI สร้าง (Google Play: AI-Generated Content policy)
         Route::post('reports', [ContentReportController::class, 'store'])
-            ->middleware('throttle:10,1')->name('reports.store');
+            ->middleware('throttle:10,1,content-report')->name('reports.store');
 
         // Wallet — balance, history, top-up start + native slip upload.
         // The slip POST goes through the same `topup` 10/min/user bucket
@@ -122,7 +122,7 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             // เติมเครดิตผ่าน Google Play Billing (แอพช่อง Play) — เซิร์ฟเวอร์ถาม Google เองทุกครั้ง
             Route::get('google-play',         [GooglePlayController::class, 'show'])->name('google-play.show');
             Route::post('google-play/redeem', [GooglePlayController::class, 'redeem'])
-                ->middleware('throttle:30,1')->name('google-play.redeem');
+                ->middleware('throttle:30,1,google-play-redeem')->name('google-play.redeem');
         });
 
         // Mae Mor AI Chat — conversations + send
@@ -178,8 +178,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
                 ->middleware('throttle:reading')->name('store');
             Route::get('readings/{reading}', [HistoryController::class, 'show'])->name('show');
             // แอพถามว่าแม่หมออ่านไพ่เสร็จหรือยัง (คู่กับ POST readings แบบ mode: async)
+            // prefix ท้าย throttle = ตัวนับของเส้นนี้เอง — throttle:N,M เปล่า ๆ ทุกเส้นใช้ตัวนับเดียวกันต่อผู้ใช้
+            // การ poll ทุก 3 วินาทีจะกินโควตาของรายงาน/เติมเครดิต/เปลี่ยนรหัส/ลบบัญชีจนตอบ 429
             Route::get('readings/{reading}/status', [HistoryController::class, 'status'])
-                ->middleware('throttle:120,1')->name('status');
+                ->middleware('throttle:120,1,reading-status')->name('status');
         });
     });
 });
