@@ -8,6 +8,8 @@ use App\Support\ReadingCooldown;
 use App\Support\ServiceGate;
 use App\Support\TarotSpreads;
 use Filament\Forms\Components\Grid;
+use Filament\Forms\Components\KeyValue;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -86,6 +88,12 @@ class WalletSettings extends Page implements HasForms
         foreach (array_keys(ServiceGate::SERVICES) as $svc) {
             $fill["closed_{$svc}"] = ServiceGate::isClosed($svc);
         }
+
+        // 🛒 Google Play Billing — แพ็กเครดิตของแอพช่อง Play
+        $fill['google_play_billing_enabled'] = Setting::get('google_play_billing_enabled', '1') !== '0';
+        $fill['google_play_products'] = collect(app(\App\Services\GooglePlay\GooglePlayBilling::class)->products())
+            ->map(fn (float $credits) => rtrim(rtrim(number_format($credits, 2, '.', ''), '0'), '.'))
+            ->all();
 
         $this->form->fill($fill);
     }
@@ -174,6 +182,26 @@ class WalletSettings extends Page implements HasForms
                         ->default('v1'),
                 ])->columns(2),
 
+            Section::make('เติมเครดิตผ่าน Google Play (แอพที่ติดตั้งจาก Play Store)')
+                ->description('นโยบาย Google Play: แอพบน Play ต้องขายเครดิตผ่าน Google Play Billing เท่านั้น (พร้อมเพย์/สลิปใช้ได้บนเว็บและแอพ APK) · Google หักค่าธรรมเนียม 15% · ราคาขายตั้งใน Play Console ส่วนตรงนี้กำหนดว่าแต่ละแพ็กได้กี่เครดิต — Product ID ต้องตรงกับที่สร้างใน Play Console ทุกตัวอักษร')
+                ->schema([
+                    Toggle::make('google_play_billing_enabled')
+                        ->label('เปิดขายเครดิตในแอพผ่าน Google Play')
+                        ->helperText('ปิด = แอพช่อง Play ไม่มีหน้าซื้อเครดิต (ใช้เครดิตที่มีได้อย่างเดียว)')
+                        ->inline(false)->onColor('success'),
+                    Placeholder::make('google_play_status')
+                        ->label('การเชื่อมต่อ Google Play')
+                        ->content(fn () => app(\App\Services\GooglePlay\GooglePlayClient::class)->configured()
+                            ? '✅ ตั้งค่า service account แล้ว — ตรวจการซื้อกับ Google ได้'
+                            : '⚠️ ยังไม่ได้ตั้งค่า — ใส่ GOOGLE_PLAY_SERVICE_ACCOUNT_PATH ใน .env ของเซิร์ฟเวอร์ (ดู docs/GOOGLE_PLAY.md ในรีโปแอพ) ระหว่างนี้แอพจะไม่แสดงหน้าซื้อ'),
+                    KeyValue::make('google_play_products')
+                        ->label('แพ็กเครดิต')
+                        ->keyLabel('Product ID (ใน Play Console)')
+                        ->valueLabel('เครดิตที่ได้')
+                        ->addActionLabel('เพิ่มแพ็ก')
+                        ->columnSpanFull(),
+                ])->columns(2),
+
             Section::make('PromptPay (สำรองเท่านั้น)')
                 ->description('⚠️ ปกติเว็บใช้บัญชีเดียวกับแม่หมอใน FB/LINE โดยดึงมาอัตโนมัติ — แก้บัญชีให้ไปแก้ในหลังบ้านบอทที่เดียว ช่องนี้ใช้เฉพาะตอนที่ยังไม่เคยดึงบัญชีมาได้สักครั้ง (เว็บเปิดใหม่ / ยังไม่มีใครเชื่อมบัญชีแม่หมอ) ถ้าใส่เลขคนละใบกับของบอท ตัวตรวจสลิปอัตโนมัติจะตีกลับสลิปที่ลูกค้าโอนถูกแล้ว · ใส่เบอร์ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก (ตัวเลขล้วน)')
                 ->schema([
@@ -223,6 +251,20 @@ class WalletSettings extends Page implements HasForms
         foreach ($data as $key => $value) {
             if ($key === 'billing_enabled') {
                 Setting::put('billing_enabled', $value ? '1' : '0', 'pricing');
+            } elseif ($key === 'google_play_billing_enabled') {
+                Setting::put('google_play_billing_enabled', $value ? '1' : '0', 'google_play');
+            } elseif ($key === 'google_play_products') {
+                // เก็บเฉพาะแถวที่ถูกต้อง (id ตัวพิมพ์เล็ก/ตัวเลข/จุด/ขีดล่าง · เครดิต > 0) — แถวผิดถูกทิ้ง
+                $clean = [];
+                foreach ((array) $value as $id => $credits) {
+                    $id = strtolower(trim((string) $id));
+                    if ($id !== '' && preg_match('/^[a-z0-9][a-z0-9._]{0,99}$/', $id) && is_numeric($credits) && (float) $credits > 0) {
+                        $clean[$id] = round((float) $credits, 2);
+                    }
+                }
+                Setting::put('google_play_products', json_encode($clean), 'google_play');
+            } elseif ($key === 'google_play_status') {
+                continue;
             } elseif (str_starts_with($key, 'visible_')) {
                 $spread = TarotSpreads::get(substr($key, strlen('visible_')));
                 if (! empty($spread['visible_setting'])) {

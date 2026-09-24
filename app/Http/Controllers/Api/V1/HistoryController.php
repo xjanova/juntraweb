@@ -5,12 +5,15 @@ namespace App\Http\Controllers\Api\V1;
 use App\Exceptions\InsufficientFundsException;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Http\Controllers\Controller;
+use App\Jobs\InterpretTarotReading;
 use App\Models\Reading;
 use App\Models\TarotCard;
+use App\Models\WalletTransaction;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use App\Support\ReadingCooldown;
+use App\Support\ReadingSections;
 use App\Support\TarotSpreads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -80,16 +83,47 @@ class HistoryController extends Controller
 
     public function show(Request $request, Reading $reading): JsonResponse
     {
+        $this->authorizeView($request, $reading);
+
+        return response()->json(['data' => $this->readingDetail($reading)]);
+    }
+
+    /**
+     * GET /v1/history/readings/{id}/status — แอพถามว่าแม่หมออ่านไพ่เสร็จหรือยัง
+     *
+     * คู่กับ `mode: async` ของ {@see store()} (แม่หมออ่านหลังส่งคำตอบ แบบเดียวกับหน้าเว็บ)
+     * ตอบเบา ๆ ไม่มีเนื้อคำทำนาย — เสร็จแล้วแอพค่อยดึง {@see show()} ทีเดียว
+     */
+    public function status(Request $request, Reading $reading): JsonResponse
+    {
+        $this->authorizeView($request, $reading);
+
+        return response()->json(['data' => [
+            'id'     => $reading->id,
+            'status' => self::statusOf($reading),
+        ]])->header('Cache-Control', 'no-store');
+    }
+
+    /** Same privacy gate as the web `/tarot/result/{id}` route — owner OR admin OR explicitly public-shared. */
+    private function authorizeView(Request $request, Reading $reading): void
+    {
         $user = $request->user();
         $isOwner = $reading->user_id === $user->id;
         $isAdmin = method_exists($user, 'isAdmin') && $user->isAdmin();
-        // Same privacy gate as the web `/tarot/result/{id}` route — owner
-        // OR admin OR explicitly public-shared.
         if (!$isOwner && !$isAdmin && !($reading->shared_public ?? false)) {
             abort(403);
         }
+    }
 
-        return response()->json(['data' => $this->readingDetail($reading)]);
+    /** pending | working = แม่หมอยังอ่านอยู่ · failed = ไม่สำเร็จ (คืนเงินแล้ว) · done */
+    private static function statusOf(Reading $reading): string
+    {
+        return match (true) {
+            $reading->status === Reading::STATUS_PENDING => 'pending',
+            $reading->status === Reading::STATUS_WORKING => 'working',
+            $reading->isFailed()                         => 'failed',
+            default                                      => 'done',
+        };
     }
 
     /**
@@ -116,16 +150,25 @@ class HistoryController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        // `mode: async` (แอพรุ่นที่ถามสถานะได้) = ตัดเงิน → สร้างรายการ → ตอบ 202 ทันที แล้วแม่หมอ
+        // อ่านไพ่หลังส่งคำตอบด้วยโปรไฟล์ของแพ็กเกจ (ทางเดียวกับหน้าเว็บ) — แพ็กเกจยาว 36-55 วิ
+        // จึงไม่ชนเพดานคำขอ และขายแพ็กเกจ web_only (คุณไสย) ในแอพได้
+        // ไม่ส่ง mode = ทางเดิมที่รอผลในคำขอเดียว (APK รุ่นเก่า) ซึ่งยังซื้อได้แค่ appKeys()
+        $async = $request->input('mode') === 'async';
+        $sellable = $async ? TarotSpreads::keys() : TarotSpreads::appKeys();
+
         $data = $request->validate([
-            'type'           => ['required', Rule::in(array_map(fn ($k) => "tarot_{$k}", TarotSpreads::appKeys()))],
+            'type'           => ['required', Rule::in(array_map(fn ($k) => "tarot_{$k}", $sellable))],
+            'mode'           => 'sometimes|in:sync,async',
             'question'       => 'nullable|string|max:500',
             // เส้นทางใหม่: กองที่เซิร์ฟเวอร์สับให้ + ตำแหน่งที่ผู้ใช้แตะ
             'deal_token'     => 'sometimes|string|max:64',
             'slots'          => 'sometimes|array',
-            'slots.*'        => 'integer|min:0|max:200',
+            // ตำแหน่งซ้ำ = ไพ่ใบเดียวกันสองครั้งในสเปรดเดียว (เว็บสุ่มใหม่เมื่อเลือกซ้ำ)
+            'slots.*'        => 'integer|min:0|max:200|distinct',
             // เส้นทางเดิม: แอพส่ง slug + reversed มาเอง (คง compat ให้ APK รุ่นเก่า)
             'picks'          => 'sometimes|array',
-            'picks.*.slug'   => 'required_with:picks|string|max:64',
+            'picks.*.slug'   => 'required_with:picks|string|max:64|distinct',
             'picks.*.reversed' => 'sometimes|boolean',
             // 🌠 (2026-09-15) วันเกิด (ไม่บังคับ) — Celtic / 12 เดือน / คุณไสย ผสานดวงดาวแบบเว็บ
             'birth_date'     => 'nullable|date_format:Y-m-d|before:today|after:1900-01-01',
@@ -197,6 +240,14 @@ class HistoryController extends Controller
         }
 
         $user = $request->user();
+
+        // คำขอเดิมที่ตัดเงินไปแล้ว (คำตอบหายกลางทางแล้วแอพส่งซ้ำด้วยคีย์เดิม) → ตอบผลของรายการเดิม
+        // ต้องมาก่อนล็อกกันยิงซ้อน: โหมด async ตอบใน 1-2 วิ ถ้าเช็คล็อกก่อน การส่งซ้ำภายใน 90 วิ
+        // จะได้แค่ 409 in_flight ทั้งที่รายการเสร็จแล้ว และหลัง 90 วิล็อกหมดอายุ = ถูกตัดเงินรอบสอง
+        if ($replayed = $this->replay($request, $user)) {
+            return $replayed;
+        }
+
         // Idempotency — block a double-submit of this reading (Idempotency-Key header).
         // ล็อกถูกปล่อยอัตโนมัติเมื่อจบ request (ดู guardChargeAuto) — ของเดิม
         // ปล่อยให้หมดอายุเอง 90 วิ ผู้ใช้ที่เจอ error แล้วกดลองใหม่จึงโดน 409
@@ -228,14 +279,66 @@ class HistoryController extends Controller
                 ], 409);
             }
 
-            return $this->chargeAndCreate($user, $data, $orderedPicks, $positions);
+            return $this->chargeAndCreate($user, $data, $orderedPicks, $positions, $async, $this->debitKey($request, $user));
         } finally {
             $openLock?->release();
         }
     }
 
+    /**
+     * Idempotency-Key ที่เคยตัดเงินไปแล้ว → คำตอบของรายการเดิม (ไม่ตัดซ้ำ ไม่สร้างรายการใหม่)
+     *
+     * ล็อก 90 วิของ guardChargeAuto กันได้แค่คำขอที่ซ้อนกัน — การ retry หลังจากนั้นเคยถูกคิดเงิน
+     * รอบสองได้ คีย์เดียวกันจึงถูกเก็บไว้ที่แถวตัดเงิน (unique) แล้วตรวจที่นี่ก่อนทุกอย่าง
+     */
+    private function replay(Request $request, $user): ?JsonResponse
+    {
+        $key = $this->debitKey($request, $user);
+        if ($key === null) {
+            return null;
+        }
+        $prior = WalletTransaction::where('user_id', $user->id)->where('idempotency_key', $key)->first();
+        if (!$prior) {
+            return null;
+        }
+        if ($prior->status === 'refunded') {
+            // คำตอบเดิมของคีย์นี้คือ "ไม่สำเร็จ คืนเงินแล้ว" — แอพจะมินต์คีย์ใหม่แล้วลองใหม่
+            return response()->json([
+                'message'     => 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนเข้าวอลเลตแล้ว กรุณาลองใหม่อีกครั้ง',
+                'reason_code' => 'reading_failed',
+            ], 503);
+        }
+        $reading = $prior->reference_id
+            ? Reading::where('user_id', $user->id)->find($prior->reference_id)
+            : null;
+        if (!$reading) {
+            // ตัดเงินแล้วแต่ยังสร้างรายการไม่เสร็จ = คำขอแรกยังทำงานอยู่
+            return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
+        }
+
+        return $this->purchaseResponse($reading, $user, abs((float) $prior->amount));
+    }
+
+    /** คีย์กันตัดซ้ำที่เก็บกับแถวตัดเงิน — ผูกกับลูกค้า (คอลัมน์ unique ทั้งตาราง) */
+    private function debitKey(Request $request, $user): ?string
+    {
+        $token = $this->idempotencyToken($request);
+
+        return $token === null ? null : 'reading:' . $user->id . ':' . sha1($token);
+    }
+
+    /** 202 = แม่หมอยังอ่านอยู่ (แอพถาม /status ต่อ) · 201 = ได้คำทำนายแล้ว */
+    private function purchaseResponse(Reading $reading, $user, float $cost): JsonResponse
+    {
+        return response()->json([
+            'data'    => $this->readingDetail($reading->fresh(['tarotCards.card'])),
+            'balance' => (float) $this->wallet->balance($user),
+            'cost'    => $cost,
+        ], $reading->fresh()->isInProgress() ? 202 : 201);
+    }
+
     /** @param  array<int,array<string,mixed>>  $orderedPicks */
-    private function chargeAndCreate($user, array $data, array $orderedPicks, array $positions): JsonResponse
+    private function chargeAndCreate($user, array $data, array $orderedPicks, array $positions, bool $async = false, ?string $debitKey = null): JsonResponse
     {
         $cost = Pricing::for($data['type']);
         $balance = $this->wallet->balance($user);
@@ -275,10 +378,11 @@ class HistoryController extends Controller
         // server resources and a successful one always has a paired tx.
         try {
             $tx = $cost > 0
-                ? $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . (TarotSpreads::nameForType($data['type']) ?? 'ไพ่ยิปซี'), [
-                    'reference_type' => 'reading',
-                    'method'         => 'system',
-                ])
+                ? $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . (TarotSpreads::nameForType($data['type']) ?? 'ไพ่ยิปซี'), array_filter([
+                    'reference_type'  => 'reading',
+                    'method'          => 'system',
+                    'idempotency_key' => $debitKey,
+                ]))
                 : null;
         } catch (InsufficientFundsException $e) {
             $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
@@ -317,9 +421,22 @@ class HistoryController extends Controller
                 ]);
             }
 
+            if ($async) {
+                // ผูกแถวตัดเงินกับรายการทันที — TarotReadingFinisher คืนเงินจากแถวนี้ถ้าอ่านไม่สำเร็จ
+                // และ replay() ใช้ reference_id หารายการเดิมให้คำขอที่ส่งซ้ำ
+                if ($tx) {
+                    $tx->update(['reference_id' => $reading->id]);
+                }
+                // แม่หมออ่านหลังส่งคำตอบ ด้วยโปรไฟล์ของแพ็กเกจ (ทางเดียวกับหน้าเว็บ) — ค้าง = ตัวกวาดคืนเงิน
+                $reading->update(['status' => Reading::STATUS_PENDING]);
+                InterpretTarotReading::dispatchAfterResponse($reading->id);
+
+                return $this->purchaseResponse($reading, $user, $cost);
+            }
+
             $reading->load('tarotCards.card');
-            // แอพรอผลในคำขอเดียว (ยังถามสถานะไม่ได้) → ทางเดิมที่ตอบเร็ว ไม่ใช่โปรไฟล์ต่อแพ็กเกจบนเลนทำนาย
-            // (Celtic/12 เดือนบนเลนทำนายใช้ 36-48 วิ เสี่ยงชนเพดานคำขอ) — ย้ายเมื่อแอพรองรับการรอผล
+            // APK รุ่นเก่ารอผลในคำขอเดียว (ถามสถานะไม่ได้) → ทางเดิมที่ตอบเร็ว ไม่ใช่โปรไฟล์ต่อแพ็กเกจ
+            // บนเลนทำนาย (Celtic/12 เดือนบนเลนทำนายใช้ 36-48 วิ เสี่ยงชนเพดานคำขอ)
             $aiResult = $this->ai->interpretTarot($reading, $user, 55, profile: false);
 
             // 🔴 `source === 'local'` = อัปสตรีมใช้ไม่ได้ (ผู้ใช้ยังไม่ผูก
@@ -428,6 +545,14 @@ class HistoryController extends Controller
             $imageUrl = asset('storage/' . ltrim((string) $payload['image_path'], '/'));
         }
 
+        // คำทำนายแบบแยกชิ้น (ฟันธง/รายใบ/รายเดือน/ตาราง) — ตัวแยกเดียวกับหน้าผลบนเว็บ
+        // แอพจัดเป็นการ์ดได้เหมือนเว็บ · ok=false (คำทำนายเก่า/รูปแบบไม่ครบ) = แสดง `result` แบบเดิม
+        $sections = null;
+        if (TarotSpreads::isTarotType((string) $reading->type) && filled($reading->result)) {
+            $parsed = ReadingSections::parse($reading->result);
+            $sections = ['ok' => $parsed['ok'], 'items' => $parsed['sections']];
+        }
+
         return array_merge($this->readingSummary($reading), [
             'question'      => $reading->question,
             'result'        => $reading->result,
@@ -437,6 +562,8 @@ class HistoryController extends Controller
             'ai_model'      => $reading->ai_model,
             'shared_public' => (bool) ($reading->shared_public ?? false),
             'cards'         => $cards,
+            'sections'      => $sections,
+            'package'       => $this->packageOf($reading),
         ]);
     }
 
@@ -445,8 +572,58 @@ class HistoryController extends Controller
         return [
             'id'         => $r->id,
             'type'       => $r->type,
-            'preview'    => mb_substr((string) ($r->result ?? ''), 0, 140),
+            'title'      => TarotSpreads::nameForType((string) $r->type),
+            'status'     => self::statusOf($r),
+            'preview'    => self::previewOf($r->result),
             'created_at' => optional($r->created_at)->toIso8601String(),
+        ];
+    }
+
+    /**
+     * ข้อความตัวอย่างหนึ่งบรรทัดของรายการประวัติ — คำทำนายเป็น markdown
+     * ถ้าตัด 140 ตัวแรกตรง ๆ ลูกค้าจะเห็น "## 🎯 ฟันธง" แทนคำตอบ
+     * จึงเก็บเฉพาะบรรทัดเนื้อความ (ข้ามหัวข้อ/ตาราง/เส้นคั่น ตัดเครื่องหมาย bullet และตัวหนา)
+     */
+    private static function previewOf(?string $result): string
+    {
+        $prose = [];
+        $headings = [];
+        foreach (preg_split('/\R/u', (string) $result) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '|') || preg_match('/^[-*_]{3,}$/', $line)) {
+                continue;
+            }
+            if (str_starts_with($line, '#')) {
+                $headings[] = trim(ltrim($line, '#'));
+                continue;
+            }
+            $line = trim(str_replace(['**', '__', '`'], '', (string) preg_replace('/^(?:[-*+>]\s+|\d+[.)]\s+)/u', '', $line)));
+            if ($line !== '') {
+                $prose[] = $line;
+            }
+            if (mb_strlen(implode(' ', $prose)) >= 140) {
+                break;
+            }
+        }
+
+        // มีแต่หัวข้อ (คำทำนายสั้นผิดปกติ) ก็ยังบอกได้ว่าเป็นเรื่องอะไร
+        return mb_substr(implode(' ', $prose ?: $headings), 0, 140);
+    }
+
+    /** แพ็กเกจไพ่ของรายการนี้ (ชื่อ + ภาพประกอบ) — แพ็กเกจที่ปิดขายไปแล้วก็ยังตอบ */
+    private function packageOf(Reading $reading): ?array
+    {
+        $key = TarotSpreads::keyFromType((string) $reading->type);
+        if ($key === null) {
+            return null;
+        }
+        $meta = TarotSpreads::get($key) ?? [];
+
+        return [
+            'key'       => $key,
+            'name_th'   => $meta['name_th'] ?? null,
+            'layout'    => TarotSpreads::layout($key),
+            'image_url' => TarotController::packageImageUrl($key),
         ];
     }
 }

@@ -27,3 +27,9 @@ Schedule::command('affiliate:sync-bills')->everyMinute()->withoutOverlapping(10)
 Schedule::command('alerts:watchdog')->everyFiveMinutes()->withoutOverlapping()->runInBackground();
 Schedule::command('alerts:digest')->hourly()->withoutOverlapping()->runInBackground();
 Schedule::command('alerts:daily-report')->dailyAt('09:00')->timezone('Asia/Bangkok')->withoutOverlapping()->runInBackground();
+
+// 🛒 Google Play Billing (แอพช่อง Play) — ไม่ได้ตั้ง service account = ทั้งสองตัวไม่ทำอะไร
+//  - consume ที่พลาดไป (ต้องทันภายใน 3 วัน ไม่งั้น Google คืนเงินลูกค้าอัตโนมัติ)
+//  - ลูกค้าขอคืนเงิน/chargeback กับ Google → ดึงเครดิตคืน
+Schedule::command('googleplay:consume-pending')->everyTenMinutes()->withoutOverlapping()->runInBackground();
+Schedule::command('googleplay:sync-voided')->hourly()->withoutOverlapping()->runInBackground();

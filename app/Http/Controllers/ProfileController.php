@@ -3,10 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProfileUpdateRequest;
+use App\Services\Account\AccountDeletion;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\View\View;
 
@@ -42,13 +42,12 @@ class ProfileController extends Controller
      * Delete the user's account.
      *
      * The account is SOFT-deleted so the wallet ledger (wallet_transactions
-     * has an FK cascadeOnDelete) survives for bookkeeping retention. To honour
-     * the PDPA "right to erasure" we scrub all personally-identifying fields
-     * first — the row that remains carries no usable PII, only the financial
-     * trail. The email placeholder embeds the user id so it can never collide
-     * with the unique constraint, and the whole operation is idempotent.
+     * has an FK cascadeOnDelete) survives for bookkeeping retention. Everything
+     * that identifies the person or that they sent us (profile, questions,
+     * readings, chats, photos, phone) is erased — see AccountDeletion, which
+     * the app's in-app deletion uses too.
      */
-    public function destroy(Request $request): RedirectResponse
+    public function destroy(Request $request, AccountDeletion $deletion): RedirectResponse
     {
         $request->validateWithBag('userDeletion', [
             'password' => ['required', 'current_password'],
@@ -58,27 +57,11 @@ class ProfileController extends Controller
 
         Auth::logout();
 
-        DB::transaction(function () use ($user) {
-            // Revoke any mobile Sanctum tokens so a stored bearer can't be used.
-            $user->tokens()->delete();
-
-            $user->forceFill([
-                'name'               => 'ผู้ใช้ที่ลบบัญชี',
-                'email'              => 'deleted+' . $user->id . '@deleted.local',
-                'email_verified_at'  => null,
-                'thaiprompt_user_id' => null,
-                'thaiprompt_token'   => null,
-                'thaiprompt_synced_at' => null,
-                'facebook_user_id'   => null,
-                'line_user_id'       => null,
-            ])->save();
-
-            $user->delete(); // soft delete — row + wallet ledger are retained
-        });
+        $deletion->delete($user);
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return Redirect::to('/');
+        return Redirect::to('/')->with('status', 'ลบบัญชีและข้อมูลของคุณเรียบร้อยแล้ว');
     }
 }

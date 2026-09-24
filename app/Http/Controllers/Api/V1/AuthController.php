@@ -232,6 +232,55 @@ class AuthController extends Controller
     }
 
     /**
+     * PUT /v1/auth/password — เปลี่ยนรหัสผ่านจากในแอพ (เดิมต้องเปิดเว็บ)
+     *
+     * เพิกถอนโทเคนของเครื่องอื่นทั้งหมด (เครื่องที่ทำรายการยังใช้ต่อได้) — คนที่เปลี่ยนรหัส
+     * เพราะสงสัยว่าบัญชีรั่ว ต้องได้ผลจริง ไม่ใช่เครื่องแปลกหน้ายังล็อกอินค้างอยู่
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string', 'current_password:sanctum'],
+            'password'         => ['required', 'confirmed', Password::min(8)],
+        ], [
+            'current_password.current_password' => 'รหัสผ่านปัจจุบันไม่ถูกต้อง',
+            'password.confirmed'                => 'รหัสผ่านใหม่สองช่องไม่ตรงกัน',
+            'password.min'                      => 'รหัสผ่านใหม่ต้องยาวอย่างน้อย 8 ตัวอักษร',
+        ]);
+
+        $user = $request->user();
+        $user->forceFill(['password' => Hash::make($data['password'])])->save();
+
+        $current = $user->currentAccessToken();
+        $currentId = $current instanceof \Laravel\Sanctum\PersonalAccessToken ? $current->getKey() : null;
+        $user->tokens()->when($currentId, fn ($q, $id) => $q->where('id', '!=', $id))->delete();
+
+        return response()->json(['data' => ['message' => 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว']]);
+    }
+
+    /**
+     * POST /v1/account/delete — ลบบัญชีจากในแอพ (Google Play บังคับให้มีทางลบบัญชีในแอพ)
+     *
+     * ต้องยืนยันด้วยรหัสผ่านปัจจุบันเหมือนหน้าเว็บ — กันคนที่หยิบโทรศัพท์ที่ปลดล็อกอยู่ไปลบบัญชี
+     * (แอพล็อกอินด้วยรหัสผ่านเท่านั้น ผู้ใช้แอพจึงรู้รหัสของตัวเองเสมอ)
+     */
+    public function deleteAccount(Request $request, \App\Services\Account\AccountDeletion $deletion): JsonResponse
+    {
+        $request->validate([
+            'password' => ['required', 'string', 'current_password:sanctum'],
+        ], [
+            'password.current_password' => 'รหัสผ่านไม่ถูกต้อง — บัญชียังไม่ถูกลบ',
+        ]);
+
+        $deletion->delete($request->user());
+
+        return response()->json(['data' => [
+            'deleted' => true,
+            'message' => 'ลบบัญชีและข้อมูลของคุณเรียบร้อยแล้ว',
+        ]]);
+    }
+
+    /**
      * Compact user payload — same shape as /api/v1/auth/me so the Flutter
      * client can cache it from the login response without a second call.
      */

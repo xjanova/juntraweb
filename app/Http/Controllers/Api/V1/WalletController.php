@@ -114,7 +114,8 @@ class WalletController extends Controller
         // กันรายการซ้ำจากการกดรัว ๆ / RetryInterceptor ของแอพยิงซ้ำเอง
         // (เพดาน pending = 5 ใบ ถ้าปล่อยให้ซ้ำ ผู้ใช้จะสร้างใบใหม่ไม่ได้
         //  และไม่รู้ว่าต้องโอนใบไหน เพราะแต่ละใบยอดสตางค์ไม่เท่ากัน)
-        if ($this->guardCharge($request, 'topup') === false) {
+        $lock = $this->guardCharge($request, 'topup');
+        if ($lock === false) {
             return response()->json([
                 'message'     => 'รายการก่อนหน้ากำลังดำเนินการ กรุณารอสักครู่นะคะ',
                 'reason_code' => 'in_flight',
@@ -129,6 +130,9 @@ class WalletController extends Controller
             ->count();
 
         if ($pendingCount >= (int) config('pricing.max_pending_topups', 5)) {
+            // ไม่ได้สร้างอะไร — ปล่อยล็อกให้กดใหม่ได้ทันทีหลังยกเลิกใบที่ค้าง (ไม่งั้นติด in_flight 90 วิ)
+            $lock?->release();
+
             return response()->json([
                 'message'     => 'มีรายการเติมเงินค้างอยู่หลายรายการ กรุณาชำระหรือยกเลิกก่อนนะคะ',
                 'reason_code' => 'too_many_pending',
@@ -172,6 +176,8 @@ class WalletController extends Controller
             $tx = $amounts->createPendingTopup($request->user(), $base);
         } catch (\RuntimeException $e) {
             // Pending-cap reached.
+            $lock?->release();
+
             return response()->json([
                 'message'     => $e->getMessage(),
                 'reason_code' => 'too_many_pending',

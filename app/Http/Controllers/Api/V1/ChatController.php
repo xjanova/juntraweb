@@ -255,6 +255,9 @@ class ChatController extends Controller
         $balance = $this->wallet->balance($user);
 
         if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
+            // ยังไม่ตัดเงิน — ปล่อยล็อก ไม่งั้นเติมเงินแล้วกด "ลองส่งใหม่" (คีย์เดิม) ภายใน 90 วิ ได้ 409 แทน
+            $this->releaseChargeLock();
+
             return response()->json([
                 'message'     => sprintf(
                     'เครดิตไม่พอสนทนา (ต้องการ %s ต่อข้อความ คงเหลือ %s) — กรุณาเติมเงินเข้าวอลเลต',
@@ -287,7 +290,7 @@ class ChatController extends Controller
         $debitTx = null;
         if ($cost > 0 && !$degraded && $kind !== 'offer') {
             try {
-                $debitTx = $this->wallet->debit($user, $cost, 'AI chat message', [
+                $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับแม่หมอ', [
                     'reference_type' => 'chat_message',
                     'reference_id'   => $userMessage->id,
                 ]);
@@ -320,6 +323,9 @@ class ChatController extends Controller
             Log::error('Mobile chat assistant message persist failed after debit', [
                 'user_id' => $user->id, 'err' => $e->getMessage(),
             ]);
+            // คืนเงินแล้ว = ข้อความนี้ไม่สำเร็จ ให้ลองส่งซ้ำด้วยคีย์เดิมได้ทันที
+            $this->releaseChargeLock();
+
             return response()->json([
                 'message'     => 'ระบบขัดข้องชั่วคราว — ' . ($debitTx ? 'เครดิตถูกคืนแล้ว ' : '') . 'กรุณาลองใหม่อีกครั้ง',
                 'reason_code' => 'persist_failed',

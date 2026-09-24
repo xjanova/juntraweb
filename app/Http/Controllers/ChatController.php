@@ -297,7 +297,7 @@ class ChatController extends Controller
         $debitTx = null;
         if ($cost > 0 && !$degraded && $kind !== 'offer') {
             try {
-                $debitTx = $this->wallet->debit($user, $cost, 'AI chat message', [
+                $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับแม่หมอ', [
                     'reference_type' => 'chat_message',
                     'reference_id'   => $userMessage->id,
                 ]);
