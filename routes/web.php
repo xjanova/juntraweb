@@ -65,6 +65,8 @@ Route::redirect('/app', '/download');
 // composer injects $activeTheme/$themeConfig into every view, so Route::view works).
 Route::view('/privacy', 'pages.legal.privacy')->name('legal.privacy');
 Route::view('/terms', 'pages.legal.terms')->name('legal.terms');
+// วิธีลบบัญชีและข้อมูล — หน้าสาธารณะที่ Google Play ต้องการ (ลิงก์ใน Play Console / Data safety)
+Route::view('/account/delete', 'pages.legal.account-deletion')->name('account.deletion');
 
 // Tarot — paid actions throttled (per-user, see AppServiceProvider) so a
 // rapid double-submit can't double-charge.

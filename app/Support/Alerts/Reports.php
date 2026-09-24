@@ -46,6 +46,7 @@ final class Reports
 
         return match (true) {
             $tx->approved_by !== null => 'แอดมินอนุมัติ',
+            $via === 'google_play' => 'Google Play',
             $via === 'slipok' => 'ตรวจสลิปอัตโนมัติ',
             in_array($via, ['sms', 'smschecker_app'], true) => 'SMS ธนาคาร',
             default => 'อัตโนมัติ',

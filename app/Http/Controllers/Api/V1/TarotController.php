@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\TarotCard;
+use App\Support\Pricing;
+use App\Support\ReadingCooldown;
+use App\Support\TarotSpreads;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -82,6 +85,52 @@ class TarotController extends Controller
     public static function dealCacheKey(int $userId, string $token): string
     {
         return 'tarot_deal:' . $userId . ':' . hash('sha256', $token);
+    }
+
+    /**
+     * GET /v1/tarot/packages — แพ็กเกจไพ่ที่เปิดขายอยู่ (ชุดเดียวกับหน้า /tarot บนเว็บ)
+     *
+     * ก่อนหน้านี้แอพเก็บรายการแพ็กเกจของตัวเองไว้ในโค้ด (spreads.dart) แล้วเดาราคาจาก
+     * `GET /wallet` → แพ็กเกจใหม่/ภาพประกอบ/ข้อห้ามเปิดซ้ำ/วันเกิด ไปไม่ถึงแอพเลยจนกว่าจะออกรุ่นใหม่
+     * ที่นี่คืนทุกอย่างที่หน้าเว็บใช้ จากแหล่งเดียวกัน (config/tarot_spreads.php + Setting)
+     *
+     * แพ็กเกจ `web_only` (ต้องอ่านเบื้องหลัง) ติดธง `requires_async` — แอพที่ส่ง `mode: async`
+     * ซื้อได้ทุกตัว ส่วน APK รุ่นเก่าไม่เรียก endpoint นี้อยู่แล้ว
+     */
+    public function packages(): JsonResponse
+    {
+        $data = [];
+        foreach (TarotSpreads::all() as $key => $meta) {
+            $price = Pricing::for(TarotSpreads::priceKey($key));
+            $data[] = [
+                'key'            => $key,
+                'type'           => TarotSpreads::typeFromKey($key),
+                'name_th'        => $meta['name_th'] ?? $key,
+                'name_en'        => $meta['name_en'] ?? null,
+                'eyebrow'        => $meta['eyebrow'] ?? null,
+                'tagline'        => $meta['tagline'] ?? null,
+                'layout'         => TarotSpreads::layout($key),
+                'est'            => $meta['est'] ?? null,
+                'cards'          => TarotSpreads::cardCount($key),
+                'positions'      => TarotSpreads::positionLabels($key),
+                'price'          => $price,
+                'free'           => $price <= 0,
+                'birth'          => TarotSpreads::wantsBirthDate($key),
+                'cooldown_days'  => ReadingCooldown::days($key),
+                'requires_async' => ! empty($meta['web_only']),
+                'image_url'      => self::packageImageUrl($key),
+            ];
+        }
+
+        return response()->json(['data' => $data])->header('Cache-Control', 'public, max-age=120');
+    }
+
+    /** ภาพประกอบประจำแพ็กเกจ (public/images/juntra/art/tarot/{key}.webp) — ไม่มีไฟล์ = null */
+    public static function packageImageUrl(string $key): ?string
+    {
+        $rel = "images/juntra/art/tarot/{$key}.webp";
+
+        return is_file(public_path($rel)) ? asset($rel) : null;
     }
 
     public function cards(): JsonResponse

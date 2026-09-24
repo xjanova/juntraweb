@@ -366,6 +366,55 @@ class WalletService
         return $result;
     }
 
+    /**
+     * System-initiated reversal of a credited top-up whose money went back to the customer outside
+     * this site — a Google Play refund / chargeback (GooglePlayBilling::void). Same rules as
+     * {@see reverseTopup()}: claws back up to the available balance (never negative; the shortfall
+     * is recorded in meta) and flips the top-up to 'refunded'. No admin actor — the store is the source.
+     */
+    public function clawBackTopup(WalletTransaction $tx, string $reason, array $meta = []): WalletTransaction
+    {
+        if ($tx->type !== 'topup' || $tx->status !== 'success') {
+            throw new \RuntimeException('เรียกคืนได้เฉพาะการเติมเงินที่สำเร็จแล้วเท่านั้น');
+        }
+
+        return DB::transaction(function () use ($tx, $reason, $meta) {
+            $locked = WalletTransaction::where('id', $tx->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'success') {
+                throw new \RuntimeException('รายการนี้ถูกเรียกคืนไปแล้ว');
+            }
+            $wallet = Wallet::where('id', $locked->wallet_id)->lockForUpdate()->firstOrFail();
+            $amount   = number_format((float) $locked->amount, 2, '.', '');
+            $clawable = bccomp((string) $wallet->balance, $amount, 2) >= 0
+                ? $amount
+                : number_format((float) $wallet->balance, 2, '.', '');
+            $newBal = bcsub((string) $wallet->balance, $clawable, 2);
+            $wallet->balance = $newBal;
+            $wallet->save();
+
+            $shortfall = bcsub($amount, $clawable, 2);
+            $adj = WalletTransaction::create([
+                'user_id'        => $locked->user_id,
+                'wallet_id'      => $wallet->id,
+                'type'           => 'adjustment',
+                'status'         => 'success',
+                'amount'         => '-' . $clawable,
+                'balance_after'  => $newBal,
+                'description'    => 'เรียกคืนเครดิต: ' . $reason,
+                'reference_type' => 'wallet_transaction',
+                'reference_id'   => $locked->id,
+                'method'         => $locked->method ?? 'system',
+                'meta'           => array_filter(array_merge($meta, [
+                    'reason'    => $reason,
+                    'shortfall' => bccomp($shortfall, '0', 2) > 0 ? $shortfall : null,
+                ]), fn ($v) => $v !== null),
+            ]);
+            $locked->update(['status' => 'refunded']);
+
+            return $adj;
+        });
+    }
+
     /** Manual signed admin adjustment (promo credit, correction). Never goes negative. */
     public function adjust(User $user, float $signedAmount, string $reason, User $admin): WalletTransaction
     {
