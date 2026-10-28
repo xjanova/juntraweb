@@ -11,6 +11,13 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
+    # Existing files in the app's own folders are never served (logs, the
+    # stray database.sqlite, vendor, deploy.sh's .env/upload backups).
+    # Routes such as /app and /storage/tarot/... do not exist on disk here,
+    # so they still fall through to the rules below.
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^(app|bootstrap|config|database|lang|resources|routes|storage|tests|vendor|node_modules|\.deploy-backup)/ - [F,L]
+
     # Static assets: serve straight from public/ if the file exists there.
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_FILENAME} !-f
@@ -28,5 +35,8 @@
     Require all denied
 </FilesMatch>
 <FilesMatch "(composer\.(json|lock)|package(-lock)?\.json|\.env(\..+)?|artisan)$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "\.(md|sh|log|sqlite3?)$|^phpunit\.xml$">
     Require all denied
 </FilesMatch>
