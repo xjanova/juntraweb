@@ -648,6 +648,15 @@
   color: var(--ink, #f6efe0);
 }
 .offer-go { padding: 10px 18px; font-size: 14px; min-height: 44px; }
+/* เครดิตไม่พอ: ปุ่มจ่ายตรงยอด + ทางเลือกเติมเก็บไว้ */
+.offer-pay { margin-top: 12px; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.offer-pay-go { width: 100%; justify-content: center; }
+.offer-pay-note { font-size: 12px; line-height: 1.5; text-align: center; color: var(--ink-dim, rgba(246, 239, 224, .7)); }
+.offer-alt {
+  align-self: center; background: none; border: 0; padding: 8px 6px; min-height: 36px;
+  font: inherit; font-size: 13px; color: var(--gold-2, var(--gold, #f4cf6a));
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
 .offer-foot { font-size: 12px; color: var(--ink-dim, rgba(246, 239, 224, .7)); line-height: 1.6; padding: 2px 4px; }
 .offer-foot strong { color: var(--gold-2, var(--gold, #f4cf6a)); }
 
