@@ -137,6 +137,15 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
     Route::get('/conversation/{conversation}', 'show')
         ->middleware('auth')
         ->name('show');
+    // 🌙 (2026-11-03 FB web-only) ลูกค้าที่ย้ายมาจากแชทเพจ FB — แม่หมอคุยต่อจากเรื่องที่ทักไว้ในเพจ
+    Route::get('/continue/{handoff}', 'continue')
+        ->middleware(['auth', 'throttle:chat-send'])
+        ->whereUuid('handoff')
+        ->name('continue');
+    // ลิงก์เสีย/ถูกตัดทอน (ไม่ใช่ uuid) → ไปห้องแชทปกติ ไม่ให้ลูกค้าเจอหน้า 404
+    Route::redirect('/continue/{any?}', '/chat')
+        ->where('any', '.*')
+        ->name('continue.invalid');
 });
 
 // เติมเงินจบในห้องแชท (สแกน QR แล้วเครดิตเข้าเอง) — ให้ลูกค้าไม่ต้องเดินออก

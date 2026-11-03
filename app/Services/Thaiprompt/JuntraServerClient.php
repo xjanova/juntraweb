@@ -167,9 +167,11 @@ class JuntraServerClient
      *
      * @param  string|null  $context  💬 (2026-09-21) ห้องที่คุยต่อจากคำพยากรณ์ (ReadingChatContext) —
      *                                Thaiprompt วางไว้ใน system message ทุกรอบ · Thaiprompt รุ่นเก่าเมินฟิลด์นี้เฉย ๆ
+     * @param  int|null  $thaipromptUserId  🌙 (2026-11-03 FB web-only) id บัญชี Thaiprompt ของลูกค้า — ให้แม่หมอรู้จักลูกค้าที่ย้ายมาจากเพจ
+     * @param  string|null  $handoff  🌙 (2026-11-03) nonce (uuid) จากลิงก์ /chat/continue/{handoff} — Thaiprompt ใช้ได้ครั้งเดียว
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatStart(int|string $userRef, ?string $context = null): array
+    public function chatStart(int|string $userRef, ?string $context = null, ?int $thaipromptUserId = null, ?string $handoff = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
@@ -177,6 +179,8 @@ class JuntraServerClient
         $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/chat/start'), array_filter([
             'user_ref' => (string) $userRef,
             'context'  => $this->chatContext($context),
+            'thaiprompt_user_id' => $thaipromptUserId !== null && $thaipromptUserId > 0 ? $thaipromptUserId : null,
+            'handoff'  => $handoff,
         ], fn ($v) => $v !== null)));
         if ($resp?->successful() && is_array($resp->json('data'))) {
             return ['status' => 'ok', 'data' => $resp->json('data')];
@@ -189,9 +193,10 @@ class JuntraServerClient
     /**
      * ส่งข้อความถึงแม่หมอ — คืน reply + kind ('reply'|'guard'|'offer') + offer_topic
      *
+     * @param  int|null  $thaipromptUserId  🌙 (2026-11-03) ให้ Thaiprompt สร้างความจำจากเพจใหม่ได้เมื่อห้องหมดอายุ (ไม่ consume handoff)
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null): array
+    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
@@ -208,6 +213,7 @@ class JuntraServerClient
                 // 💬 (2026-09-21) ส่งบริบทไปทุกรอบ — ห้องฝั่ง Thaiprompt หมดอายุ/cache ถูกล้างเมื่อไร
                 //    ห้องนั้นก็ยังตอบ 200 แบบ "ไม่มีประวัติ" (ไม่ใช่ error) เราจึงไม่มีทางรู้ว่าต้องป้อนบริบทใหม่
                 'context'    => $this->chatContext($context),
+                'thaiprompt_user_id' => $thaipromptUserId !== null && $thaipromptUserId > 0 ? $thaipromptUserId : null,
             ], fn ($v) => $v !== null && $v !== '')));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {

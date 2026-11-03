@@ -27,18 +27,36 @@ class MaeMorUpstream
         private FortuneBotClient $bot,
     ) {}
 
-    /** @return array{session:string,greeting:?string}|null  null = คุยกับแม่หมอไม่ได้ตอนนี้ */
-    public function start(User $user, ?string $context = null): ?array
+    /**
+     * 🌙 (2026-11-03 FB web-only) `$handoff` = nonce จากลิงก์ /chat/continue/{handoff} ไปกับทางที่ 1 เท่านั้น
+     * และส่ง thaiprompt_user_id ของลูกค้าไปด้วยทุกครั้ง ให้แม่หมอรู้จักลูกค้าที่ย้ายมาจากเพจ
+     * (ความจำอยู่ฝั่ง Thaiprompt ไม่ถูกส่งกลับมา — ตอบแค่ continued_from / offer_topic)
+     *
+     * 🔐 (รีวิว) handoff_id / handoff_consumed ส่งต่อให้ ChatController::continue ตัดสินว่าลิงก์นี้ "ใช้ได้ครั้งนี้" จริงไหม
+     *    (handoff_consumed = null = Thaiprompt รุ่นเก่าที่ยังไม่ส่งฟิลด์นี้)
+     *
+     * @return array{session:string,greeting:?string,offer_topic:?string,continued_from:?string,handoff_id:?string,handoff_consumed:?bool}|null  null = คุยกับแม่หมอไม่ได้ตอนนี้
+     */
+    public function start(User $user, ?string $context = null, ?string $handoff = null): ?array
     {
-        $res = $this->server->chatStart($user->id, $context);
+        $res = $this->server->chatStart($user->id, $context, $this->thaipromptUserId($user), $handoff);
         if ($res['status'] === 'ok' && ! empty($res['data']['session_id'])) {
-            return ['session' => 'srv:' . $res['data']['session_id'], 'greeting' => $res['data']['greeting'] ?? null];
+            $topic = $res['data']['offer_topic'] ?? null;
+
+            return [
+                'session'        => 'srv:' . $res['data']['session_id'],
+                'greeting'       => $res['data']['greeting'] ?? null,
+                'offer_topic'    => is_string($topic) && $topic !== '' ? ChatReadingIntent::normalizeTopic($topic) : null,
+                'continued_from' => ($res['data']['continued_from'] ?? null) === 'facebook' ? 'facebook' : null,
+                'handoff_id'     => is_string($res['data']['handoff_id'] ?? null) ? $res['data']['handoff_id'] : null,
+                'handoff_consumed' => array_key_exists('handoff_consumed', $res['data']) ? (bool) $res['data']['handoff_consumed'] : null,
+            ];
         }
 
         if ($res['status'] === 'unsupported' && $this->bot->isAvailable($user)) {
             $start = $this->bot->start($user);
             if (! empty($start['session_id'])) {
-                return ['session' => 'usr:' . $start['session_id'], 'greeting' => $start['greeting'] ?? null];
+                return ['session' => 'usr:' . $start['session_id'], 'greeting' => $start['greeting'] ?? null, 'offer_topic' => null, 'continued_from' => null, 'handoff_id' => null, 'handoff_consumed' => null];
             }
         }
 
@@ -53,7 +71,7 @@ class MaeMorUpstream
         [$mode, $sid] = str_contains($session, ':') ? explode(':', $session, 2) : ['usr', $session];
 
         if ($mode === 'srv') {
-            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded, $context);
+            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded, $context, $this->thaipromptUserId($user));
             $reply = trim((string) ($res['data']['reply'] ?? ''));
             if ($res['status'] !== 'ok' || $reply === '') {
                 return null;
@@ -73,5 +91,13 @@ class MaeMorUpstream
         $reply = trim((string) (($this->bot->send($user, $sid, $text))['reply'] ?? ''));
 
         return $reply !== '' ? ['reply' => $reply, 'kind' => 'reply', 'offer_topic' => null] : null;
+    }
+
+    /** id บัญชี Thaiprompt ของลูกค้า (ผูกผ่าน SSO) — ไม่ผูก = null */
+    private function thaipromptUserId(User $user): ?int
+    {
+        $id = (int) ($user->thaiprompt_user_id ?? 0);
+
+        return $id > 0 ? $id : null;
     }
 }

@@ -439,6 +439,82 @@ class ChatController extends Controller
         return redirect()->route('chat.index');
     }
 
+    /**
+     * 🌙 (2026-11-03 FB web-only) ลูกค้าที่ย้ายมาจากแชทเพจ FB — /chat/continue/{handoff}
+     *
+     * ลิงก์ในเพจพาลูกค้าผ่าน SSO มาลงที่นี่ (ThaipromptController::isHandoffPath) แม่หมอบนเว็บต้องคุยต่อ
+     * จากเรื่องที่ลูกค้าทักไว้ในเพจ ไม่ใช่ทักทายใหม่เหมือนไม่เคยรู้จัก:
+     *   1. เปิดห้อง Thaiprompt ใหม่พร้อม handoff — Thaiprompt consume handoff ครั้งเดียว (lockForUpdate)
+     *      ความจำอยู่ฝั่งนั้น เราได้กลับมาแค่คำทักทาย + offer_topic + continued_from
+     *   2. handoff ใช้ไม่ได้ (ใช้แล้ว / หมดอายุ / ของคนอื่น / Thaiprompt ล่ม) → ไป /chat ตามปกติ ไม่ติดทางตัน
+     *      และไม่แตะห้องที่ลูกค้าคุยค้างไว้ (กดลิงก์ซ้ำ/กดเบิ้ล = ครั้งที่สองตกเส้นนี้เอง)
+     *   3. ห้องสดมีข้อความของลูกค้าแล้ว หรือเป็นห้องที่ผูกกับไพ่ → เปิดห้องใหม่ "คุยต่อจากเพจ"
+     *      (ห้องเดิมยังอยู่ในประวัติแชท) · ห้องว่างที่มีแค่คำทักทาย → ใช้ห้องนั้นต่อ
+     *   4. บันทึกคำทักทายพร้อม offer_topic → หน้าแชทวาดการ์ดแพ็กเกจทันที แล้ว redirect ไป /chat
+     */
+    public function continue(Request $request, string $handoff)
+    {
+        $user = $request->user();
+
+        if (! $this->gate($user)['allowed']) {
+            return redirect()->route('chat.index');
+        }
+
+        // เปิดห้อง Thaiprompt ก่อนแตะห้องฝั่งเรา — handoff เสียจะได้ไม่ทิ้งห้องเปล่าไว้ในประวัติ
+        $start = $this->upstream->start($user, null, $handoff);
+        if (! $start || empty($start['session']) || ($start['continued_from'] ?? null) !== 'facebook'
+            || ! $this->handoffConsumedNow($start, $handoff)) {
+            if ($start) {
+                Log::info('FB handoff ใช้ไม่ได้/ใช้ไปแล้ว — พาไปห้องแชทเดิม', ['user_id' => $user->id]);
+            }
+
+            return redirect()->route('chat.index');
+        }
+
+        $live = $this->conversationFor($request, $user);
+        $busy = $live->reading_id !== null || $live->messages()->where('role', 'user')->exists();
+        $room = $busy
+            ? ChatConversation::create([
+                'user_id'       => $user->id,
+                'session_token' => (string) Str::uuid(),
+                'title'         => 'คุยต่อจากเพจ',
+            ])
+            : $live;
+
+        $request->session()->put('chat_token', $room->session_token);
+        // ห้องฝั่ง Thaiprompt ที่จำเรื่องจากเพจ — ข้อความถัดไปของลูกค้าไปห้องนี้ ไม่ใช่ห้องเก่า
+        $request->session()->put('thaiprompt_chat_session', $start['session']);
+
+        $greeting = trim((string) ($start['greeting'] ?? ''));
+        if ($greeting !== '') {
+            ChatMessage::create([
+                'chat_conversation_id' => $room->id,
+                'role'        => 'assistant',
+                'content'     => $greeting,
+                'offer_topic' => $start['offer_topic'] ?? null,
+            ]);
+        }
+
+        return redirect()->route('chat.index');
+    }
+
+    /**
+     * 🔐 (รีวิว) ลิงก์ /chat/continue นี้ถูก consume "ในครั้งนี้" จริงไหม
+     *
+     * ลูกค้าประจำมีความจำในเพจ → Thaiprompt ตอบ continued_from=facebook ทุกครั้ง แม้ลิงก์ถูกใช้ไปแล้ว
+     * ถ้าดูแค่ continued_from = เปิดลิงก์เดิมซ้ำแล้วได้ห้องใหม่/คำทักทายซ้ำทุกครั้ง
+     * Thaiprompt รุ่นใหม่ส่ง handoff_consumed มา · รุ่นเก่า (null) → เทียบ handoff_id กับลิงก์
+     */
+    private function handoffConsumedNow(array $start, string $handoff): bool
+    {
+        $consumed = $start['handoff_consumed'] ?? null;
+        if ($consumed !== null) {
+            return $consumed === true;
+        }
+
+        return is_string($start['handoff_id'] ?? null) && strtolower($start['handoff_id']) === strtolower($handoff);
+    }
+
     public function show(ChatConversation $conversation)
     {
         $user = auth()->user();
