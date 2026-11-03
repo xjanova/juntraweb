@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Rules\NotReservedEmailDomain;
 use App\Services\Affiliate\MaeMorAffiliate;
 use App\Support\PhoneNumber;
 use App\Support\Turnstile;
@@ -39,7 +40,7 @@ class RegisteredUserController extends Controller
         $data = $request->validate([
             'name'     => ['required', 'string', 'max:255'],
             // อีเมลหรือเบอร์ อย่างน้อยอย่างใดอย่างหนึ่ง
-            'email'    => ['nullable', 'required_without:phone', 'string', 'lowercase', 'email', 'max:255', Rule::unique(User::class)],
+            'email'    => ['nullable', 'required_without:phone', 'string', 'lowercase', 'email', 'max:255', Rule::unique(User::class), new NotReservedEmailDomain()],
             'phone'    => ['nullable', 'required_without:email', 'string', 'max:32'],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ], [

@@ -75,8 +75,10 @@ class AffiliateSyncBillsCommand extends Command
         $history = Schema::hasColumn('affiliate_bills', 'history_only') ? $this->discoverHistory($since, $limit) : 0;
         [$sent, $failed, $skipped] = $this->sendDue($affiliate, $limit);
         $voided = $this->voidRefunded($affiliate, $limit);
+        // 🌙 (2026-11-03) บัญชีที่ลบแล้วแต่ผังแม่หมอยังไม่ได้ปลด (ตอนลบ Thaiprompt ล่ม/บัญชีลบก่อนมีเส้นนี้)
+        $released = $affiliate->retryPendingReleases($limit);
 
-        $this->info("enrolled {$enrolled} · queued {$queued} · history {$history} · sent {$sent} · failed {$failed} · skipped {$skipped} · voided {$voided}");
+        $this->info("enrolled {$enrolled} · queued {$queued} · history {$history} · sent {$sent} · failed {$failed} · skipped {$skipped} · voided {$voided} · released {$released}");
 
         return self::SUCCESS;
     }

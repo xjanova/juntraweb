@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Rules\NotReservedEmailDomain;
 use App\Services\Affiliate\MaeMorAffiliate;
 use App\Services\Wallet\WalletService;
 use App\Support\PhoneNumber;
@@ -104,7 +105,8 @@ class AuthController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name'     => 'required|string|max:120',
-            'email'    => 'nullable|required_without:phone|email|max:255|unique:users,email',
+            // ห้ามโดเมนที่ระบบสร้างอีเมลให้เอง (กันจองบัญชีรอ SSO ของเจ้าของตัวจริง)
+            'email'    => ['nullable', 'required_without:phone', 'email', 'max:255', 'unique:users,email', new NotReservedEmailDomain()],
             'phone'    => 'nullable|required_without:email|string|max:32',
             'password' => ['required', 'confirmed', Password::min(8)],
             'device'   => 'sometimes|string|max:64',

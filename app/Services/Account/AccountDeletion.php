@@ -7,6 +7,7 @@ use App\Models\ChatMessage;
 use App\Models\Reading;
 use App\Models\User;
 use App\Models\WalletTransaction;
+use App\Services\Affiliate\MaeMorAffiliate;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -29,9 +30,15 @@ use Illuminate\Support\Str;
  *   - แถวคำทำนายแบบไม่มีเนื้อหา (ประเภท/ราคา/วันที่) — บิลที่ผังแม่หมอใช้คิดค่าแนะนำ
  *   - การซื้อผ่าน Google Play (เลขออเดอร์/token) — ต้องใช้ตามการขอคืนเงินกับ Google
  *   - รหัสสมาชิกแม่หมอ (maemor_member_code) — ผูกกับค่าแนะนำในระบบ Thaiprompt ที่จ่ายไปแล้ว
+ *
+ * 🌙 (2026-11-03) หลังลบเสร็จ บอกผังแม่หมอให้ "ปลด" การผูกบัญชี Thaiprompt ของบัญชีนี้ด้วย
+ *   ไม่ปลด = ลูกค้าสมัครใหม่แล้วผูก Thaiprompt บัญชีเดิมไม่ได้ (409 thaiprompt_taken) สายงานเดิมขาด
+ *   ปลดไม่สำเร็จตอนนี้ (Thaiprompt ล่ม) ไม่ขวางการลบ — affiliate:sync-bills ลองใหม่ทุกนาทีจนปลดได้
  */
 class AccountDeletion
 {
+    public function __construct(private MaeMorAffiliate $affiliate) {}
+
     public function delete(User $user): void
     {
         $files = ['public' => [], 'local' => []];
@@ -131,6 +138,14 @@ class AccountDeletion
                     Log::warning('Account deletion: file cleanup failed', ['disk' => $disk, 'path' => $path, 'err' => $e->getMessage()]);
                 }
             }
+        }
+
+        // ปลดการผูกที่ผังแม่หมอ — หลัง commit เท่านั้น (ลบไม่สำเร็จ = บัญชียังเป็นของลูกค้า ห้ามปลด)
+        //   ไม่ผ่านตอนนี้ = maemor_released_at ยังว่าง → affiliate:sync-bills เก็บตกให้ (ห้ามทำให้การลบล้ม)
+        try {
+            $this->affiliate->releaseMember($user);
+        } catch (\Throwable $e) {
+            Log::warning('Account deletion: Mae Mor release deferred', ['user_id' => $user->id, 'err' => mb_substr($e->getMessage(), 0, 200)]);
         }
     }
 }

@@ -19,8 +19,20 @@ use Illuminate\Support\Str;
  */
 class MaeMorAffiliate
 {
+    /**
+     * 🌙 (2026-11-03 FB web-only) บัญชี Thaiprompt ที่ลูกค้าผูกยังถูกบัญชีจันทราอื่นถือไว้ (409 thaiprompt_taken)
+     *
+     * ไม่ใช่การปฏิเสธถาวร: มักเป็นบัญชีเก่าที่ลบไปแล้วแต่ยังไม่ได้ปลด หรือกำลังปลดอยู่ — พอปลดแล้ว
+     *   ส่งซ้ำจะผ่านและสายงานเดิมตามมาครบ · Thaiprompt ไม่สร้างตัวตนเงาใต้ผู้แนะนำกลางให้แล้ว (แจ้งแอดมินเอง)
+     *   ห้ามล้างรหัสเชิญ ห้ามหยุดลองบิล และห้ามถือเป็น "อีกฝั่งล่ม" (ลูกค้าคนอื่นต้องส่งต่อได้)
+     */
+    public const STATUS_TAKEN = 'taken';
+
     /** ตรวจครั้งเดียวต่อโปรเซส ว่าคอลัมน์รหัสสมาชิก migrate แล้วหรือยัง */
     private static ?bool $hasMemberCodeColumn = null;
+
+    /** ตรวจครั้งเดียวต่อโปรเซส ว่าคอลัมน์ users.maemor_released_at migrate แล้วหรือยัง */
+    private static ?bool $hasReleasedColumn = null;
 
     public function __construct(private JuntraServerClient $server) {}
 
@@ -32,19 +44,31 @@ class MaeMorAffiliate
      *
      * @return array{status: string, data: ?array} data = ข้อมูลสมาชิก (member_code, sponsor, referral)
      */
-    public function ensureMember(User $user): array
+    public function ensureMember(User $user, ?string $pageCode = null): array
     {
         $res = $this->server->affiliate('POST', '/accounts', array_filter([
             'user_ref' => $user->id,
             'name' => $this->displayName($user),
             'thaiprompt_user_id' => $user->thaiprompt_user_id ?: null,
             'referral_code' => $user->pending_referral_code ?: null,
+            // 🌙 (2026-11-03) สาขาเพจ FB ต้นทาง (fortune_pages.code) — ไม่มีก็ได้: Thaiprompt ใช้สาขาแรกของลูกค้าเอง
+            'page_code' => self::pageCode($pageCode),
         ], fn ($v) => $v !== null));
 
         if ($res['status'] === 'ok') {
             $this->remember($user, (array) ($res['data']['data'] ?? []));
 
             return ['status' => 'ok', 'data' => $res['data']['data'] ?? null];
+        }
+
+        // บัญชี Thaiprompt ยังถูกบัญชีจันทราอื่นถือไว้ — รอปลดแล้วลองใหม่ (เก็บรหัสเชิญไว้ ห้ามล้าง)
+        if (self::isTaken($res)) {
+            Log::warning('MaeMorAffiliate: บัญชี Thaiprompt นี้ยังผูกกับบัญชีจันทราอื่น — รอปลดแล้วลองใหม่', [
+                'user_id' => $user->id,
+                'thaiprompt_user_id' => $user->thaiprompt_user_id,
+            ]);
+
+            return ['status' => self::STATUS_TAKEN, 'data' => null];
         }
 
         if ($res['status'] === 'rejected') {
@@ -93,6 +117,8 @@ class MaeMorAffiliate
             'paid_at' => $tx->created_at?->toIso8601String(),
             'thaiprompt_user_id' => $user->thaiprompt_user_id ?: null,
             'referral_code' => $user->pending_referral_code ?: null,
+            // 🌙 (2026-11-03) สาขาเพจ FB ของบิลนี้ (ถ้าการซื้อจดไว้ใน meta) — ไม่มี = Thaiprompt ใช้สาขาแรกของลูกค้า
+            'page_code' => self::pageCode(((array) ($tx->meta ?? []))['page_code'] ?? null),
             // บิลก่อนเปิดระบบ — แม่หมอนับสิทธิ์ "เคยมีบิลที่ชำระแล้ว" แต่ไม่แจกค่าแนะนำ
             'history_only' => $bill->history_only ? true : null,
         ], fn ($v) => $v !== null), timeout: 15);
@@ -116,7 +142,9 @@ class MaeMorAffiliate
         }
 
         $attempts = $bill->attempts + 1;
-        $definitive = $res['status'] === 'rejected';
+        // 409 thaiprompt_taken = รอบัญชีเก่าปลด ไม่ใช่ข้อมูลผิด → ลองใหม่เองตามรอบถอยเวลา (ไม่รอแอดมิน)
+        $taken = self::isTaken($res);
+        $definitive = $res['status'] === 'rejected' && ! $taken;
         $bill->update([
             'status' => AffiliateBill::STATUS_FAILED,
             // attempts = จำนวนครั้งที่ยิงจริง (ใช้ตัดสินว่าต้องสั่งยกเลิกเมื่อคืนเงิน) ไม่ใช่โควตา
@@ -124,10 +152,11 @@ class MaeMorAffiliate
             // ข้อมูลถูกปฏิเสธ = หยุดลองเอง รอแอดมินกดส่งซ้ำ · อีกฝั่งล่ม = ลองต่อเรื่อย ๆ (ห่างสุด 30 นาที)
             //   ไม่มีเพดาน: ล่มนานแค่ไหนบิลก็ต้องไม่ค้างถาวร
             'next_attempt_at' => $definitive ? null : now()->addMinutes(min(2 ** min($attempts, 5), 30)),
-            'last_error' => Str::limit($this->describe($res), 250, ''),
+            'last_error' => Str::limit($this->describe($taken ? ['status' => self::STATUS_TAKEN] + $res : $res), 250, ''),
         ]);
 
-        return $res['status'];
+        // คืน 'taken' ไม่ใช่ 'rejected'/'unavailable' — ผู้เรียกไม่หยุดรอบ บิลของลูกค้าคนอื่นส่งต่อได้
+        return $taken ? self::STATUS_TAKEN : $res['status'];
     }
 
     /**
@@ -168,7 +197,107 @@ class MaeMorAffiliate
         return $res['status'];
     }
 
+    /**
+     * 🌙 (2026-11-03) ลูกค้าลบบัญชีแล้ว → บอกผังแม่หมอให้ปลดการผูกบัญชี Thaiprompt ของ user_ref นี้
+     *
+     * ไม่ปลด = ลูกค้าสมัครจันทราใหม่แล้วผูก Thaiprompt บัญชีเดิม จะติด 409 thaiprompt_taken ตลอดไป
+     *   (เดิมเงียบ ๆ ได้ตัวตนเงาใต้ผู้แนะนำกลาง → ค่าแนะนำของสายงานเดิมหายทั้งสาย)
+     *   ปลดแล้ว Thaiprompt ยังจำว่าบิลเก่าของ user_ref นี้เป็นของใคร (ดึงค่าแนะนำคืนได้ตามเดิม)
+     *
+     * ส่งซ้ำได้: ปลดแล้ว/ไม่รู้จัก user_ref นี้ (404 unknown_account) = จบ
+     *   ต่อไม่ได้ / Thaiprompt ยังไม่ deploy / 503 = ค้างไว้ affiliate:sync-bills ลองใหม่ทุกนาที
+     *
+     * @return string 'released' | 'unavailable' | 'unsupported'
+     */
+    public function releaseMember(User $user, string $reason = 'account_deleted'): string
+    {
+        $res = $this->server->affiliate('POST', '/accounts/' . $user->id . '/release', [
+            'reason' => Str::limit($reason, 200, ''),
+        ], timeout: 8);
+
+        $done = $res['status'] === 'ok' || $res['reason_code'] === 'unknown_account';
+        if (! $done && $res['status'] === 'rejected') {
+            if ($res['code'] === 409) {
+                // ยังไม่มีสัญญาว่า 409 ตอนปลด = อะไร — ถือว่ายังไม่ปลด ลองใหม่รอบหน้า (ไม่ปิดงานเอง)
+                return 'unavailable';
+            }
+            // ปฏิเสธชัด (ข้อมูลผิด) — ส่งซ้ำก็ไม่ผ่าน ปิดงานไว้แต่ให้แอดมินเห็นใน log
+            Log::error('MaeMorAffiliate: Thaiprompt ปฏิเสธการปลดบัญชี', [
+                'user_id' => $user->id,
+                'code' => $res['code'],
+                'reason' => $res['reason_code'],
+            ]);
+            $done = true;
+        }
+
+        if (! $done) {
+            return $res['status'] === 'unsupported' ? 'unsupported' : 'unavailable';
+        }
+
+        if (self::hasReleasedColumn()) {
+            // ผู้ใช้ถูก soft delete ไปแล้ว — อัปเดตตรงไม่ผ่าน global scope
+            User::withTrashed()->whereKey($user->id)->update(['maemor_released_at' => now()]);
+        }
+
+        return 'released';
+    }
+
+    /**
+     * เก็บตกการปลดที่ค้าง: บัญชีที่ลบแล้ว (AccountDeletion) แต่ Thaiprompt ยังไม่รับรู้
+     *
+     * รวมบัญชีที่ลบก่อนมีเส้นนี้ด้วย — พวกนั้นไม่เคยถูกปลดเลย (Thaiprompt ตอบ unknown_account = จบเร็ว)
+     *
+     * @return int จำนวนที่ปลดสำเร็จรอบนี้
+     */
+    public function retryPendingReleases(int $limit = 100): int
+    {
+        if (! self::hasReleasedColumn()) {
+            return 0; // deploy ดึงโค้ดก่อน migrate เสร็จ — รอบหน้าค่อยทำ
+        }
+
+        $n = 0;
+        User::onlyTrashed()
+            ->whereNull('maemor_released_at')
+            ->where('email', 'like', 'deleted+%@deleted.local')
+            ->orderBy('id')
+            ->limit(max(1, $limit))
+            ->get()
+            ->each(function (User $user) use (&$n) {
+                $status = $this->releaseMember($user);
+                if ($status === 'released') {
+                    $n++;
+                }
+
+                // Thaiprompt ล่ม/ยังไม่พร้อม — คนที่เหลือก็ไม่ผ่าน ไว้รอบหน้า
+                return $status === 'released';
+            });
+
+        return $n;
+    }
+
     /* ============================================================ */
+
+    /** 409 thaiprompt_taken — บัญชี Thaiprompt นี้ยังถูกบัญชีจันทราอื่นถือไว้ (ลองใหม่ได้) */
+    private static function isTaken(array $res): bool
+    {
+        return ($res['code'] ?? 0) === 409 && ($res['reason_code'] ?? null) === 'thaiprompt_taken';
+    }
+
+    /** รหัสสาขา (fortune_pages.code) — ตัดอักขระแปลกและความยาวเกิน ว่าง = ไม่ส่งฟิลด์ */
+    private static function pageCode(mixed $code): ?string
+    {
+        if (! is_scalar($code)) {
+            return null;
+        }
+        $clean = substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string) $code) ?? '', 0, 64);
+
+        return $clean !== '' ? $clean : null;
+    }
+
+    private static function hasReleasedColumn(): bool
+    {
+        return self::$hasReleasedColumn ??= Schema::hasColumn('users', 'maemor_released_at');
+    }
 
     /** จำรหัสสมาชิกของลูกค้า + ล้างรหัสเชิญที่ใช้ไปแล้ว */
     private function remember(User $user, array $data): void
