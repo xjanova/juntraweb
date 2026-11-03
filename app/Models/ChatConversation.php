@@ -9,7 +9,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class ChatConversation extends Model
 {
     // 💬 (2026-09-21) reading_id = ห้องนี้คุยต่อจากคำพยากรณ์ไหน (null = ห้องคุยทั่วไป)
-    protected $fillable = ['user_id', 'session_token', 'title', 'reading_id'];
+    // 🔮 (2026-11-03) persona = ห้องของผู้พยากรณ์คนไหน (App\Support\ChatRooms) — ห้องเก่าทั้งหมด = maemor
+    protected $fillable = ['user_id', 'session_token', 'title', 'reading_id', 'persona'];
+
+    protected $attributes = ['persona' => 'maemor'];
 
     public function user(): BelongsTo
     {

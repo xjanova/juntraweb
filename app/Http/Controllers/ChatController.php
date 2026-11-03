@@ -14,6 +14,7 @@ use App\Services\Chat\MaeMorUpstream;
 use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
+use App\Support\ChatRooms;
 use App\Support\ChatSuggestions;
 use App\Support\Markdown;
 use App\Support\Pricing;
@@ -37,10 +38,23 @@ use Illuminate\Support\Str;
  *
  * Guests get the chat shell with a login CTA. If Thaiprompt is unreachable
  * we fall back to the local AiOracle so the page never crashes.
+ *
+ * 🔮 (2026-11-03) ห้องพยากรณ์ 3 ห้อง (ChatRooms): ลูกค้าเลือกคุยกับน้องบุษบา / แม่หมอจันทรา / คุณไสย
+ *   ห้องละ 1 แบบทำนาย · ห้องผูกกับ persona ตั้งแต่สร้าง (chat_conversations.persona)
+ *   ห้อง Thaiprompt ของแต่ละห้องเก็บต่อห้องใน cache (เดิมอยู่ใน session เบราว์เซอร์ = ได้ห้องเดียวต่อเบราว์เซอร์)
  */
 class ChatController extends Controller
 {
     use PreventsDuplicateCharges;
+
+    /**
+     * งบเวลาทั้งคำขอส่งข้อความ (วินาที) — Apache ตัดที่ ~60 วิ ถ้าเกินนั้นลูกค้าเห็น error
+     * ทั้งที่ PHP ยังทำต่อและบันทึกคำตอบที่ลูกค้าไม่เคยเห็น แล้วลูกค้ากดส่งซ้ำ = คำถามซ้ำ
+     */
+    private const BUDGET_SEC = 52;
+
+    /** ข้อความที่แสดงในห้อง — ห้องยาวมากไม่ต้องลากทั้งก้อนมาทุกครั้งที่เปิดหน้า */
+    private const RENDER_LIMIT = 80;
 
     public function __construct(
         private AiOracle $oracle,
@@ -59,22 +73,41 @@ class ChatController extends Controller
             $request->session()->put('url.intended', route('chat.index'));
         }
 
+        // 🔮 เลือกห้องก่อน: ?room=… = เข้าห้องนั้น · ?pick=1 หรือยังไม่เคยเลือก = หน้าเลือกผู้พยากรณ์
+        $room = $this->chosenRoom($request);
+        if ($room === null) {
+            return view('pages.chat.rooms', [
+                'rooms'   => ChatRooms::cards(),
+                'current' => $request->session()->get('chat_room'),
+                'gate'    => $gate,
+                // คำว่า "ฟรี" บนหน้าเลือกห้องต้องจริงตามที่แอดมินตั้ง (ราคาต่อข้อความ / โควตาฟรีรายวัน)
+                'chatFree'  => ChatPolicy::isFree() || ChatPolicy::dailyLimit() > 0,
+                'chatLede'  => match (true) {
+                    ChatPolicy::isFree() && ChatPolicy::dailyLimit() <= 0 => 'คุยฟรีทุกวัน',
+                    ChatPolicy::dailyLimit() > 0 => 'คุยฟรีวันละ ' . ChatPolicy::dailyLimit() . ' ข้อความ',
+                    default => 'คุยข้อความละ ' . Pricing::format(ChatPolicy::cost()),
+                },
+            ]);
+        }
+        if (! ChatRooms::isOpen($room)) {
+            return redirect()->route('chat.index', ['pick' => 1])
+                ->with('status', ChatRooms::name($room) . ' ยังไม่เปิดให้คุยนะคะ เร็ว ๆ นี้ค่ะ');
+        }
+        $request->session()->put('chat_room', $room);
+
         // Even when the gate denies access, render the shell — the user
         // sees the bot UI with an inline CTA + greeting placeholder. Less
         // jarring than a dead "please log in" page.
-        $conversation = $this->conversationFor($request, $user);
+        $conversation = $this->conversationFor($request, $user, $room);
 
-        // First-time greeting via upstream so persona matches FB/LINE bot exactly.
+        // 🔮 (2026-11-03) คำทักทายของห้องประกอบในเครื่อง — เดิมยิง Thaiprompt ทุกครั้งที่เปิดหน้า
+        //    (รอได้ถึง 14 วิ ถือ worker ของเซิร์ฟเวอร์ที่ใช้ร่วมกันหลายเว็บ แม้คนที่ไม่พิมพ์อะไรเลย)
+        //    ห้อง Thaiprompt เปิดเองตอนส่งข้อความแรก (dispatchToUpstream)
         if ($gate['allowed'] && $conversation->messages()->doesntExist()) {
-            $start = $this->upstream->start($user);
-            $greeting = $start['greeting'] ?? 'สวัสดีค่ะลูก แม่หมอจันทราอยู่ตรงนี้แล้ว · อยากปรึกษาเรื่องอะไรเป็นพิเศษวันนี้คะ?';
-            if (!empty($start['session'])) {
-                $request->session()->put('thaiprompt_chat_session', $start['session']);
-            }
             ChatMessage::create([
                 'chat_conversation_id' => $conversation->id,
                 'role'    => 'assistant',
-                'content' => $greeting,
+                'content' => ChatRooms::greeting($conversation->persona),
             ]);
         }
 
@@ -86,7 +119,7 @@ class ChatController extends Controller
         $dailyLimit = ChatPolicy::dailyLimit();
         $dailyLeft  = $user ? ChatPolicy::dailyLeft($user) : null;
 
-        $conversation->load('messages');
+        $this->loadRecentMessages($conversation);
 
         // เข้าแชทต่อจากการเปิดไพ่หรือเปล่า — ใช้เลือกชุดปุ่มคำถามลัด
         // 💬 (2026-09-21) อ่านจากห้อง (chat_conversations.reading_id) ไม่ใช่ session เบราว์เซอร์อีกต่อไป
@@ -94,6 +127,9 @@ class ChatController extends Controller
 
         return view('pages.chat.index', [
             'conversation' => $conversation,
+            'room'         => $conversation->persona,
+            'rooms'        => ChatRooms::cards(),
+            'offerCards'   => $this->offerCardsFor($conversation, $user),
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => $cost,
@@ -129,13 +165,24 @@ class ChatController extends Controller
      * ห้อง guest ที่ถือ token เดียวกันจะถูก "ยึด" มาเป็นของเจ้าของทันที
      * ผู้ใช้จึงคุยต่อจากที่ค้างไว้ได้โดยไม่เสียบทสนทนาก่อนล็อกอิน
      */
-    private function conversationFor(Request $request, $user): ChatConversation
+    private function conversationFor(Request $request, $user, string $room = ChatRooms::DEFAULT): ChatConversation
     {
-        $token = $request->session()->get('chat_token');
+        $room  = ChatRooms::normalize($room);
+        $token = $this->roomToken($request, $room);
+
+        if (! $token && $user) {
+            // 🔮 ลูกค้าที่ล็อกอินกลับมาจากเบราว์เซอร์/เครื่องใหม่ — คุยต่อในห้องเดิมของผู้พยากรณ์คนนี้
+            //    (เดิมได้ห้องใหม่เปล่า ๆ ทุก session ประวัติที่เพิ่งคุยหายไปจากหน้าจอ)
+            $token = ChatConversation::where('user_id', $user->id)
+                ->where('persona', $room)
+                ->whereNull('reading_id')
+                ->latest('updated_at')
+                ->value('session_token');
+        }
         if (! $token) {
             $token = (string) Str::uuid();
-            $request->session()->put('chat_token', $token);
         }
+        $this->rememberRoomToken($request, $room, $token);
 
         if ($user) {
             ChatConversation::where('session_token', $token)
@@ -145,8 +192,89 @@ class ChatController extends Controller
 
         return ChatConversation::firstOrCreate(
             ['session_token' => $token, 'user_id' => $user?->id],
-            ['title' => 'สนทนากับแม่หมอ']
+            ['title' => 'สนทนากับ' . ChatRooms::name($room), 'persona' => $room]
         );
+    }
+
+    /**
+     * ห้องที่ลูกค้าเลือก — null = ให้แสดงหน้าเลือกผู้พยากรณ์
+     *
+     * ลิงก์เก่า /chat (ปุ่มทั่วเว็บ, ลิงก์จากบอท) ของคนที่เคยคุยอยู่แล้ว → ห้องเดิม ไม่ต้องเลือกใหม่ทุกครั้ง
+     */
+    private function chosenRoom(Request $request): ?string
+    {
+        if ($request->boolean('pick')) {
+            return null;
+        }
+        $asked = $request->query('room');
+        if (is_string($asked) && ChatRooms::get($asked) !== null) {
+            return $asked;
+        }
+        // ห้องล่าสุดที่ปิดไปแล้ว (เจ้าของปิดแพ็กเกจ/ปิด flag) ไม่พาไปหน้า "เร็ว ๆ นี้" — ให้เลือกใหม่/เข้าห้องที่เปิดอยู่แทน
+        $last = $request->session()->get('chat_room');
+        if (is_string($last) && ChatRooms::isOpen($last)) {
+            return $last;
+        }
+
+        // เคยคุยห้องแม่หมอไว้แล้ว (ก่อนมีห้อง) หรือมีคำถามที่ติดมาจากหน้าผลไพ่ — พากลับห้องเดิม
+        if ($request->session()->has('chat_token') || $request->session()->has('chat_autosend')) {
+            return ChatRooms::DEFAULT;
+        }
+
+        // เปิดอยู่ห้องเดียว (ยังไม่เปิด CHAT_PERSONA_UPSTREAM) — ไม่มีอะไรให้เลือก เข้าห้องแม่หมอเลยเหมือนเดิม
+        $open = array_values(array_filter(ChatRooms::keys(), [ChatRooms::class, 'isOpen']));
+
+        return count($open) > 1 ? null : ($open[0] ?? ChatRooms::DEFAULT);
+    }
+
+    /** token ห้องสดของผู้พยากรณ์คนนี้ใน session — ห้องแม่หมออ่านคีย์เดิม (chat_token) ด้วย */
+    private function roomToken(Request $request, string $room): ?string
+    {
+        $tokens = (array) $request->session()->get('chat_tokens', []);
+        $token  = $tokens[$room] ?? ($room === ChatRooms::DEFAULT ? $request->session()->get('chat_token') : null);
+
+        return is_string($token) && $token !== '' ? $token : null;
+    }
+
+    private function rememberRoomToken(Request $request, string $room, string $token): void
+    {
+        $tokens        = (array) $request->session()->get('chat_tokens', []);
+        $tokens[$room] = $token;
+        $request->session()->put('chat_tokens', $tokens);
+        if ($room === ChatRooms::DEFAULT) {
+            // คีย์เดิม — session ที่ค้างอยู่ก่อนมีห้องยังหาห้องแม่หมอเจอ
+            $request->session()->put('chat_token', $token);
+        }
+    }
+
+    /** ข้อความล่าสุดของห้อง (เรียงเก่า → ใหม่) ไม่เกิน RENDER_LIMIT */
+    private function loadRecentMessages(ChatConversation $conversation): void
+    {
+        $conversation->setRelation('messages', $conversation->messages()
+            ->reorder()
+            ->latest('created_at')
+            ->latest('id')
+            ->limit(self::RENDER_LIMIT)
+            ->get()
+            ->reverse()
+            ->values());
+    }
+
+    /**
+     * การ์ดแพ็กเกจของข้อความชวนเปิดไพ่ — คำนวณเฉพาะข้อความชวนล่าสุด
+     * (เดิมคำนวณทุกข้อความที่เคยชวน: ราคา + ข้อห้ามเปิดซ้ำ ต่อการ์ด ต่อข้อความ = query บานตามความยาวห้อง)
+     * การ์ดเก่ากว่านั้นไม่แสดงแล้ว — ลูกค้าเห็นของล่าสุดที่กดได้จริงอยู่ชุดเดียวพอ
+     *
+     * @return array{id:?int,offers:array}
+     */
+    private function offerCardsFor(ChatConversation $conversation, $user): array
+    {
+        $last = $conversation->messages->last(fn ($m) => $m->role === 'assistant' && $m->offer_topic);
+        if ($last === null) {
+            return ['id' => null, 'offers' => []];
+        }
+
+        return ['id' => $last->id, 'offers' => ChatOffers::forRoom($conversation->persona, $last->offer_topic, $user)];
     }
 
     /**
@@ -162,7 +290,11 @@ class ChatController extends Controller
      */
     private function conversationForReading(Request $request, $user, Reading $reading): array
     {
-        $bind = function () use ($request, $user, $reading): array {
+        // 🔮 ห้องคุยต่อจากไพ่เป็นของผู้พยากรณ์ที่อ่านไพ่ชุดนั้น (quick → บุษบา · kunsai → คุณไสย · อื่น ๆ → แม่หมอ)
+        //    ห้องนั้นยังปิดอยู่ → ห้องแม่หมอ (ลูกค้าจ่ายไพ่ไปแล้ว ต้องได้คุยต่อเสมอ)
+        $persona = ChatRooms::roomForSpread(TarotSpreads::keyFromType($reading->type));
+
+        $bind = function () use ($request, $user, $reading, $persona): array {
             $room = ChatConversation::where('user_id', $user->id)
                 ->where('reading_id', $reading->id)
                 ->latest('id')
@@ -171,7 +303,7 @@ class ChatController extends Controller
                 return [$room, false];
             }
 
-            $live = $this->conversationFor($request, $user);
+            $live = $this->conversationFor($request, $user, $persona);
             if ($live->reading_id === null && ! $live->messages()->where('role', 'user')->exists()) {
                 $live->update(['reading_id' => $reading->id, 'title' => ReadingChatContext::title($reading)]);
                 $room = $live;
@@ -181,13 +313,14 @@ class ChatController extends Controller
                     'session_token' => (string) Str::uuid(),
                     'reading_id'    => $reading->id,
                     'title'         => ReadingChatContext::title($reading),
+                    'persona'       => $persona,
                 ]);
             }
 
             // คำทักทายประกอบในเครื่อง — ไม่ถาม AI ไม่คิดเงิน (เดิมเสียหนึ่งรอบไปกับการ prime)
             $room->messages()->create([
                 'role'    => 'assistant',
-                'content' => ReadingChatContext::greeting($reading),
+                'content' => ReadingChatContext::greeting($reading, $persona),
             ]);
 
             return [$room, true];
@@ -200,7 +333,8 @@ class ChatController extends Controller
             [$room, $fresh] = $bind();
         }
 
-        $request->session()->put('chat_token', $room->session_token);
+        $this->rememberRoomToken($request, $room->persona, $room->session_token);
+        $request->session()->put('chat_room', $room->persona);
 
         return [$room, $fresh];
     }
@@ -221,8 +355,12 @@ class ChatController extends Controller
 
     public function send(Request $request)
     {
+        $t0 = microtime(true);
         $data = $request->validate([
             'message' => 'required|string|max:2000',
+            // 🔮 ห้องที่หน้าจอเปิดอยู่ — ไม่ส่ง = หน้าเก่าก่อนมีห้องที่ค้างในแท็บ ซึ่งเป็นห้องแม่หมอเสมอ
+            //    (ห้ามเดาจาก session: แท็บเก่าห้องแม่หมอส่งแล้วข้อความไปโผล่ห้องบุษบาที่เพิ่งเปิดอีกแท็บ)
+            'room'    => 'nullable|string|max:16',
         ]);
 
         $user = $request->user();
@@ -234,8 +372,18 @@ class ChatController extends Controller
                 : redirect()->route('chat.index')->with('status', $gate['reason']);
         }
 
+        $room = ChatRooms::normalize($data['room'] ?? null);
+        if (! ChatRooms::isOpen($room)) {
+            $msg = ChatRooms::name($room) . ' ยังไม่เปิดให้คุยนะคะ เร็ว ๆ นี้ค่ะ';
+
+            return $request->wantsJson()
+                ? response()->json(['error' => $msg, 'reason_code' => 'room_closed'], 403)
+                : redirect()->route('chat.index', ['pick' => 1])->with('status', $msg);
+        }
+
         // Idempotency — block a double-submit of the same message.
-        if ($this->guardCharge($request, 'chat') === false) {
+        // guardChargeAuto: ล้ม/คืนเงิน → ปล่อยล็อก ลูกค้ากด "ลองส่งใหม่" ได้ทันที (เดิมค้าง 409 ไป 90 วิ)
+        if (! $this->guardChargeAuto($request, 'chat')) {
             return $request->wantsJson()
                 ? response()->json(['error' => 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409)
                 : redirect()->route('chat.index')->with('status', 'ข้อความก่อนหน้ากำลังส่งอยู่ กรุณารอสักครู่');
@@ -250,7 +398,8 @@ class ChatController extends Controller
         //   ครบเพดานแล้วแม่หมอชวนไปเปิดไพ่แบบเจาะลึกแทน (เตะเบาๆ ไม่ใช่ error แข็งๆ)
         //   ⚠️ exhausted() บล็อกเฉพาะโหมดฟรีล้วน — โหมดคิดเงินให้ผ่านไปหักเครดิตแทน
         if (ChatPolicy::exhausted($user)) {
-            $limitMsg = ChatPolicy::limitMessage();
+            $this->releaseChargeLock();
+            $limitMsg = ChatPolicy::limitMessage($room);
 
             return $request->wantsJson()
                 ? response()->json([
@@ -269,24 +418,57 @@ class ChatController extends Controller
                 Pricing::format($cost),
                 Pricing::format($balance),
             );
+            $this->releaseChargeLock();
+
             return $request->wantsJson()
                 ? response()->json(['error' => $msg, 'reason_code' => 'insufficient_funds'], 402)
                 : redirect()->route('wallet.index')->with('status', $msg);
         }
 
-        $conversation = $this->conversationFor($request, $user);
+        // 🔒 ทีละข้อความต่อคน — สองแท็บ (หรือเว็บ + แอพ) ยิงพร้อมกันได้ เดิมแต่ละข้อความถือ worker
+        //    ของเซิร์ฟเวอร์ (ที่ใช้ร่วมกันหลายเว็บ) ค้างไว้ทั้งคู่ระหว่างรอ AI และประวัติฝั่ง Thaiprompt
+        //    เขียนทับกันจนข้อความหาย · reason_code แยกจาก in_flight (ข้อความเดิมส่งซ้ำ) เพราะข้อความนี้
+        //    ยังไม่ถูกส่งเลย หน้าแชทต้องโชว์ปุ่ม "ลองส่งใหม่" ไม่ใช่บอกให้รอเฉย ๆ
+        $inflight = Cache::lock("chat:inflight:u{$user->id}", self::BUDGET_SEC + 15);
+        if (! $inflight->get()) {
+            $this->releaseChargeLock();
+            $msg = ChatRooms::selfName($room) . 'กำลังตอบข้อความก่อนหน้าอยู่ค่ะ รอให้ตอบเสร็จแล้วกด "ลองส่งใหม่" ได้เลย (ยังไม่คิดเครดิต)';
+
+            return $request->wantsJson()
+                ? response()->json(['error' => $msg, 'reason_code' => 'busy_other'], 409)
+                : redirect()->route('chat.index')->with('status', $msg);
+        }
+
+        try {
+            return $this->deliver($request, $user, $room, $data['message'], $cost, $t0);
+        } finally {
+            $inflight->release();
+        }
+    }
+
+    /** ส่งข้อความที่ผ่านทุกด่านแล้ว — บันทึก → ถามผู้พยากรณ์ → หักเงิน → ตอบกลับ */
+    private function deliver(Request $request, $user, string $room, string $message, float $cost, float $t0)
+    {
+        $conversation = $this->conversationFor($request, $user, $room);
 
         $userMessage = ChatMessage::create([
             'chat_conversation_id' => $conversation->id,
             'role'    => 'user',
-            'content' => $data['message'],
+            'content' => $message,
         ]);
 
-        $dispatch = $this->dispatchToUpstream($request, $user, $conversation, $data['message']);
+        $dispatch = $this->dispatchToUpstream($user, $conversation, $message, $t0);
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
-        $offers   = $kind === 'offer' ? ChatOffers::for((string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
+        $offers   = $kind === 'offer' ? ChatOffers::forRoom($conversation->persona, (string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
+        if ($degraded) {
+            // ไม่ได้คำตอบจริง ไม่คิดเงิน — ลูกค้าส่งใหม่ด้วยคีย์เดิมได้ทันที
+            $this->releaseChargeLock();
+            // 🔮 (2026-11-03) และไม่กินโควตาคุยฟรี: dailyUsed() นับข้อความของลูกค้า ถ้าเก็บไว้ ส่งใหม่หนึ่งครั้ง
+            //    = เสียโควตาสองข้อความแลกคำตอบเดียว · คำขอโทษก็ไม่เก็บ (ลูกค้าเห็นบนจอแล้ว ส่งใหม่ได้คำตอบจริงแทน)
+            $userMessage->delete();
+        }
 
         // Debit only AFTER a successful reply — fairer to the user when upstream
         // blips. And NEVER charge for a degraded placeholder (no AI key AND
@@ -297,7 +479,7 @@ class ChatController extends Controller
         $debitTx = null;
         if ($cost > 0 && !$degraded && $kind !== 'offer') {
             try {
-                $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับแม่หมอ', [
+                $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับ' . ChatRooms::name($room), [
                     'reference_type' => 'chat_message',
                     'reference_id'   => $userMessage->id,
                 ]);
@@ -306,19 +488,21 @@ class ChatController extends Controller
                 // We've already produced a reply — surface a one-liner in the
                 // assistant message so the user understands why no further
                 // messages will go through.
-                $reply .= "\n\n— *แม่หมอบอก: เครดิตในวอลเลตหมดพอดีตอนตอบครั้งนี้ ครั้งหน้ากรุณาเติมเงินก่อนนะคะ*";
+                $reply .= "\n\n— *" . ChatRooms::selfName($conversation->persona) . 'บอก: เครดิตในวอลเลตหมดพอดีตอนตอบครั้งนี้ ครั้งหน้ากรุณาเติมเงินก่อนนะคะ*';
             }
         }
 
         // We've already debited — if persisting the reply now fails, the user
         // would be charged for a message they never see. Refund on failure.
         try {
-            ChatMessage::create([
-                'chat_conversation_id' => $conversation->id,
-                'role'        => 'assistant',
-                'content'     => $reply,
-                'offer_topic' => $offers !== [] ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null,
-            ]);
+            if (! $degraded) {
+                ChatMessage::create([
+                    'chat_conversation_id' => $conversation->id,
+                    'role'        => 'assistant',
+                    'content'     => $reply,
+                    'offer_topic' => $offers !== [] ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null,
+                ]);
+            }
         } catch (\Throwable $e) {
             if ($debitTx) {
                 try {
@@ -332,6 +516,7 @@ class ChatController extends Controller
             Log::error('Chat assistant message persist failed after debit', [
                 'user_id' => $user->id, 'err' => $e->getMessage(),
             ]);
+            $this->releaseChargeLock();
             $errMsg = 'ระบบขัดข้องชั่วคราว — ' . ($debitTx ? 'เครดิตถูกคืนแล้ว ' : '') . 'กรุณาลองใหม่อีกครั้ง';
             return $request->wantsJson()
                 ? response()->json(['error' => $errMsg, 'reason_code' => 'persist_failed'], 500)
@@ -362,10 +547,11 @@ class ChatController extends Controller
                 // 🌙 (2026-09-15) ลูกค้าขอให้ทำนาย → การ์ดแพ็กเกจเปิดไพ่ (หักเครดิตตอนเปิดไพ่จริง)
                 'kind'        => $kind,
                 'offers'      => $offers,
-                'question'    => $offers !== [] ? mb_substr($data['message'], 0, 300) : null,
+                'question'    => $offers !== [] ? mb_substr($message, 0, 300) : null,
             ]);
         }
-        return redirect()->route('chat.index')->with('status', 'แม่หมอตอบกลับแล้ว');
+
+        return redirect()->route('chat.index')->with('status', ChatRooms::short($conversation->persona) . 'ตอบกลับแล้ว');
     }
 
     /**
@@ -404,7 +590,9 @@ class ChatController extends Controller
 
         // ครบโควตาวันนี้แล้ว — คำถามแรกที่ส่งอัตโนมัติจะโดนเด้ง 429 ทันทีที่หน้าแชท บอกตรงนี้เลยดีกว่า
         if (ChatPolicy::exhausted($user)) {
-            return redirect()->route('chat.index')->with('status', ChatPolicy::limitMessage());
+            return redirect()->route('chat.index')->with('status', ChatPolicy::limitMessage(
+                ChatRooms::roomForSpread(TarotSpreads::keyFromType($reading->type))
+            ));
         }
 
         // 💬 (2026-09-21) แม่หมอยังอ่านไม่เสร็จ / อ่านไม่สำเร็จ (คืนเงินแล้ว) = ยังไม่มีคำพยากรณ์ให้คุยต่อ
@@ -418,16 +606,15 @@ class ChatController extends Controller
             $question = mb_substr($question, 0, 2000);
         }
 
-        $previousToken = $request->session()->get('chat_token');
         [$conversation, $fresh] = $this->conversationForReading($request, $user, $reading);
 
-        // ห้อง Thaiprompt ของห้องนี้: เพิ่งผูกไพ่ / สลับมาจากห้องอื่น / ยังไม่มี → เปิดใหม่พร้อมบริบทเต็ม
-        // กดซ้ำ/รีเฟรชในห้องเดิม → ใช้ห้องเดิมต่อ (ประวัติฝั่งแม่หมอไม่หาย) · เปิดห้องไม่ถาม AI จึงไม่เสียรอบ
-        $switched = $previousToken !== $conversation->session_token;
-        if ($fresh || $switched || ! $request->session()->has('thaiprompt_chat_session')) {
+        // ห้อง Thaiprompt ของห้องนี้: เพิ่งผูกไพ่ / ยังไม่มี → เปิดใหม่พร้อมบริบทเต็ม
+        // กดซ้ำ/รีเฟรชในห้องเดิม → ใช้ห้องเดิมต่อ (ประวัติฝั่งผู้พยากรณ์ไม่หาย) · เปิดห้องไม่ถาม AI จึงไม่เสียรอบ
+        // 🔮 (2026-11-03) ห้อง Thaiprompt เก็บต่อห้องแชท (cache) ไม่ใช่ต่อเบราว์เซอร์แล้ว จึงไม่มีเคส "สลับห้อง"
+        if ($fresh || $this->upstream->sessionFor($conversation->id) === null) {
             // ลืมห้องเก่าก่อนเสมอ — เปิดใหม่ไม่ติด ข้อความถัดไปจะเปิดเองพร้อมบริบท ไม่ไปคุยในห้องของเรื่องอื่น
-            $request->session()->forget('thaiprompt_chat_session');
-            $this->openUpstreamSession($request, $user, ReadingChatContext::for($reading));
+            $this->upstream->forgetSession($conversation->id);
+            $this->openUpstreamSession($user, $conversation, ReadingChatContext::for($reading));
         }
 
         // Carry the first question into /chat so it auto-sends there (charged
@@ -451,13 +638,17 @@ class ChatController extends Controller
      *   3. ห้องสดมีข้อความของลูกค้าแล้ว หรือเป็นห้องที่ผูกกับไพ่ → เปิดห้องใหม่ "คุยต่อจากเพจ"
      *      (ห้องเดิมยังอยู่ในประวัติแชท) · ห้องว่างที่มีแค่คำทักทาย → ใช้ห้องนั้นต่อ
      *   4. บันทึกคำทักทายพร้อม offer_topic → หน้าแชทวาดการ์ดแพ็กเกจทันที แล้ว redirect ไป /chat
+     *
+     * 🔮 (2026-11-03) มีห้องผู้พยากรณ์แล้ว — คนจากเพจคุยกับแม่หมอเสมอ ทุกทางออกพาไปห้องแม่หมอตรง ๆ
+     *    (ไม่ไปหน้าเลือกห้อง และไม่ไปห้องบุษบา/คุณไสยที่เคยเลือกค้างไว้ใน session)
      */
     public function continue(Request $request, string $handoff)
     {
         $user = $request->user();
+        $toMaeMor = fn () => redirect()->route('chat.index', ['room' => ChatRooms::DEFAULT]);
 
         if (! $this->gate($user)['allowed']) {
-            return redirect()->route('chat.index');
+            return $toMaeMor();
         }
 
         // เปิดห้อง Thaiprompt ก่อนแตะห้องฝั่งเรา — handoff เสียจะได้ไม่ทิ้งห้องเปล่าไว้ในประวัติ
@@ -468,22 +659,25 @@ class ChatController extends Controller
                 Log::info('FB handoff ใช้ไม่ได้/ใช้ไปแล้ว — พาไปห้องแชทเดิม', ['user_id' => $user->id]);
             }
 
-            return redirect()->route('chat.index');
+            return $toMaeMor();
         }
 
-        $live = $this->conversationFor($request, $user);
+        $live = $this->conversationFor($request, $user, ChatRooms::DEFAULT);
         $busy = $live->reading_id !== null || $live->messages()->where('role', 'user')->exists();
         $room = $busy
             ? ChatConversation::create([
                 'user_id'       => $user->id,
                 'session_token' => (string) Str::uuid(),
                 'title'         => 'คุยต่อจากเพจ',
+                'persona'       => ChatRooms::DEFAULT,
             ])
             : $live;
 
-        $request->session()->put('chat_token', $room->session_token);
-        // ห้องฝั่ง Thaiprompt ที่จำเรื่องจากเพจ — ข้อความถัดไปของลูกค้าไปห้องนี้ ไม่ใช่ห้องเก่า
-        $request->session()->put('thaiprompt_chat_session', $start['session']);
+        $this->rememberRoomToken($request, ChatRooms::DEFAULT, $room->session_token);
+        $request->session()->put('chat_room', ChatRooms::DEFAULT);
+        // ห้องฝั่ง Thaiprompt ที่จำเรื่องจากเพจ — ผูกกับห้องแชทนี้ ข้อความถัดไปของลูกค้าไปห้องนี้ ไม่ใช่ห้องเก่า
+        $this->upstream->forgetSession($room->id);
+        $this->upstream->rememberSession($room->id, $start['session']);
 
         $greeting = trim((string) ($start['greeting'] ?? ''));
         if ($greeting !== '') {
@@ -495,7 +689,7 @@ class ChatController extends Controller
             ]);
         }
 
-        return redirect()->route('chat.index');
+        return $toMaeMor();
     }
 
     /**
@@ -524,8 +718,13 @@ class ChatController extends Controller
             abort(403);
         }
 
+        $this->loadRecentMessages($conversation);
+
         return view('pages.chat.index', [
-            'conversation' => $conversation->load('messages'),
+            'conversation' => $conversation,
+            'room'         => ChatRooms::normalize($conversation->persona),
+            'rooms'        => ChatRooms::cards(),
+            'offerCards'   => ['id' => null, 'offers' => []],
             'gate'         => ['allowed' => true, 'reason' => null, 'code' => null],
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => ChatPolicy::cost(),
@@ -552,8 +751,12 @@ class ChatController extends Controller
      * fall back to the local AiOracle — juntra's chat NEVER breaks, even
      * when upstream is down.
      */
-    private function dispatchToUpstream(Request $request, $user, ChatConversation $conversation, string $message): array
+    private function dispatchToUpstream($user, ChatConversation $conversation, string $message, float $t0): array
     {
+        $room    = ChatRooms::normalize($conversation->persona);
+        $persona = ChatRooms::upstreamPersona($room);
+        $left    = fn (): int => (int) floor(self::BUDGET_SEC - (microtime(true) - $t0));
+
         // 💬 (2026-09-21) ห้องที่ผูกกับไพ่ที่จ่ายแล้ว — อ่านจากฐานข้อมูลทุกครั้ง (เดิมอ่านจาก session เบราว์เซอร์
         //    และมีอายุ 24 ชม.) · บริบท = ไพ่ทุกใบ + คำพยากรณ์ฉบับเต็ม ส่งไปทุกรอบ ห้องฝั่ง Thaiprompt หมดอายุ
         //    หรือ cache ถูกล้างเมื่อไร แม่หมอก็ยังเห็นคำพยากรณ์ครบ
@@ -564,32 +767,35 @@ class ChatController extends Controller
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย
         //    ไม่ส่งไปให้ AI ทำนายฟรี · ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว (ถามเรื่องไพ่ชุดนั้น = คุยได้)
         if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
-            return ['reply' => ChatOffers::invite($topic), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
+            return ['reply' => ChatOffers::invite($topic, $room, $user), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
         // Re-use the upstream session id across messages for context continuity.
-        $sessionId = $request->session()->get('thaiprompt_chat_session');
-        if (!$sessionId) {
-            $sessionId = $this->openUpstreamSession($request, $user, $context);
-        }
+        $sessionId = $this->upstream->sessionFor($conversation->id)
+            ?? $this->openUpstreamSession($user, $conversation, $context);
 
-        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message, $grounded, $context) : null;
+        $out = $sessionId && $left() >= 8
+            ? $this->upstream->send($user, $sessionId, $message, $grounded, $context, $persona, $left() - 3)
+            : null;
 
-        if ($out === null && $sessionId) {
-            // Possible stale upstream session (6h cache TTL on Thaiprompt) —
-            // forget our cached id, start fresh, retry once. After that, fall back.
-            Log::info('แม่หมอ upstream gave no reply — refreshing session and retrying once', [
-                'user_id' => $user->id,
-            ]);
-            $request->session()->forget('thaiprompt_chat_session');
-            $newSession = $this->openUpstreamSession($request, $user, $context);
-            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context) : null;
+        // ลองห้องใหม่อีกรอบเฉพาะตอน "ได้คำตอบว่าง" (ห้องค้าง) และยังมีเวลาพอ — ต่อไม่ติด/หมดเวลา/เซิร์ฟเวอร์แน่น
+        // ยิงซ้ำทันทีมีแต่ซ้ำเติมฝั่งที่กำลังล้ม และกินเวลาจนเกินเพดาน 60 วิ (เดิมรวมได้ ~148 วิ)
+        if ($out === null && $sessionId && $this->upstream->worthRetry() && $left() >= 25) {
+            Log::info('ผู้พยากรณ์ตอบว่าง — เปิดห้องใหม่แล้วลองอีกครั้ง', ['user_id' => $user->id, 'room' => $room]);
+            $this->upstream->forgetSession($conversation->id);
+            $newSession = $this->openUpstreamSession($user, $conversation, $context);
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context, $persona, $left() - 3) : null;
         }
 
         if ($out === null) {
-            Log::warning('แม่หมอ upstream still silent after retry — falling back to AiOracle', [
-                'user_id' => $user->id,
-            ]);
+            Log::warning('ผู้พยากรณ์ไม่ตอบ — ใช้ทางสำรอง', ['user_id' => $user->id, 'room' => $room, 'left' => $left()]);
+
+            // ทางสำรอง (AiOracle) รอได้ถึง 30 วิ — เวลาไม่พอแล้วตอบขอโทษ (ไม่คิดเงิน) ดีกว่าให้ลูกค้าเห็นหน้า error
+            // ห้องที่ไม่ใช่แม่หมอก็ไม่ใช้ทางสำรอง: ทางสำรองพูดเป็นแม่หมอ บุคลิกจะไม่ตรงห้อง
+            if ($room !== ChatRooms::DEFAULT || $left() < 32) {
+                return ['reply' => ChatRooms::busyReply($room), 'degraded' => true];
+            }
+
             return $this->degradedFallback($message, $context);
         }
 
@@ -605,15 +811,15 @@ class ChatController extends Controller
      * 💬 (2026-09-21) บริบทไม่ใช่ข้อความ primer ที่ต้องยิงซ้ำ (และเงียบหายได้ถ้ายิงไม่ผ่าน) อีกต่อไป
      * แต่เป็นฟิลด์ `context` ของการเปิดห้อง ซึ่งผู้เรียกสร้างใหม่จากฐานข้อมูล (reading_id)
      */
-    private function openUpstreamSession(Request $request, $user, ?string $context = null): ?string
+    private function openUpstreamSession($user, ChatConversation $conversation, ?string $context = null): ?string
     {
-        $start     = $this->upstream->start($user, $context);
+        $start     = $this->upstream->start($user, $context, persona: ChatRooms::upstreamPersona($conversation->persona));
         $sessionId = $start['session'] ?? null;
         if (! $sessionId) {
             return null;
         }
 
-        $request->session()->put('thaiprompt_chat_session', $sessionId);
+        $this->upstream->rememberSession($conversation->id, $sessionId);
 
         return $sessionId;
     }

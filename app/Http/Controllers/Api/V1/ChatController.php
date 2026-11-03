@@ -15,6 +15,7 @@ use App\Services\Chat\MaeMorUpstream;
 use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
+use App\Support\ChatRooms;
 use App\Support\ChatSuggestions;
 use App\Support\Pricing;
 use App\Support\TarotSpreads;
@@ -123,23 +124,27 @@ class ChatController extends Controller
             }
         }
 
+        // 🔮 (2026-11-03) แอพมีห้องแม่หมอห้องเดียว · คุยต่อจากไพ่ = ห้องของผู้พยากรณ์ที่อ่านไพ่ชุดนั้น (ห้องปิดอยู่ → แม่หมอ)
+        $persona = $reading ? ChatRooms::roomForSpread(TarotSpreads::keyFromType((string) $reading->type)) : ChatRooms::DEFAULT;
+
         $token = (string) Str::uuid();
         $convo = ChatConversation::create([
             'user_id'       => $user->id,
             'session_token' => $token,
             'title'         => $reading ? ReadingChatContext::title($reading) : 'สนทนากับแม่หมอ',
             'reading_id'    => $reading?->id,
+            'persona'       => $persona,
         ]);
 
         // Greet via upstream when possible so mobile + web feel identical.
         $greeting = 'สวัสดีค่ะลูก แม่หมอจันทราอยู่ตรงนี้แล้ว · อยากปรึกษาเรื่องอะไรเป็นพิเศษวันนี้คะ?';
-        $start = $this->upstream->start($user, $reading ? ReadingChatContext::for($reading) : null);
+        $start = $this->upstream->start($user, $reading ? ReadingChatContext::for($reading) : null, persona: ChatRooms::upstreamPersona($persona));
         if (!empty($start['greeting'])) {
             $greeting = $start['greeting'];
         }
         if ($reading) {
             // คำทักทายเดียวกับเว็บ (บอกจำนวนใบ + ชื่อแพ็กเกจ) — ไม่ขึ้นกับว่า Thaiprompt รุ่นไหน
-            $greeting = ReadingChatContext::greeting($reading);
+            $greeting = ReadingChatContext::greeting($reading, $persona);
         }
         if (!empty($start['session'])) {
             $this->cacheUpstreamSession($convo->id, $start['session']);
@@ -237,7 +242,7 @@ class ChatController extends Controller
         //    จะได้ 409 แทนที่จะได้เหตุผลจริงว่าโควตาหมด
         if (ChatPolicy::exhausted($user)) {
             return response()->json([
-                'message'     => ChatPolicy::limitMessage(),
+                'message'     => ChatPolicy::limitMessage($conversation->persona),
                 'reason_code' => 'daily_limit',
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => 0,
@@ -281,7 +286,7 @@ class ChatController extends Controller
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
         $topic    = $kind === 'offer' ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null;
-        $offers   = $topic !== null ? ChatOffers::for($topic, $user) : [];
+        $offers   = $topic !== null ? ChatOffers::forRoom((string) $conversation->persona, $topic, $user) : [];
 
         // Debit only AFTER a successful reply — fairer when upstream blips. And
         // NEVER for a degraded placeholder (no AI key + upstream unreachable):
@@ -290,7 +295,7 @@ class ChatController extends Controller
         $debitTx = null;
         if ($cost > 0 && !$degraded && $kind !== 'offer') {
             try {
-                $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับแม่หมอ', [
+                $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับ' . ChatRooms::name((string) $conversation->persona), [
                     'reference_type' => 'chat_message',
                     'reference_id'   => $userMessage->id,
                 ]);
@@ -298,7 +303,7 @@ class ChatController extends Controller
                 // Race lost between balance check and debit. Append a one-line
                 // notice to the assistant message so the user knows they need
                 // to top up before the next message goes through.
-                $reply .= "\n\n— *แม่หมอบอก: เครดิตในวอลเลตหมดพอดีตอนตอบครั้งนี้ ครั้งหน้ากรุณาเติมเงินก่อนนะคะ*";
+                $reply .= "\n\n— *" . ChatRooms::selfName((string) $conversation->persona) . 'บอก: เครดิตในวอลเลตหมดพอดีตอนตอบครั้งนี้ ครั้งหน้ากรุณาเติมเงินก่อนนะคะ*';
             }
         }
 
@@ -372,35 +377,43 @@ class ChatController extends Controller
         $reading  = ReadingChatContext::readingOf($conversation);
         $context  = $reading ? ReadingChatContext::for($reading) : null;
         $grounded = $reading !== null;
+        // 🔮 (2026-11-03) ห้องเดียวกับเว็บ (ห้องที่เปิดจากเว็บโผล่ในรายการของแอพด้วย) — ผู้พยากรณ์ต้องตรงห้อง
+        $room    = ChatRooms::normalize($conversation->persona);
+        $persona = ChatRooms::upstreamPersona($room);
 
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นแพ็กเกจเลย ไม่ถาม AI
         //    ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว ("จากไพ่ชุดนี้ ดวงความรักเป็นยังไง" ต้องได้คำตอบ ไม่ใช่ใบเสนอราคา)
         if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
-            return ['reply' => ChatOffers::invite($topic), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
+            return ['reply' => ChatOffers::invite($topic, $room, $user), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
-        $sessionId = $this->loadUpstreamSession($conversation->id) ?? $this->openUpstreamSession($user, $conversation->id, $context);
-        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message, $grounded, $context) : null;
+        $sessionId = $this->loadUpstreamSession($conversation->id) ?? $this->openUpstreamSession($user, $conversation, $context);
+        $out = $sessionId ? $this->upstream->send($user, $sessionId, $message, $grounded, $context, $persona) : null;
 
         // Stale upstream session (6h TTL) — refresh once then retry.
         if ($out === null && $sessionId) {
             $this->forgetUpstreamSession($conversation->id);
-            $newSession = $this->openUpstreamSession($user, $conversation->id, $context);
-            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context) : null;
+            $newSession = $this->openUpstreamSession($user, $conversation, $context);
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context, $persona) : null;
         }
 
         if ($out === null) {
+            // ทางสำรองพูดเป็นแม่หมอ — ห้องอื่นตอบขอโทษในเสียงของห้องแทน (ไม่คิดเงิน)
+            if ($room !== ChatRooms::DEFAULT) {
+                return ['reply' => ChatRooms::busyReply($room), 'degraded' => true];
+            }
+
             return $this->degradedFallback($message, $context);
         }
 
         return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
     }
 
-    private function openUpstreamSession($user, int $convoId, ?string $context = null): ?string
+    private function openUpstreamSession($user, ChatConversation $conversation, ?string $context = null): ?string
     {
-        $session = $this->upstream->start($user, $context)['session'] ?? null;
+        $session = $this->upstream->start($user, $context, persona: ChatRooms::upstreamPersona((string) $conversation->persona))['session'] ?? null;
         if ($session) {
-            $this->cacheUpstreamSession($convoId, $session);
+            $this->cacheUpstreamSession($conversation->id, $session);
         }
 
         return $session;

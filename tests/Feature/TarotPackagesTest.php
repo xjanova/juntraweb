@@ -136,7 +136,7 @@ class TarotPackagesTest extends TestCase
         $this->get(route('tarot.index'))->assertOk()->assertSee('ไพ่ดูคุณไสย');
         $this->cast($u, 'kunsai')->assertRedirect();
         $this->assertSame('kunsai', $this->sent[0]['spread_key']);
-        $this->assertSame(401.0, (float) app(WalletService::class)->balance($u->fresh()), 'คุณไสย ฿99 เท่าบอท');
+        $this->assertSame(361.0, (float) app(WalletService::class)->balance($u->fresh()), 'คุณไสย ฿139 (เจ้าของสั่ง 2026-11-03)');
         $this->assertSame('tarot_kunsai', ChatOffers::for('kunsai')[0]['key']);
     }
 

@@ -114,6 +114,12 @@ class FbHandoffChatTest extends TestCase
         return $room;
     }
 
+    /** ห้อง Thaiprompt ที่จำเรื่องจากเพจต้องผูกกับห้องแชทนี้ (ข้อความถัดไปไปห้องนั้น) */
+    private function assertUpstreamSession(ChatConversation $room): void
+    {
+        $this->assertSame('srv:' . self::SESSION, app(\App\Services\Chat\MaeMorUpstream::class)->sessionFor($room->id));
+    }
+
     private function startRequests(): array
     {
         return Http::recorded(fn (Request $r) => str_ends_with($r->url(), '/server/chat/start'))
@@ -125,8 +131,8 @@ class FbHandoffChatTest extends TestCase
         $user = $this->fbMember(4242);
 
         $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)
-            ->assertRedirect(route('chat.index'))
-            ->assertSessionHas('thaiprompt_chat_session', 'srv:' . self::SESSION);
+            ->assertRedirect(route('chat.index', ['room' => 'maemor']));
+        $this->assertUpstreamSession(ChatConversation::where('user_id', $user->id)->latest('id')->first());
 
         $starts = $this->startRequests();
         $this->assertCount(1, $starts);
@@ -169,14 +175,15 @@ class FbHandoffChatTest extends TestCase
             'chat_token' => $old->session_token,
             'thaiprompt_chat_session' => 'srv:old-session',
         ])->get('/chat/continue/' . self::HANDOFF)
-            ->assertRedirect(route('chat.index'))
-            ->assertSessionHas('thaiprompt_chat_session', 'srv:' . self::SESSION);
+            ->assertRedirect(route('chat.index', ['room' => 'maemor']));
 
         $rooms = ChatConversation::where('user_id', $user->id)->orderBy('id')->get();
         $this->assertCount(2, $rooms);
         $fresh = $rooms->last();
         $this->assertNotSame($old->session_token, $fresh->session_token);
         $this->assertSame('คุยต่อจากเพจ', $fresh->title);
+        $this->assertSame('maemor', $fresh->persona, 'คนจากเพจคุยกับแม่หมอเสมอ');
+        $this->assertUpstreamSession($fresh);
         $this->assertSame(session('chat_token'), $fresh->session_token, 'ห้องใหม่ต้องเป็นห้องสดของ session');
         $this->assertSame(2, $old->messages()->count(), 'ห้องเดิมต้องไม่ถูกแตะ');
         $this->assertSame('love', $fresh->messages()->first()->offer_topic);
@@ -189,7 +196,7 @@ class FbHandoffChatTest extends TestCase
 
         $this->actingAs($user)->withSession(['chat_token' => $live->session_token])
             ->get('/chat/continue/' . self::HANDOFF)
-            ->assertRedirect(route('chat.index'));
+            ->assertRedirect(route('chat.index', ['room' => 'maemor']));
 
         $this->assertSame(1, ChatConversation::where('user_id', $user->id)->count(), 'ไม่ทิ้งห้องเปล่าไว้ในประวัติ');
         $this->assertSame('love', $live->messages()->get()->last()->offer_topic);
@@ -219,8 +226,7 @@ class FbHandoffChatTest extends TestCase
             'chat_token' => $old->session_token,
             'thaiprompt_chat_session' => 'srv:old-session',
         ])->get('/chat/continue/' . self::HANDOFF)
-            ->assertRedirect(route('chat.index'))
-            ->assertSessionHas('thaiprompt_chat_session', 'srv:old-session')
+            ->assertRedirect(route('chat.index', ['room' => 'maemor']))
             ->assertSessionHas('chat_token', $old->session_token);
 
         $this->assertSame(1, ChatConversation::where('user_id', $user->id)->count());
@@ -235,7 +241,7 @@ class FbHandoffChatTest extends TestCase
         $this->startData = null;
         $user = $this->fbMember();
 
-        $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)->assertRedirect(route('chat.index'));
+        $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)->assertRedirect(route('chat.index', ['room' => 'maemor']));
         $this->assertSame(0, ChatMessage::count());
     }
 
@@ -246,7 +252,7 @@ class FbHandoffChatTest extends TestCase
         $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF);
         // Thaiprompt consume ไปแล้ว — ครั้งที่สองได้ห้องธรรมดา
         $this->startData = $this->plain();
-        $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)->assertRedirect(route('chat.index'));
+        $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)->assertRedirect(route('chat.index', ['room' => 'maemor']));
 
         $this->assertSame(1, ChatConversation::where('user_id', $user->id)->count());
         $this->assertSame(1, ChatMessage::count(), 'คำทักทายต้องไม่ซ้ำ');
@@ -265,7 +271,7 @@ class FbHandoffChatTest extends TestCase
             'greeting' => 'แม่หมออยู่ตรงนี้แล้วค่ะลูก ✨', 'offer_topic' => null, 'handoff_id' => null, 'handoff_consumed' => false,
         ]);
         $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)
-            ->assertRedirect(route('chat.index'))
+            ->assertRedirect(route('chat.index', ['room' => 'maemor']))
             ->assertSessionHas('chat_token', $room->session_token);
 
         $this->assertSame(1, ChatConversation::where('user_id', $user->id)->count(), 'ห้ามเปิดห้องใหม่จากลิงก์เดิม');
@@ -276,7 +282,7 @@ class FbHandoffChatTest extends TestCase
         unset($old['handoff_consumed']);
         $old['handoff_id'] = null;
         $this->startData = $old;
-        $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)->assertRedirect(route('chat.index'));
+        $this->actingAs($user)->get('/chat/continue/' . self::HANDOFF)->assertRedirect(route('chat.index', ['room' => 'maemor']));
         $this->assertSame(1, ChatConversation::where('user_id', $user->id)->count());
     }
 

@@ -15,13 +15,16 @@ return [
     // Admin can override any of these live via Setting('pricing_<key>').
     'tarot_single'   => env('PRICING_TAROT_SINGLE', 9),
     'tarot_three'    => env('PRICING_TAROT_THREE', 19),
+    // 🔮 (2026-11-03) แบบทำนายเดียวของห้องน้องบุษบา (เจ้าของกำหนด 39)
+    'tarot_quick'    => env('PRICING_TAROT_QUICK', 39),
     'tarot_love'     => env('PRICING_TAROT_LOVE', 39),
     'tarot_career'   => env('PRICING_TAROT_CAREER', 39),
     'tarot_decision' => env('PRICING_TAROT_DECISION', 39),
     'tarot_celtic'   => env('PRICING_TAROT_CELTIC', 99),
     'tarot_year'     => env('PRICING_TAROT_YEAR', 129),
-    // 🪬 (2026-09-15) เท่าบอท — บนเฟซบุ๊กโหมดคุณไสย์อยู่ในแพ็กเกจ 99
-    'tarot_kunsai'   => env('PRICING_TAROT_KUNSAI', 99),
+    // 🪬 (2026-11-03) ห้องคุณไสยของแม่หมอ — เจ้าของกำหนด 139 (เดิม 99 เท่าโหมดคุณไสย์ในแพ็กเกจ 99 ของบอท)
+    //    แอดมินที่เคยตั้งราคาไว้เองที่หลังบ้านไม่ถูกทับ — ดู migration 2026_11_03_000002
+    'tarot_kunsai'   => env('PRICING_TAROT_KUNSAI', 139),
 
     // Other readings
     'numerology' => env('PRICING_NUMEROLOGY', 9),

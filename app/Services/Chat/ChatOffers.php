@@ -3,6 +3,7 @@
 namespace App\Services\Chat;
 
 use App\Models\User;
+use App\Support\ChatRooms;
 use App\Support\Pricing;
 use App\Support\ReadingCooldown;
 use App\Support\TarotSpreads;
@@ -36,10 +37,35 @@ final class ChatOffers
         'general' => 'ดวงชะตา',
     ];
 
-    /** คำชวนของแม่หมอเมื่อด่านแรก (ChatReadingIntent) จับได้ — ไม่ต้องถาม AI */
-    public static function invite(string $topic): string
+    /**
+     * คำชวนเมื่อด่านแรก (ChatReadingIntent) จับได้ — ไม่ต้องถาม AI
+     *
+     * 🔮 (2026-11-03) ห้องอื่นนอกจากแม่หมอใช้คำชวนในน้ำเสียงของห้องนั้น (config/chat_rooms.php `invite`)
+     *    ห้องแม่หมอคงข้อความเดิมทุกตัวอักษร
+     */
+    public static function invite(string $topic, string $room = ChatRooms::DEFAULT, ?User $user = null): string
     {
         $word = self::TOPIC_WORD[ChatReadingIntent::normalizeTopic($topic)];
+        $room = ChatRooms::normalize($room);
+
+        // คำพูดต้องตรงกับการ์ดที่ลูกค้าเห็นจริง (forRoom) — ไม่งั้นบุษบาบอก "ไพ่ 3 ใบ" แต่การ์ดเป็นคุณไสย
+        // หรือบอก "กดการ์ดด้านล่าง" ตอนที่ไม่มีการ์ด (ติดข้อห้ามเปิดซ้ำ)
+        if (ChatRooms::personaUpstream()) {
+            $keys = array_column(self::forRoom($room, $topic, $user), 'key');
+            $line = match (true) {
+                $keys === [] => ChatRooms::line($room, 'no_offer'),
+                $room !== 'kunsai' && $keys === ['tarot_kunsai'] => ChatRooms::line($room, 'handoff'),
+                default => '',
+            };
+            if ($line !== '') {
+                return $line;
+            }
+        }
+
+        $own = $room !== ChatRooms::DEFAULT ? ChatRooms::invite($room) : '';
+        if ($own !== '') {
+            return str_replace('{topic}', $word, $own);
+        }
 
         return "ได้เลยค่ะลูก แม่หมอจะเปิดไพ่ดู{$word}ให้นะคะ ✨ "
             . 'เลือกแบบที่ลูกอยากให้แม่หมอดูด้านล่างได้เลย — ตั้งจิตถึงคำถามของลูกไว้ แล้วแม่หมอจะอ่านไพ่ให้ละเอียดค่ะ ☾';
@@ -61,6 +87,49 @@ final class ChatOffers
         }
 
         return "\n\n" . implode("\n", $lines) . "\nเลือกได้จากเมนูดูดวงในแอพเลยนะคะ";
+    }
+
+    /**
+     * 🔮 (2026-11-03) การ์ดของห้องผู้พยากรณ์ — ห้องละ 1 แบบทำนาย (เจ้าของเลือก)
+     *
+     * 1. เรื่องของ/คุณไสยที่หลุดมาห้องอื่น (topic kunsai) และห้องคุณไสยเปิดอยู่ → การ์ดคุณไสยใบเดียว
+     *    (บุษบา/แม่หมอบอกลูกค้าว่า "เรื่องนี้ต้องให้แม่หมอส่องให้โดยเฉพาะ" — การ์ดต้องตรงกับคำพูด)
+     * 2. แพ็กเกจของห้องซื้อได้ → การ์ดของห้องใบเดียว
+     * 3. ซื้อไม่ได้ (ซ่อน / ติดข้อห้ามเปิดซ้ำ) → ห้องแม่หมอถอยไปการ์ดตามเรื่องแบบเดิม (ห้องหลักของเว็บ ต้องมีของให้เลือกเสมอ)
+     *    ห้องอื่นไม่ยื่นการ์ด — ยื่นแพ็กเกจของอีกคนในห้องบุษบา = คำพูด "ไพ่ 3 ใบ" ไม่ตรงกับการ์ดที่เห็น
+     */
+    public static function forRoom(string $room, string $topic, ?User $user = null): array
+    {
+        // ยังไม่เปิดห้องผู้พยากรณ์ (CHAT_PERSONA_UPSTREAM) = มีห้องแม่หมอห้องเดียว → การ์ดตามเรื่องแบบเดิมทุกอย่าง
+        if (! ChatRooms::personaUpstream()) {
+            return self::for($topic, $user);
+        }
+        $room = ChatRooms::normalize($room);
+        if (ChatReadingIntent::normalizeTopic($topic) === 'kunsai' && $room !== 'kunsai' && ChatRooms::isOpen('kunsai')) {
+            $card = self::roomCard('kunsai', $user);
+            if ($card !== null) {
+                return [$card];
+            }
+        }
+
+        $card = self::roomCard($room, $user);
+        if ($card !== null) {
+            return [$card];
+        }
+
+        return $room === ChatRooms::DEFAULT ? self::for($topic, $user) : [];
+    }
+
+    /** การ์ดแพ็กเกจของห้อง — null เมื่อซื้อไม่ได้ตอนนี้ */
+    private static function roomCard(string $room, ?User $user): ?array
+    {
+        $spread = ChatRooms::spread($room);
+        $meta   = TarotSpreads::all()[$spread] ?? null;
+        if ($meta === null || ReadingCooldown::blockingReading($user, $spread) !== null) {
+            return null;
+        }
+
+        return self::tarotCard($spread, $meta);
     }
 
     /**
@@ -95,18 +164,23 @@ final class ChatOffers
             if ($meta === null || ReadingCooldown::blockingReading($user, $key) !== null) {
                 continue;
             }
-            $out[] = [
-                'key'    => 'tarot_' . $key,
-                'kind'   => 'tarot',
-                'spread' => $key,
-                'label'  => (string) ($meta['name_th'] ?? $key),
-                'cards'  => TarotSpreads::cardCount($key),
-                'price'  => (float) Pricing::for(TarotSpreads::priceKey($key)),
-                'blurb'  => (string) ($meta['tagline'] ?? ''),
-                'url'    => route('tarot.index'),
-            ];
+            $out[] = self::tarotCard($key, $meta);
         }
 
         return $out;
+    }
+
+    private static function tarotCard(string $key, array $meta): array
+    {
+        return [
+            'key'    => 'tarot_' . $key,
+            'kind'   => 'tarot',
+            'spread' => $key,
+            'label'  => (string) ($meta['name_th'] ?? $key),
+            'cards'  => TarotSpreads::cardCount($key),
+            'price'  => (float) Pricing::for(TarotSpreads::priceKey($key)),
+            'blurb'  => (string) ($meta['tagline'] ?? ''),
+            'url'    => route('tarot.index'),
+        ];
     }
 }

@@ -1300,3 +1300,141 @@
 }
 
 .chip .ico { width: 15px; height: 15px; }
+
+/* ============================================================
+   🔮 (2026-11-03) ห้องผู้พยากรณ์ — หน้าเลือกห้อง + สีประจำห้อง
+   สีห้องอยู่ใน --room-1/--room-2 (data-persona) ใช้ทั้งการ์ดเลือกห้องและห้องแชท
+   ============================================================ */
+[data-persona="busaba"] { --room-1: #9fd3ff; --room-2: #e6ecff; }
+[data-persona="maemor"] { --room-1: #b07aff; --room-2: #f4cf6a; }
+[data-persona="kunsai"] { --room-1: #e0455f; --room-2: #f4cf6a; }
+
+.rooms-shell { max-width: 1120px; margin: 0 auto; }
+.rooms-deck {
+  display: grid; gap: 22px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.room-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+  border-radius: 26px;
+  border: 1px solid var(--line, rgba(244, 207, 106, .22));
+  background: rgba(20, 10, 36, .62);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  transition: transform .3s ease, border-color .3s ease, box-shadow .3s ease;
+}
+.room-card:hover { transform: translateY(-4px); border-color: var(--room-1); box-shadow: 0 18px 40px -18px var(--room-1); }
+.room-card.is-current { border-color: var(--room-1); box-shadow: 0 0 0 1px var(--room-1); }
+.room-card.is-closed { opacity: .72; }
+.room-card.is-closed .room-art img { filter: grayscale(.55); }
+
+.room-art { position: relative; aspect-ratio: 4 / 5; overflow: hidden; }
+.room-art img { width: 100%; height: 100%; object-fit: cover; object-position: top; transition: transform .7s ease; }
+.room-card:hover .room-art img { transform: scale(1.04); }
+.room-art-fade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0, 0, 0, .88), rgba(0, 0, 0, .1) 55%, transparent); }
+.room-badges { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; }
+.room-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: rgba(0, 0, 0, .5); color: rgba(255, 255, 255, .92);
+  font-size: 11px; letter-spacing: .06em;
+}
+.room-badge.is-online { background: rgba(16, 120, 72, .82); }
+.room-name { position: absolute; inset: auto 0 0 0; padding: 18px; color: #fff; }
+.room-eyebrow { font-size: 11px; color: var(--room-2); letter-spacing: .04em; }
+.room-name h2 { font-family: var(--thai); font-weight: 700; font-size: clamp(24px, 2.4vw, 30px); line-height: 1.2; margin: 2px 0 2px; text-shadow: 0 2px 12px rgba(0, 0, 0, .6); }
+.room-name p { font-size: 13.5px; color: rgba(255, 255, 255, .82); margin: 0; }
+
+.room-body { display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 18px; flex: 1; }
+.room-quote {
+  margin: 0; padding: 12px 14px; border-radius: 16px;
+  background: rgba(244, 207, 106, .08); color: var(--ink, #f3e9ff);
+  font-size: 14px; line-height: 1.65;
+}
+.room-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.room-tags span { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line, rgba(244, 207, 106, .22)); color: var(--ink-dim); font-size: 12px; }
+.room-product {
+  display: flex; align-items: center; gap: 10px; margin-top: auto;
+  padding: 10px 12px; border-radius: 14px;
+  border: 1px solid var(--line-soft, rgba(244, 207, 106, .14));
+}
+.room-product-cards {
+  display: grid; place-items: center; width: 26px; height: 34px; flex: none;
+  border: 1px solid var(--gold, #f4cf6a); border-radius: 5px;
+  color: var(--gold, #f4cf6a); font-family: var(--display); font-size: 14px;
+}
+.room-product-name { flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink-dim); }
+.room-product-price { font-family: var(--display); font-size: 22px; color: var(--gold, #f4cf6a); white-space: nowrap; }
+.room-go { width: 100%; justify-content: center; min-height: 48px; }
+.room-go[aria-disabled="true"] { pointer-events: none; opacity: .6; }
+
+/* ปุ่มเปลี่ยนผู้พยากรณ์ในห้องแชท */
+.room-switch {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-top: 10px; padding: 6px 14px; min-height: 36px;
+  border-radius: 999px; border: 1px solid var(--line, rgba(244, 207, 106, .22));
+  color: var(--gold, #f4cf6a); font-size: 12.5px;
+}
+.mor-mini .room-switch { margin-top: 0; flex: none; }
+.room-switch:hover { border-color: var(--gold, #f4cf6a); }
+.chat-shell[data-persona] .mor-glow { background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--room-1) 30%, transparent), transparent 65%); }
+
+/* มือถือ/แท็บเล็ตแนวตั้ง: ปัดการ์ดซ้าย-ขวา เห็นขอบการ์ดถัดไปเป็นสัญญาณว่าปัดได้ */
+@media (max-width: 900px) {
+  .rooms-deck {
+    display: flex; gap: 14px; overflow-x: auto;
+    scroll-snap-type: x mandatory; scrollbar-width: none;
+    margin: 0 -16px; padding: 0 16px 8px;
+  }
+  .rooms-deck::-webkit-scrollbar { display: none; }
+  .room-card { flex: 0 0 min(84%, 360px); scroll-snap-align: center; }
+  .room-art { aspect-ratio: 5 / 5; }
+}
+
+/* ============================================================
+   🎬 (2026-11-03) <x-oracle-stage> — ภาพนิ่งเป็นฐาน + คลิป idle เงียบวางทับ
+   คลิปจางเข้าบนภาพนิ่ง (เฟรมแรก = ภาพนิ่ง เลยไม่เห็นรอยต่อ) · ตัวที่โชว์อยู่ทึบจนตัวใหม่จางเข้าเสร็จ
+   ============================================================ */
+.oracle-stage { position: relative; overflow: hidden; isolation: isolate; }
+/* (.oracle-stage > …) ต้องชนะ .mor-portrait img / .mor-mini img ที่ตั้งขอบ/ตำแหน่งให้รูปเดิมไว้ */
+.oracle-stage > .oracle-still,
+.oracle-stage > .oracle-clip {
+  position: absolute; inset: 0; z-index: 0;
+  width: 100%; height: 100%; max-width: none;
+  object-fit: cover; object-position: top;
+  display: block; border: 0; border-radius: 0;
+}
+.oracle-stage > .oracle-clip { opacity: 0; transition: opacity .45s ease; pointer-events: none; z-index: 1; }
+.oracle-stage > .oracle-clip.is-on { opacity: 1; z-index: 2; }
+.oracle-sound {
+  position: absolute; right: 10px; bottom: 10px; z-index: 4;
+  display: grid; place-items: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .28);
+  background: rgba(10, 4, 22, .55); color: #fff;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  transition: background .2s ease, border-color .2s ease;
+}
+.oracle-sound svg { width: 20px; height: 20px; }
+.oracle-sound:hover,
+.oracle-sound[aria-pressed="true"] { border-color: var(--room-1, var(--gold, #f4cf6a)); background: rgba(10, 4, 22, .78); }
+.oracle-sound:focus-visible { outline: 2px solid var(--gold, #f4cf6a); outline-offset: 2px; }
+
+/* ห้องแชท (เดสก์ท็อป): แทนรูปแม่หมอเดิม สัดส่วนภาพ 9:16 */
+.mor-stage {
+  width: 100%; max-width: 288px; margin: 0 auto;
+  aspect-ratio: 9 / 16;
+  border-radius: 20px;
+  border: 1px solid var(--line, rgba(244, 207, 106, .22));
+  position: relative; z-index: 1;
+}
+/* แถบหัวห้องบนมือถือ: วงกลม 44px ก็ยังขยับได้ */
+.mor-mini .oracle-stage { width: 44px; height: 44px; flex: none; border-radius: 50%; border: 2px solid var(--gold, #f4cf6a); }
+/* การ์ดหน้าเลือกห้อง */
+.room-art .oracle-stage { position: absolute; inset: 0; transition: transform .7s ease; }
+.room-card:hover .room-art .oracle-stage { transform: scale(1.04); }
+.room-card.is-closed .room-art .oracle-stage { filter: grayscale(.55); }
+
+@media (prefers-reduced-motion: reduce) {
+  .oracle-stage > .oracle-clip { display: none; }
+}
