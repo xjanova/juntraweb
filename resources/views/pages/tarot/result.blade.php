@@ -5,6 +5,8 @@
   use App\Support\TarotSpreads;
   $spreadKey   = TarotSpreads::keyFromType($reading->type);
   $spreadMeta  = $spreadKey ? TarotSpreads::get($spreadKey) : null;
+  // ผู้พยากรณ์ของไพ่ชุดนี้ = ห้องที่ปุ่ม "ถามต่อ" พาไป (quick → บุษบา · ห้องยังปิด → แม่หมอ)
+  $oracleShort = \App\Support\ChatRooms::short(\App\Support\ChatRooms::roomForSpread($spreadKey));
   $spreadName  = $spreadMeta['name_th'] ?? 'ไพ่ยิปซี';
   $spreadEn    = $spreadMeta['name_en'] ?? '';
   $layout      = $spreadMeta['layout'] ?? 'grid';
@@ -269,9 +271,9 @@
          (ต้องรอคำทำนายเสร็จก่อน — primer ใช้เนื้อคำทำนาย) --}}
     @if ($canConsult && ! $reading->isInProgress() && ! $reading->isFailed())
       <div class="followup-box">
-        <div class="eyebrow" style="display:inline-flex">ถามแม่หมอต่อจากไพ่ชุดนี้</div>
+        <div class="eyebrow" style="display:inline-flex">ถาม{{ $oracleShort }}ต่อจากไพ่ชุดนี้</div>
         <p class="followup-hint">
-          แม่หมอเห็นไพ่ทั้ง {{ $count }} ใบที่คุณเพิ่งเปิดแล้ว — พิมพ์ถามเจาะจงได้เลย
+          {{ $oracleShort }}เห็นไพ่ทั้ง {{ $count }} ใบที่คุณเพิ่งเปิดแล้ว — พิมพ์ถามเจาะจงได้เลย
           เช่น “เรื่องงานควรตัดสินใจอย่างไร” หรือ “ไพ่ใบนี้เตือนอะไรฉัน”
           {{-- โชว์บรรทัดค่าบริการเฉพาะตอนที่คิดเงินจริง — โหมดคุยฟรีจะทำให้ลูกค้าลังเลเปล่า ๆ --}}
           @if (! \App\Support\ChatPolicy::isFree())
@@ -282,9 +284,9 @@
               x-data="{ sending:false }" @submit="sending=true">
           @csrf
           <input type="text" name="question" maxlength="2000" autocomplete="off"
-                 placeholder="อยากถามแม่หมอเจาะจงเรื่องอะไรจากไพ่ชุดนี้?">
+                 placeholder="อยากถาม{{ $oracleShort }}เจาะจงเรื่องอะไรจากไพ่ชุดนี้?">
           <button type="submit" class="btn btn-primary" :disabled="sending">
-            <span x-show="!sending">ถามแม่หมอ</span>
+            <span x-show="!sending">ถาม{{ $oracleShort }}</span>
             <span x-show="sending">กำลังพา ⋯</span>
             <svg x-show="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
           </button>

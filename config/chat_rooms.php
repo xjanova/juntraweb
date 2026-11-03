@@ -23,6 +23,10 @@ return [
     // Thaiprompt รับ `persona` ในแชทแล้วหรือยัง — เปิดหลัง deploy ฝั่ง Thaiprompt เท่านั้น
     'persona_upstream' => (bool) env('CHAT_PERSONA_UPSTREAM', false),
 
+    // 🚪 (2026-11-04) ปิดทีละห้อง — คั่นด้วยจุลภาค เช่น CHAT_ROOMS_CLOSED=kunsai
+    //    เปิดสวิตช์ persona แล้วยังอยากรอห้องไหนอยู่ ใส่ชื่อห้องไว้ที่นี่ (ห้องหลัก maemor ปิดไม่ได้)
+    'closed' => array_values(array_filter(array_map('trim', explode(',', (string) env('CHAT_ROOMS_CLOSED', ''))))),
+
     'default' => 'maemor',
 
     'rooms' => [
