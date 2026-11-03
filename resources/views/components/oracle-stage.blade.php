@@ -5,19 +5,22 @@
     // แสดงปุ่มลำโพงหรือไม่ (หน้าเลือกห้องไม่ต้องมี) — มีปุ่มก็ต่อเมื่อห้องนี้มีไฟล์เสียงจริงอย่างน้อย 1 ไฟล์
     'sound' => false,
     'eager' => false,
+    // ประโยคทักตอนเปิดเสียง — มาจากหน้าผลทำนายใช้ followup_ask แทน room_greet
+    'greet' => 'room_greet',
 ])
 
 {{-- 🎬 (2026-11-03) เวทีของผู้พยากรณ์ — ภาพนิ่งเป็นฐานเสมอ คลิป idle เงียบ ๆ วางทับเมื่อพร้อม
      - คลิปทุกตัวเริ่ม/จบที่ภาพนิ่ง → สลับคลิปตอนจบได้โดยไม่กระตุก (ไม่ใช้ loop attr)
      - เล่นเฉพาะตอนเห็นบนจอ · ไม่โหลดคลิปเลยถ้าตั้งลดการเคลื่อนไหว / ประหยัดเน็ต / ไฟล์ไม่มี
-     - เสียงไม่เล่นเองเด็ดขาด: ลูกค้าต้องกดลำโพงก่อน (ไม่จำค่าข้ามหน้า) ไฟล์ไหนไม่มี = เงียบ --}}
+     - เสียงเริ่มปิดเสมอ ลูกค้าต้องกดลำโพงก่อน · เปิดแล้วจำทั้งแท็บ (partials.juntra-voice) ไฟล์ไหนไม่มี = เงียบ
+     - ปุ่มอื่น (เช่นแถบหัวห้องบนมือถือ) สั่งเปิด/ปิดได้ด้วยอีเวนต์ oracle-sound-toggle --}}
 @php
     $loops = \App\Support\OracleMedia::loops($persona);
     $voice = $sound ? \App\Support\OracleMedia::voice($persona) : [];
 @endphp
 
 <div {{ $attributes->class('oracle-stage') }} data-persona="{{ $persona }}"
-     x-data="oracleStage(@js(['loops' => $loops, 'voice' => $voice]))"
+     x-data="oracleStage(@js(['loops' => $loops, 'voice' => $voice, 'greet' => $greet, 'persona' => $persona]))"
      :class="{ 'is-live': live }">
   <img class="oracle-still" src="{{ $poster }}" alt="{{ $alt }}"
        @if ($eager) fetchpriority="high" @else loading="lazy" @endif
@@ -41,6 +44,8 @@
   @endif
 </div>
 
+@include('partials.juntra-voice')
+
 @once
 @push('scripts')
 <script>
@@ -49,16 +54,17 @@ document.addEventListener('alpine:init', () => {
     loops: cfg.loops || [],
     voice: cfg.voice || {},
     live: false,       // มีคลิปเล่นอยู่บนจอแล้ว (ซ่อนภาพนิ่ง)
-    sound: false,      // ลูกค้ากดเปิดเสียงในหน้านี้แล้ว — เริ่มปิดเสมอ
+    sound: false,      // เปิดเสียงไว้หรือไม่ (จำทั้งแท็บ) — เริ่มปิดเสมอ
+    pending: null,     // ประโยคที่เบราว์เซอร์ยังไม่ให้เล่น — รอแตะหน้าครั้งแรก
     idx: -1,
     front: null,       // video ที่โชว์อยู่
     broken: new Set(),
     visible: false,
-    said: {},
     audio: null,
     io: null,
 
     init() {
+      this.initVoice();
       const a = this.$refs.a, b = this.$refs.b;
       if (!a || !b || !this.loops.length || !this.motionOk()) return;
 
@@ -81,14 +87,29 @@ document.addEventListener('alpine:init', () => {
       if (typeof this.thinking !== 'undefined') {
         this.$watch('thinking', (on) => { if (on) this.say('thinking_once', true); });
       }
+    },
+
+    // เฉพาะเวทีที่มีไฟล์เสียง (sound) — เวทีเล็กบนมือถือ/หน้าเลือกห้องไม่ฟังอีเวนต์ จะได้ไม่พูดซ้อนกัน
+    initVoice() {
+      if (!Object.keys(this.voice).length) return;
+      this.sound = window.JuntraVoice.on();
       this._say = (e) => this.say(e.detail?.key || e.detail, !!e.detail?.once);
       window.addEventListener('oracle-say', this._say);
+      this._toggle = () => this.toggleSound();
+      window.addEventListener('oracle-sound-toggle', this._toggle);
+      this._unlock = () => { if (this.pending) { const k = this.pending; this.pending = null; this.play(k); } };
+      document.addEventListener('pointerdown', this._unlock, { capture: true });
+      this.announce();
+      // เปิดเสียงค้างไว้จากหน้าก่อน → ทักครั้งเดียวต่อห้องต่อแท็บ (ยังไม่แตะหน้า = รอแตะครั้งแรก)
+      if (this.sound) this.say(cfg.greet || 'room_greet', true);
     },
 
     destroy() {
       this.io?.disconnect();
       document.removeEventListener('visibilitychange', this._vis);
       window.removeEventListener('oracle-say', this._say);
+      window.removeEventListener('oracle-sound-toggle', this._toggle);
+      document.removeEventListener('pointerdown', this._unlock, { capture: true });
       this.audio?.pause();
     },
 
@@ -181,17 +202,33 @@ document.addEventListener('alpine:init', () => {
     // ── เสียง ─────────────────────────────────────────────
     toggleSound() {
       this.sound = !this.sound;
-      if (!this.sound) { this.audio?.pause(); return; }
-      this.say('room_greet', true);   // เล่นจากการกดของลูกค้าเท่านั้น (นโยบาย autoplay)
+      window.JuntraVoice.set(this.sound);
+      this.announce();
+      if (!this.sound) { this.audio?.pause(); this.pending = null; return; }
+      // กดเปิด = การแตะของลูกค้า เล่นได้แน่นอน — ทักทุกครั้งที่เปิด ให้รู้ว่าเสียงมาแล้ว
+      this.play(cfg.greet && this.voice[cfg.greet] ? cfg.greet : 'room_greet');
+    },
+
+    // บอกปุ่มลำโพงตัวอื่นในหน้าว่าตอนนี้เปิดหรือปิด
+    announce() {
+      window.dispatchEvent(new CustomEvent('oracle-sound-state', { detail: { on: this.sound } }));
     },
 
     say(key, once = false) {
       if (!this.sound || !key || !this.voice[key]) return;   // ไม่มีไฟล์ = เงียบ
-      if (once && this.said[key]) return;
-      this.said[key] = true;
+      const scope = 'room-' + (cfg.persona || '');
+      if (once && window.JuntraVoice.said(scope, key)) return;
+      window.JuntraVoice.mark(scope, key);
+      this.play(key);
+    },
+
+    play(key) {
+      if (!this.voice[key]) return;
       this.audio?.pause();
       this.audio = new Audio(this.voice[key]);
-      this.audio.play().catch(() => {});
+      const p = this.audio.play();
+      // ยังไม่ได้แตะหน้า (นโยบาย autoplay) → เก็บประโยคล่าสุดไว้เล่นตอนแตะครั้งแรก
+      if (p && p.catch) p.catch((e) => { if (e && e.name === 'NotAllowedError') this.pending = key; });
     },
   }));
 });

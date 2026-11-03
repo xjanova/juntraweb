@@ -174,7 +174,8 @@
       <aside class="mor-portrait">
         <div class="mor-glow" aria-hidden="true"></div>
         {{-- 🎬 คลิป idle เงียบ + ปุ่มลำโพง (เสียงประโยคประจำ เล่นเมื่อลูกค้ากดเปิดเท่านั้น) --}}
-        <x-oracle-stage :persona="$room" :poster="$P['image']" :alt="$P['name']" sound class="mor-stage" />
+        <x-oracle-stage :persona="$room" :poster="$P['image']" :alt="$P['name']" sound class="mor-stage"
+                        :greet="($fromReading ?? false) ? 'followup_ask' : 'room_greet'" />
         <div class="mor-plate">
           <div style="font-family:var(--thai);font-size:11px;color:var(--gold)">{{ $P['eyebrow'] }}</div>
           <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">{{ $P['name'] }}</div>
@@ -200,6 +201,19 @@
               <span x-text="thinking ? persona.busy : 'ออนไลน์'">ออนไลน์</span>
             </div>
           </div>
+          {{-- มือถือไม่เห็นเวทีใหญ่ (ซ่อนตาม breakpoint แต่ยังทำงาน) → ปุ่มลำโพงตรงนี้สั่งเวทีนั้นเปิด/ปิดเสียง --}}
+          @if (\App\Support\OracleMedia::voice($room))
+            <button type="button" class="oracle-mini-sound"
+                    x-data="{ on: !!(window.JuntraVoice && window.JuntraVoice.on()) }"
+                    @oracle-sound-state.window="on = $event.detail.on"
+                    @click="window.dispatchEvent(new CustomEvent('oracle-sound-toggle'))"
+                    :aria-pressed="on ? 'true' : 'false'"
+                    :aria-label="on ? 'ปิดเสียง' + persona.short : 'เปิดเสียง' + persona.short"
+                    aria-label="เปิดเสียง">
+              <svg x-show="!on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6M17 9l6 6"/></svg>
+              <svg x-show="on" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+            </button>
+          @endif
           @if ($canSwitch)
             <a href="{{ route('chat.index', ['pick' => 1]) }}" class="room-switch">เปลี่ยน</a>
           @endif
@@ -702,6 +716,7 @@ document.addEventListener('alpine:init', () => {
      */
     payAndOpen(m, o) {
       if (m.offerBusy) return;
+      this.voice('credit_low');
       const then = { msg: m, offer: o };
       const amount = this.payAmount(o);
       const open = this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && !x.pay?.superseded);
@@ -723,6 +738,10 @@ document.addEventListener('alpine:init', () => {
       }
       const card = this.openTopup(then, true);
       this.chooseAmount(card, amount);
+    },
+    // ให้แม่หมอพูดประโยคประจำ (ถ้าลูกค้าเปิดเสียงไว้และมีไฟล์) — เวทีเสียงเป็นคนตัดสินใจเล่น
+    voice(key, once = true) {
+      window.dispatchEvent(new CustomEvent('oracle-say', { detail: { key, once } }));
     },
     say(text) {                 // ข้อความจาก "ระบบ" ไม่ใช่คำพูดของแม่หมอ
       return this.push('assistant', this.escape(text).replace(/\n/g, '<br>'), 'system');
@@ -754,9 +773,12 @@ document.addEventListener('alpine:init', () => {
         this.blockedReason = '';
       }
       this.scrollToBottom(true);
+      this.voice('topup_done', false);
       const t = m.pay.then;
       // หน่วงให้เห็นว่า "สำเร็จ" ก่อนเปลี่ยนหน้า — ผู้สูงอายุตกใจถ้าหน้าเด้งทันที
-      if (t && this.canAfford(t.offer)) setTimeout(() => this.startOffer(t.msg, t.offer), 1500);
+      // เปิดเสียงไว้ = รอให้แม่หมอพูดจบก่อน (เปลี่ยนหน้าแล้วเสียงขาด)
+      const wait = window.JuntraVoice && window.JuntraVoice.on() ? 3500 : 1500;
+      if (t && this.canAfford(t.offer)) setTimeout(() => this.startOffer(t.msg, t.offer), wait);
     },
 
     async chooseAmount(m, amount) {
@@ -927,6 +949,7 @@ document.addEventListener('alpine:init', () => {
           this.blocked = true;
           this.blockedReason = 'เครดิตไม่พอ — เติมเครดิตแล้วคุยต่อได้เลยค่ะ';
           this.say(j.error || 'เครดิตไม่พอ กรุณาเติมเงินก่อนนะคะ');
+          this.voice('credit_low');
           // กาง QR ให้เลยตรงนี้ ลูกค้าไม่ต้องหาว่าต้องกดตรงไหนต่อ
           if (this.canTopupInChat) this.openTopup();
           return;
@@ -938,6 +961,7 @@ document.addEventListener('alpine:init', () => {
             this.blocked = true;
             this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้' + this.persona.self + 'รอฟังต่อนะคะ';
             this.say(j.error || 'วันนี้คุยครบแล้วค่ะ พรุ่งนี้มาคุยกันใหม่นะคะ');
+            this.voice('daily_limit');
           } else {                                   // ส่งถี่เกินไป
             mine.state = 'failed';
             this.say('พิมพ์เร็วไปนิดนะคะ — รอสักครู่แล้วกด "ลองส่งใหม่" ได้เลย');
@@ -975,6 +999,11 @@ document.addEventListener('alpine:init', () => {
           : null;
         this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '', offers);
 
+        // เสียงประโยคประจำตามจังหวะของบทสนทนา (คำตอบจริงเป็นตัวอักษรเสมอ — เสียงแค่ชวน/ย้ำ)
+        if (offers) this.voice('offer_cards', false);
+        else if (/(ขอบคุณ|ขอบใจ|บ๊ายบาย|บายบาย|ลาก่อน|ไปก่อนนะ)/.test(text)) this.voice('thanks_bye', false);
+        else if (/(วันเดือนปีเกิด|วันเกิด)/.test(j.reply || '') && /(ขอ|บอก|\?|ไหม|มั้ย)/.test(j.reply || '')) this.voice('ask_birth');
+
         // 🎁 (2026-07-28) "โควตาฟรีหมด" ไม่ได้แปลว่าคุยต่อไม่ได้เสมอไป
         //    ถ้าตั้งราคาต่อข้อความไว้ ลูกค้าจ่ายเครดิตคุยต่อได้ — ปิดช่องพิมพ์ตรงนี้
         //    = ปิดปากคนที่พร้อมจ่าย เสียทั้งลูกค้าและรายได้
@@ -990,6 +1019,7 @@ document.addEventListener('alpine:init', () => {
         }
 
         if (j.blocked === true) {
+          this.voice('daily_limit');
           this.blocked = true;
           this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้' + this.persona.self + 'รอฟังต่อนะคะ';
         } else if (typeof j.blocked === 'undefined' && this.dailyLimit > 0 && this.dailyLeft <= 0) {

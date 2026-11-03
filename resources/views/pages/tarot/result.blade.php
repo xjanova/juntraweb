@@ -99,6 +99,12 @@
 @endpush
 
 @section('content')
+@if ($isOwner)
+  {{-- 🔊 แม่หมอพูดตามสถานะของใบนี้ — ครั้งเดียวต่อสถานะ (รีเฟรช/กลับมาดูซ้ำไม่พูดซ้ำ) --}}
+  <x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spreadKey)"
+                  :cues="\App\Support\OracleMedia::readingCues($reading, $sections)"
+                  :scope="'reading-' . $reading->id . '-' . $reading->status" />
+@endif
 <section class="canvas" style="padding-top:160px">
   <div class="reading-result">
     <div class="eyebrow">{{ $spreadName }}@if($spreadEn) · {{ $spreadEn }}@endif · {{ $count }} ใบ</div>

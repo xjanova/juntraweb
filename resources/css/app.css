@@ -1429,6 +1429,32 @@
 .oracle-sound[aria-pressed="true"] { border-color: var(--room-1, var(--gold, #f4cf6a)); background: rgba(10, 4, 22, .78); }
 .oracle-sound:focus-visible { outline: 2px solid var(--gold, #f4cf6a); outline-offset: 2px; }
 
+/* ปุ่มลำโพงบนหน้าเลือกไพ่/ผลทำนาย — ลอยมุมขวาล่าง ใหญ่พอให้ผู้สูงอายุกดง่าย */
+.oracle-voice-fab {
+  position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 60;
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 48px; padding: 0 16px 0 14px; border-radius: 999px;
+  border: 1px solid rgba(244, 207, 106, .45);
+  background: rgba(10, 4, 22, .78); color: var(--gold-2, var(--gold, #f4cf6a));
+  font: inherit; font-size: 14px; cursor: pointer;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .6);
+}
+.oracle-voice-fab svg { width: 20px; height: 20px; flex: none; }
+.oracle-voice-fab[aria-pressed="true"] { border-color: var(--gold, #f4cf6a); background: rgba(40, 20, 60, .9); }
+.oracle-voice-fab:focus-visible { outline: 2px solid var(--gold, #f4cf6a); outline-offset: 2px; }
+@media (max-width: 480px) { .oracle-voice-label { display: none; } .oracle-voice-fab { padding: 0; width: 48px; justify-content: center; } }
+
+/* ปุ่มลำโพงในแถบหัวห้องบนมือถือ */
+.oracle-mini-sound {
+  flex: none; display: grid; place-items: center;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(244, 207, 106, .4); background: rgba(10, 4, 22, .5);
+  color: var(--gold, #f4cf6a); cursor: pointer;
+}
+.oracle-mini-sound svg { width: 18px; height: 18px; }
+.oracle-mini-sound[aria-pressed="true"] { border-color: var(--gold, #f4cf6a); background: rgba(40, 20, 60, .85); }
+
 /* ห้องแชท (เดสก์ท็อป): แทนรูปแม่หมอเดิม สัดส่วนภาพ 9:16 */
 .mor-stage {
   width: 100%; max-width: 288px; margin: 0 auto;

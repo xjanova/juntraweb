@@ -156,4 +156,64 @@ class OracleMediaTest extends TestCase
         $this->assertStringNotContainsString('<video', $html);
         $this->assertStringNotContainsString('oracle-sound', $html);
     }
+
+    /** ประโยคที่พูดบนหน้าผลทำนาย — ตามสถานะและผลของใบนั้น ห้ามเดาว่า "มาดี" เมื่อไม่รู้โทน */
+    public function test_reading_cues_follow_the_reading_state_and_verdict(): void
+    {
+        $r = fn (?string $status, ?string $result = null) => new \App\Models\Reading(['status' => $status, 'result' => $result]);
+        $cues = fn (\App\Models\Reading $x) => OracleMedia::readingCues($x, \App\Support\ReadingSections::parse($x->result));
+
+        $this->assertSame(['reveal_cards', 'reading_wait'], $cues($r('pending')));
+        $this->assertSame(['reveal_cards', 'reading_wait'], $cues($r('working')));
+        $this->assertSame(['reading_failed'], $cues($r('failed')));
+
+        $verdict = fn (string $res) => "## 🎯 ผลฟันธง\n**ผล: {$res}**\nเหตุผล\n\n## 🃏 ใบที่ 1 · ปัจจุบัน\nความหมาย";
+        $this->assertSame(['verdict_good'], $cues($r(null, $verdict('ใช่ — มาแน่'))));
+        $this->assertSame(['verdict_caution'], $cues($r(null, $verdict('ไม่ใช่คนนี้'))));
+        $this->assertSame(['verdict_caution'], $cues($r(null, $verdict('ยังไม่ใช่ตอนนี้'))));
+        $this->assertSame(['followup_ask'], $cues($r(null, $verdict('ขึ้นกับการตัดสินใจ'))));
+        $this->assertSame(['followup_ask'], $cues($r(null, 'คำทำนายแบบข้อความยาวไม่มีหัวข้อ')));
+
+        $diag = fn (string $found) => "## 🪬 ผลตรวจคุณไสย\nพบของ: {$found}\nชนิด: —\n\n## 🃏 ใบที่ 1 · พลังที่ครอบคุณอยู่\nความหมาย";
+        $this->assertSame(['kunsai_found'], $cues($r(null, $diag('พบ — ของเสน่ห์'))));
+        $this->assertSame(['kunsai_clear'], $cues($r(null, $diag('ไม่พบ'))));
+        $this->assertSame(['kunsai_unclear'], $cues($r(null, $diag('ไม่ชัดเจน'))));
+    }
+
+    public function test_spread_voice_belongs_to_the_right_room(): void
+    {
+        $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
+        $this->assertSame('maemor', OracleMedia::personaFor('three'));
+
+        session(['chat_room' => 'busaba']);
+        $this->assertSame('busaba', OracleMedia::personaFor('three'));
+        $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
+
+        session(['chat_room' => 'ไม่มีห้องนี้']);
+        $this->assertSame('maemor', OracleMedia::personaFor('three'));
+    }
+
+    /** ปุ่มลำโพงลอยบนหน้าเลือกไพ่/ผล: ไม่มีไฟล์ = ไม่มีปุ่ม · ส่งเฉพาะประโยคที่มีไฟล์ · ไม่เล่นเอง */
+    public function test_voice_button_only_appears_with_files_and_never_autoplays(): void
+    {
+        $dir = 'media/oracle-test-' . uniqid();
+        config(['oracle_media.dir' => $dir]);
+
+        try {
+            $none = (string) $this->blade('<x-oracle-voice persona="maemor" :cues="[\'shuffle_focus\']" />');
+            $this->assertStringNotContainsString('oracle-voice-fab', $none);
+
+            File::ensureDirectoryExists(public_path("{$dir}/maemor/voice"));
+            File::put(public_path("{$dir}/maemor/voice/shuffle_focus.mp3"), "ID3\x03fake");
+            $html = (string) $this->blade('<x-oracle-voice persona="maemor" :cues="[\'shuffle_focus\', \'pick_complete\']" scope="reading-1" />');
+
+            $this->assertStringContainsString('oracle-voice-fab', $html);
+            $this->assertStringContainsString('shuffle_focus.mp3', $html);
+            $this->assertStringNotContainsString('pick_complete.mp3', $html);
+            $this->assertStringContainsString('aria-pressed', $html);
+            $this->assertStringNotContainsString('autoplay', $html);
+        } finally {
+            File::deleteDirectory(public_path($dir));
+        }
+    }
 }
