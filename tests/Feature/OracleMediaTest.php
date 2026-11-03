@@ -68,19 +68,20 @@ class OracleMediaTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('voice_id', File::get(config_path('oracle_media.php')));
     }
 
-    public function test_existing_voice_files_are_real_mp3s(): void
+    /** (2026-11-04) เสียงครบทุกประโยคของทุกห้องแล้ว — ประโยคใหม่ใน manifest ต้องมาพร้อมไฟล์เสียงเสมอ */
+    public function test_every_voice_line_has_a_real_mp3(): void
     {
         foreach (ChatRooms::keys() as $persona) {
             $paths = OracleMedia::voicePaths($persona);
             $this->assertNotEmpty($paths);
             foreach ($paths as $path) {
                 $full = public_path($path);
-                if (! is_file($full)) {
-                    continue;   // ยังรอ endpoint เสียงของ Thaiprompt — เงียบไว้ก่อน
-                }
+                $this->assertFileExists($full, "ประโยคเสียง {$path} ยังไม่มีไฟล์ — สร้างผ่านเสียงตัวละครของ Thaiprompt (ElevenLabs)");
+                $this->assertGreaterThan(5000, filesize($full), "{$path} เล็กผิดปกติ");
                 $head = (string) file_get_contents($full, false, null, 0, 3);
                 $this->assertTrue(str_starts_with($head, 'ID3') || (ord($head[0] ?? "\0") === 0xFF), "{$path} ไม่ใช่ mp3");
             }
+            $this->assertCount(count($paths), OracleMedia::voice($persona), "ห้อง {$persona} เสียงไม่ครบ");
         }
     }
 
