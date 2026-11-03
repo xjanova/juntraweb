@@ -1388,6 +1388,68 @@
 .room-switch:hover { border-color: var(--gold, #f4cf6a); }
 .chat-shell[data-persona] .mor-glow { background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--room-1) 30%, transparent), transparent 65%); }
 
+/* 🎨 (2026-11-04 เจ้าของสั่ง "แต่ละห้องการตกแต่งต่างกัน") — บรรยากาศของแต่ละห้อง
+   บุษบา = ฟ้าใสยามเช้า ประกายดอกไม้ · แม่หมอ = ม่วงทองใต้แสงจันทร์ (หน้าตาเดิม) · คุณไสย = แดงเทียน ควันมืด
+   ทุกอย่างอ่านจากตัวแปรห้อง ห้องใหม่เพิ่มแค่บล็อกตัวแปร */
+.chat-shell[data-persona="maemor"] {
+  --room-bubble-a: rgba(106, 59, 214, .22); --room-bubble-b: rgba(106, 59, 214, .06); --room-bubble-line: rgba(176, 124, 255, .3);
+  --room-ambient:
+    radial-gradient(60% 50% at 85% 0%, rgba(244, 207, 106, .10), transparent 70%),
+    radial-gradient(70% 60% at 10% 20%, rgba(106, 59, 214, .16), transparent 70%);
+  --room-motif: radial-gradient(1.2px 1.2px at 20% 30%, rgba(244, 207, 106, .55), transparent 60%),
+                radial-gradient(1px 1px at 70% 15%, rgba(255, 255, 255, .45), transparent 60%),
+                radial-gradient(1.4px 1.4px at 45% 75%, rgba(244, 207, 106, .4), transparent 60%);
+}
+.chat-shell[data-persona="busaba"] {
+  --room-bubble-a: rgba(120, 190, 255, .20); --room-bubble-b: rgba(255, 170, 210, .06); --room-bubble-line: rgba(159, 211, 255, .40);
+  --room-ambient:
+    radial-gradient(60% 50% at 85% 0%, rgba(255, 182, 216, .14), transparent 70%),
+    radial-gradient(70% 60% at 10% 20%, rgba(120, 190, 255, .20), transparent 70%),
+    radial-gradient(50% 40% at 50% 100%, rgba(230, 236, 255, .07), transparent 70%);
+  --room-motif: radial-gradient(2px 2px at 15% 25%, rgba(255, 190, 220, .7), transparent 60%),
+                radial-gradient(1.4px 1.4px at 62% 12%, rgba(255, 255, 255, .7), transparent 60%),
+                radial-gradient(2px 2px at 82% 58%, rgba(159, 211, 255, .65), transparent 60%),
+                radial-gradient(1.4px 1.4px at 35% 80%, rgba(255, 190, 220, .55), transparent 60%);
+}
+.chat-shell[data-persona="kunsai"] {
+  --room-bubble-a: rgba(150, 20, 44, .26); --room-bubble-b: rgba(20, 6, 10, .30); --room-bubble-line: rgba(224, 69, 95, .34);
+  --room-ambient:
+    radial-gradient(55% 45% at 50% 105%, rgba(255, 120, 40, .16), transparent 70%),
+    radial-gradient(70% 60% at 10% 10%, rgba(140, 16, 36, .22), transparent 70%),
+    radial-gradient(90% 80% at 50% 50%, transparent 55%, rgba(0, 0, 0, .45));
+  --room-motif: radial-gradient(1.6px 1.6px at 30% 70%, rgba(255, 150, 70, .55), transparent 60%),
+                radial-gradient(1.2px 1.2px at 72% 82%, rgba(255, 110, 60, .45), transparent 60%),
+                radial-gradient(1px 1px at 55% 30%, rgba(244, 207, 106, .3), transparent 60%);
+}
+.chat-shell[data-persona] { position: relative; isolation: isolate; }
+.chat-shell[data-persona]::before,
+.chat-shell[data-persona]::after {
+  content: ''; position: absolute; inset: -32px -16px; z-index: -1;
+  border-radius: 36px; pointer-events: none;
+}
+.chat-shell[data-persona]::before { background: var(--room-ambient); }
+.chat-shell[data-persona]::after {
+  background-image: var(--room-motif); background-size: 220px 220px;
+  opacity: .8; animation: roomMotif 60s linear infinite;
+}
+@keyframes roomMotif { to { background-position: 220px -220px; } }
+@media (prefers-reduced-motion: reduce) { .chat-shell[data-persona]::after { animation: none; } }
+
+.chat-shell[data-persona] .msg.is-ai .msg-body {
+  background: linear-gradient(135deg, var(--room-bubble-a), var(--room-bubble-b));
+  border-color: var(--room-bubble-line);
+}
+.chat-shell[data-persona] .mor-portrait img,
+.chat-shell[data-persona] .chat-panel { border-color: color-mix(in srgb, var(--room-1) 40%, transparent); }
+.chat-shell[data-persona] .mor-mini img { border-color: var(--room-1); }
+.chat-shell[data-persona] .mor-plate {
+  border-color: color-mix(in srgb, var(--room-1) 28%, transparent);
+  background: color-mix(in srgb, var(--room-1) 7%, transparent);
+}
+.chat-shell[data-persona] .room-switch { color: var(--room-2); border-color: color-mix(in srgb, var(--room-1) 40%, transparent); }
+.chat-shell[data-persona] .chat-suggest-label,
+.chat-shell[data-persona] .eyebrow { color: var(--room-1); }
+
 /* มือถือ/แท็บเล็ตแนวตั้ง: ปัดการ์ดซ้าย-ขวา เห็นขอบการ์ดถัดไปเป็นสัญญาณว่าปัดได้ */
 @media (max-width: 900px) {
   .rooms-deck {

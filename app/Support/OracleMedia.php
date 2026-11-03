@@ -87,8 +87,11 @@ final class OracleMedia
      */
     public static function personaFor(?string $spreadKey): string
     {
-        if ($spreadKey === 'kunsai') {
-            return 'kunsai';
+        // แบบทำนายประจำห้อง (quick → บุษบา · kunsai → คุณไสย) พูดด้วยเสียงห้องนั้นเสมอ — ห้องยังปิดก็ยังเป็นเสียงเดิมของแบบนั้น
+        //   (ไพ่ quick อ่านโดยบุษบาฝั่ง Thaiprompt — เสียงต้องตรงกับคนเขียนคำทำนาย)
+        $owner = ChatRooms::personaForSpread($spreadKey);
+        if ($owner !== ChatRooms::DEFAULT) {
+            return $owner;
         }
         $room = session('chat_room');
 

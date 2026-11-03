@@ -42,6 +42,7 @@ final class ChatRooms
      * ห้องที่ต้องให้ Thaiprompt รู้จัก persona ก่อน (บุษบา/คุณไสย) ปิดไว้จนกว่าจะเปิด
      * CHAT_PERSONA_UPSTREAM — ไม่งั้นลูกค้าเข้าห้องบุษบาแล้วเจอแม่หมอตอบ (บุคลิกไม่ตรงห้อง)
      * และแพ็กเกจของห้องต้องเปิดขายอยู่ (ห้อง 1 ห้อง = 1 แบบทำนาย ไม่มีของขาย = ไม่มีห้อง)
+     * และไม่อยู่ใน CHAT_ROOMS_CLOSED (ปิดทีละห้อง — ห้องหลักปิดไม่ได้)
      */
     public static function isOpen(string $key): bool
     {
@@ -50,6 +51,9 @@ final class ChatRooms
             return false;
         }
         if (! empty($room['needs_upstream']) && ! self::personaUpstream()) {
+            return false;
+        }
+        if ($key !== self::DEFAULT && in_array($key, (array) config('chat_rooms.closed', []), true)) {
             return false;
         }
 

@@ -147,6 +147,35 @@ class ChatRoomsTest extends TestCase
             ->assertSee('เร็ว ๆ นี้');
     }
 
+    /** 🚪 (2026-11-04) เปิดบุษบาก่อน คุณไสยรอ — CHAT_ROOMS_CLOSED ปิดทีละห้อง แต่ห้องหลักแม่หมอปิดไม่ได้ */
+    public function test_rooms_can_be_held_closed_one_by_one(): void
+    {
+        $this->allRoomsOpen();
+        config(['chat_rooms.closed' => ['kunsai', 'maemor']]);
+
+        $this->assertTrue(ChatRooms::isOpen('busaba'));
+        $this->assertFalse(ChatRooms::isOpen('kunsai'));
+        $this->assertTrue(ChatRooms::isOpen('maemor'));
+        // ไพ่คุณไสยที่ซื้อไปแล้วยังคุยต่อได้ — ที่ห้องแม่หมอ
+        $this->assertSame('maemor', ChatRooms::roomForSpread('kunsai'));
+        $this->assertSame('busaba', ChatRooms::roomForSpread('quick'));
+
+        $user = $this->member();
+        $this->actingAs($user)->get('/chat?room=kunsai')->assertRedirect(route('chat.index', ['pick' => 1]));
+        $this->actingAs($user)->get('/chat?room=busaba')->assertOk()->assertViewIs('pages.chat.index');
+    }
+
+    /** ไพ่ quick อ่านโดยบุษบา — เสียงและปุ่ม "ถามต่อ" ต้องเป็นบุษบา แม้ลูกค้าจะมาจากห้องแม่หมอ */
+    public function test_quick_reading_speaks_as_busaba_even_from_mae_mor_room(): void
+    {
+        $this->allRoomsOpen();
+        session(['chat_room' => 'maemor']);
+
+        $this->assertSame('busaba', \App\Support\OracleMedia::personaFor('quick'));
+        $this->assertSame('kunsai', \App\Support\OracleMedia::personaFor('kunsai'));
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('three'));
+    }
+
     public function test_closed_room_notice_shows_once_on_the_picker(): void
     {
         // QA prod 2026-11-03: เลย์เอาต์กับหน้าเลือกห้องต่างวางข้อความเดียวกัน → ขึ้นซ้ำสองรอบ
