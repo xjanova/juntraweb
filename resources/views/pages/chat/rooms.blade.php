@@ -1,4 +1,5 @@
 @extends('layouts.app')
+@section('page-handles-flash', '1')
 
 {{-- 🔮 (2026-11-03) หน้าเลือกผู้พยากรณ์ — ห้องละ 1 คน 1 แบบทำนาย
      ข้อมูลทั้งหมดมาจาก ChatRooms::cards() (config/chat_rooms.php + ราคาสดจาก Pricing)

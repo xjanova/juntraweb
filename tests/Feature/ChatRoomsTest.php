@@ -147,6 +147,15 @@ class ChatRoomsTest extends TestCase
             ->assertSee('เร็ว ๆ นี้');
     }
 
+    public function test_closed_room_notice_shows_once_on_the_picker(): void
+    {
+        // QA prod 2026-11-03: เลย์เอาต์กับหน้าเลือกห้องต่างวางข้อความเดียวกัน → ขึ้นซ้ำสองรอบ
+        $html = $this->actingAs($this->member())->followingRedirects()->get('/chat?room=busaba')
+            ->assertOk()->getContent();
+
+        $this->assertSame(1, substr_count($html, 'ยังไม่เปิดให้คุยนะคะ'));
+    }
+
     public function test_with_all_rooms_open_a_new_visitor_picks_a_room_first(): void
     {
         $this->allRoomsOpen();
