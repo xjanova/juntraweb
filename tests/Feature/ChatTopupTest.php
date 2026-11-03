@@ -113,6 +113,11 @@ class ChatTopupTest extends TestCase
         $this->assertStringContainsString('maxTopup: 50000', $html);
         $this->assertStringContainsString('หรือเติมเครดิตเก็บไว้หลายครั้ง', $html);
 
+        // Alpine 3.15 ตั้ง disabled ให้ปุ่มเมื่อค่าเป็น undefined — offerBusy ไม่มีจนกว่าจะกด
+        // ปุ่ม "เลือกไพ่เลย" ในแชทเลยกดไม่ได้ตั้งแต่ 2026-09-15 จนเจอ 2026-11-04 ต้องบังคับเป็น boolean เสมอ
+        $this->assertStringNotContainsString(':disabled="m.offerBusy"', $html);
+        $this->assertStringContainsString(':disabled="!!m.offerBusy"', $html);
+
         // ยอดต่ำกว่าขั้นต่ำ = ระบบไม่รับ → JS ต้องปัดขึ้นเป็น min_topup เสมอ
         $this->actingAs($user)->postJson('/chat/topup', ['amount' => 5])->assertStatus(422);
     }
