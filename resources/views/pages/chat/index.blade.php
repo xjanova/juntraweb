@@ -11,18 +11,37 @@
   $isFree      = ($cost ?? 0) <= 0;
   $exhausted   = $isFree && $dailyLimit > 0 && $dailyLeft <= 0;
 
+  // 🔮 (2026-11-03) ห้องของผู้พยากรณ์ — ชื่อ/รูป/คำเรียกตัวเองมาจาก config/chat_rooms.php ที่เดียว
+  //    (เดิมเขียน "แม่หมอจันทรา" ตายตัวทั้งหน้า → ห้องบุษบาจะขึ้นชื่อแม่หมอ)
+  $room       = \App\Support\ChatRooms::normalize($room ?? null);
+  $roomCfg    = \App\Support\ChatRooms::get($room) ?? [];
+  $roomImage  = is_file(public_path($roomCfg['image'] ?? '')) ? asset($roomCfg['image']) : asset('images/hero-chantra.webp');
+  $P = [
+      'key'     => $room,
+      'name'    => \App\Support\ChatRooms::name($room),
+      'short'   => \App\Support\ChatRooms::short($room),
+      'self'    => \App\Support\ChatRooms::selfName($room),
+      'eyebrow' => (string) ($roomCfg['eyebrow'] ?? ''),
+      'busy'    => (string) ($roomCfg['busy'] ?? 'กำลังเพ่งไพ่...'),
+      'image'   => $roomImage,
+  ];
+  $offerCards = $offerCards ?? ['id' => null, 'offers' => []];
+  // ปุ่มเปลี่ยนผู้พยากรณ์ — มีให้เมื่อเปิดมากกว่าห้องเดียว
+  $canSwitch  = ! $readonly && collect($rooms ?? [])->where('open', true)->count() > 1;
+
   // ข้อความเริ่มต้นถูก render markdown ฝั่งเซิร์ฟเวอร์แล้วส่งเป็น HTML ที่ผ่าน
   // การ strip HTML ดิบทิ้ง (Markdown::safe) — ฝั่ง client จึงไม่ต้องมีตัวแปลง
   // markdown ของตัวเอง และข้อความเดียวกันหน้าตาเหมือนกันทั้งก่อน/หลังรีเฟรช
   // การ์ดแพ็กเกจเปิดไพ่ที่แม่หมอยื่นไว้ (offer_topic) ต้องยังอยู่หลังรีเฟรช — ราคาอ่านสด ณ ตอนนี้
   // คำถามของการ์ด = ข้อความล่าสุดของลูกค้าก่อนหน้านั้น (ส่งต่อไปหน้าเลือกไพ่ ไม่ต้องพิมพ์ซ้ำ)
   $lastAsked = null;
-  $initialMessages = $conversation->messages->map(function ($m) use (&$lastAsked, $readonly) {
+  // การ์ดคำนวณมาจาก controller แล้ว (offerCardsFor) เฉพาะข้อความชวนล่าสุด — ไม่ query ต่อข้อความในวิว
+  $initialMessages = $conversation->messages->map(function ($m) use (&$lastAsked, $readonly, $offerCards) {
       if ($m->role === 'user') {
           $lastAsked = $m->content;
       }
-      $offers = (! $readonly && $m->role === 'assistant' && $m->offer_topic)
-          ? \App\Services\Chat\ChatOffers::for($m->offer_topic, auth()->user())
+      $offers = (! $readonly && $offerCards['id'] !== null && $m->id === $offerCards['id'])
+          ? $offerCards['offers']
           : [];
 
       return [
@@ -37,12 +56,14 @@
   })->values();
 @endphp
 
-@section('title', $isFree ? 'คุยกับแม่หมอจันทรา · ฟรี' : 'คุยกับแม่หมอจันทรา')
+@section('title', $isFree ? 'คุยกับ' . $P['name'] . ' · ฟรี' : 'คุยกับ' . $P['name'])
 
 @section('content')
 <section class="canvas">
-  <div class="chat-shell"
+  <div class="chat-shell" data-persona="{{ $room }}"
        x-data="chatBot({
+         room: @js($room),
+         persona: @js(['name' => $P['name'], 'short' => $P['short'], 'self' => $P['self'], 'busy' => $P['busy']]),
          messages: @js($initialMessages),
          suggestions: @js($suggestions),
          topics: @js($topics),
@@ -71,9 +92,9 @@
     <x-page-hero art="images/juntra/art/chat.webp" />
 
     <div style="text-align:center;margin-bottom:26px">
-      <div class="eyebrow">CHANTRA AI ORACLE</div>
+      <div class="eyebrow">{{ $P['eyebrow'] ?: 'CHANTRA AI ORACLE' }}</div>
       <h1 class="display" style="font-size:clamp(34px,4.5vw,60px);margin-bottom:12px">
-        คุยกับ <em>แม่หมอจันทรา</em>
+        คุยกับ <em>{{ $P['name'] }}</em>
         @if ($channel)
           <span class="chip" style="vertical-align:middle;margin-left:12px;font-family:var(--display);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);pointer-events:none">
             @if ($channel === 'facebook')
@@ -88,7 +109,7 @@
       </h1>
       <p class="lede" style="margin:0 auto">
         @if ($isFree)
-          คุยกับแม่หมอได้<em style="color:var(--gold);font-style:normal">ฟรี</em> — ความรัก การงาน การเงิน ชะตาชีวิต ระบบเดียวกับบอทแม่หมอใน Facebook / LINE
+          คุยกับ{{ $P['short'] }}ได้<em style="color:var(--gold);font-style:normal">ฟรี</em> — ความรัก การงาน การเงิน ชะตาชีวิต ระบบเดียวกับบอทแม่หมอใน Facebook / LINE
         @else
           ถามได้ทุกเรื่อง — ความรัก การงาน ชะตาดวง คำแนะนำชีวิต ระบบเดียวกับบอทแม่หมอใน Facebook Messenger / LINE OA
         @endif
@@ -121,11 +142,11 @@
       <div class="flash" style="text-align:center;padding:28px 32px;margin-bottom:24px">
         <div class="eyebrow" style="margin-bottom:14px">
           @if ($gate['code'] === 'guest') ต้องเข้าสู่ระบบก่อน
-          @else ต่อสายแม่หมอใหม่ @endif
+          @else ต่อสาย{{ $P['self'] }}ใหม่ @endif
         </div>
         <p style="font-family:var(--thai);font-size:15px;color:var(--ink-dim);max-width:520px;margin:0 auto 20px;line-height:1.7">
           @if ($gate['code'] === 'guest')
-            เข้าสู่ระบบครั้งเดียว แม่หมอจะจดจำเรื่องราวของลูกไว้เสมอ — สมาชิกจากบอท Facebook / LINE ของแม่หมอ เข้าใช้ได้ทันทีไม่ต้องสมัครใหม่
+            เข้าสู่ระบบครั้งเดียว {{ $P['self'] }}จะจดจำเรื่องราวของ{{ $roomCfg['customer'] ?? 'ลูก' }}ไว้เสมอ — สมาชิกจากบอท Facebook / LINE ของแม่หมอ เข้าใช้ได้ทันทีไม่ต้องสมัครใหม่
           @else
             {{ $gate['reason'] }}
           @endif
@@ -150,14 +171,18 @@
       {{-- ฝั่งซ้าย: ภาพแม่หมอ (เดสก์ท็อป) --}}
       <aside class="mor-portrait">
         <div class="mor-glow" aria-hidden="true"></div>
-        <img src="{{ asset('images/hero-chantra.webp') }}" alt="แม่หมอจันทรา" loading="lazy" width="288" height="384">
+        {{-- 🎬 คลิป idle เงียบ + ปุ่มลำโพง (เสียงประโยคประจำ เล่นเมื่อลูกค้ากดเปิดเท่านั้น) --}}
+        <x-oracle-stage :persona="$room" :poster="$P['image']" :alt="$P['name']" sound class="mor-stage" />
         <div class="mor-plate">
-          <div style="font-family:var(--display);letter-spacing:.22em;text-transform:uppercase;font-size:10px;color:var(--gold)">Oracle of the Moon</div>
-          <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">แม่หมอจันทราพยากรณ์</div>
+          <div style="font-family:var(--thai);font-size:11px;color:var(--gold)">{{ $P['eyebrow'] }}</div>
+          <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">{{ $P['name'] }}</div>
           <div style="display:flex;align-items:center;gap:6px;justify-content:center;margin-top:6px;font-size:12px;color:var(--ink-dim)">
             <span class="mor-online"></span>
-            <span x-text="thinking ? 'กำลังเพ่งไพ่ให้ลูกอยู่...' : 'พร้อมรับฟังลูกอยู่ค่ะ'">พร้อมรับฟังลูกอยู่ค่ะ</span>
+            <span x-text="thinking ? persona.busy : 'พร้อมรับฟังอยู่ค่ะ'">พร้อมรับฟังอยู่ค่ะ</span>
           </div>
+          @if ($canSwitch)
+            <a href="{{ route('chat.index', ['pick' => 1]) }}" class="room-switch">เปลี่ยนผู้พยากรณ์</a>
+          @endif
         </div>
       </aside>
 
@@ -165,23 +190,26 @@
       <div class="panel chat-panel" style="position:relative">
 
         <div class="mor-mini">
-          <img src="{{ asset('images/hero-chantra.webp') }}" alt="แม่หมอจันทรา" width="44" height="44">
-          <div style="min-width:0">
-            <div style="font-family:var(--thai);font-weight:700;font-size:15px">แม่หมอจันทราพยากรณ์</div>
+          <x-oracle-stage :persona="$room" :poster="$P['image']" :alt="$P['name']" eager />
+          <div style="min-width:0;flex:1">
+            <div style="font-family:var(--thai);font-weight:700;font-size:15px">{{ $P['name'] }}</div>
             <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-dim)">
               <span class="mor-online"></span>
-              <span x-text="thinking ? 'กำลังเพ่งไพ่...' : 'ออนไลน์'">ออนไลน์</span>
+              <span x-text="thinking ? persona.busy : 'ออนไลน์'">ออนไลน์</span>
             </div>
           </div>
+          @if ($canSwitch)
+            <a href="{{ route('chat.index', ['pick' => 1]) }}" class="room-switch">เปลี่ยน</a>
+          @endif
         </div>
 
         <div class="chat-log" x-ref="log" @scroll="onScroll"
              role="log" aria-live="polite" aria-relevant="additions"
-             aria-label="บทสนทนากับแม่หมอจันทรา">
+             aria-label="บทสนทนากับ{{ $P['name'] }}">
 
           <template x-for="m in messages" :key="m.id">
             <div class="msg" :class="'is-' + (m.state === 'system' ? 'system' : (m.role === 'user' ? 'user' : 'ai'))">
-              <div class="msg-head" x-show="m.role === 'assistant' && m.state !== 'system'">แม่หมอจันทรา</div>
+              <div class="msg-head" x-show="m.role === 'assistant' && m.state !== 'system'" x-text="persona.name">{{ $P['name'] }}</div>
               <div class="msg-body" x-show="m.kind !== 'topup'" x-html="m.html"></div>
 
               {{-- ═══ การ์ดแพ็กเกจเปิดไพ่ ═══════════════════════════════
@@ -211,7 +239,7 @@
                   </template>
                   <div class="offer-foot">
                     เครดิตคงเหลือ <strong x-text="'฿' + Number(balance).toFixed(2)"></strong>
-                    @if ($isFree) · คุยกับแม่หมอฟรี หักเครดิตเฉพาะตอนเปิดไพ่ @endif
+                    @if ($isFree) · คุยกับ{{ $P['short'] }}ฟรี หักเครดิตเฉพาะตอนเปิดไพ่ @endif
                   </div>
                 </div>
               </template>
@@ -261,7 +289,7 @@
 
                       <div class="pay-wait">
                         <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                        <span x-text="m.pay.waited < 600 ? 'แม่หมอกำลังรอเงินเข้าอยู่ค่ะ...' : 'ยังไม่พบเงินเข้า — แนบสลิปให้แม่หมอได้เลยค่ะ'"></span>
+                        <span x-text="m.pay.waited < 600 ? persona.self + 'กำลังรอเงินเข้าอยู่ค่ะ...' : 'ยังไม่พบเงินเข้า — แนบสลิปให้' + persona.self + 'ได้เลยค่ะ'"></span>
                       </div>
 
                       <div class="pay-actions">
@@ -289,7 +317,7 @@
                       <div class="pay-title" style="margin-bottom:2px">เติมเครดิตสำเร็จแล้วค่ะ</div>
                       <div class="amt" x-text="'฿' + Number(m.pay.payable).toFixed(2)"></div>
                       <div class="pay-sub" style="margin-top:8px">
-                        ยอดคงเหลือ <strong x-text="'฿' + Number(balance).toFixed(2)"></strong> — อยากให้แม่หมอดูเรื่องไหนต่อดีคะ
+                        ยอดคงเหลือ <strong x-text="'฿' + Number(balance).toFixed(2)"></strong> — อยากให้{{ $P['self'] }}ดูเรื่องไหนต่อดีคะ
                       </div>
                       <div class="pay-actions" style="justify-content:center">
                         <template x-for="s in nextSteps" :key="s.url">
@@ -298,7 +326,7 @@
                           </a>
                         </template>
                         <button type="button" class="chip" @click="scrollToBottom(true); $refs.input?.focus()">
-                          <span class="chip-icon">💬</span> คุยกับแม่หมอต่อ
+                          <span class="chip-icon">💬</span> คุยกับ{{ $P['short'] }}ต่อ
                         </button>
                       </div>
                     </div>
@@ -326,9 +354,9 @@
           </template>
 
           <div class="msg is-ai" x-show="thinking" x-cloak>
-            <div class="msg-head">แม่หมอจันทรา</div>
+            <div class="msg-head" x-text="persona.name">{{ $P['name'] }}</div>
             <div class="msg-body" style="display:flex;align-items:center;gap:8px">
-              <span style="color:var(--ink-dim);font-size:13.5px">กำลังเพ่งไพ่</span>
+              <span style="color:var(--ink-dim);font-size:13.5px" x-text="persona.busy">{{ $P['busy'] }}</span>
               <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
             </div>
           </div>
@@ -342,7 +370,7 @@
         @if ($readonly)
           <div style="text-align:center;padding:20px 8px 4px">
             <p style="color:var(--ink-dim);font-size:14px;margin-bottom:14px">นี่คือประวัติการสนทนา — เปิดอ่านได้อย่างเดียว</p>
-            <a href="{{ route('chat.index') }}" class="btn btn-primary">ไปคุยกับแม่หมอต่อ
+            <a href="{{ route('chat.index', ['room' => $room]) }}" class="btn btn-primary">ไปคุยกับ{{ $P['short'] }}ต่อ
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
             </a>
           </div>
@@ -387,7 +415,7 @@
             {{-- 2. แม่หมอกำลังรอคำตอบ → ยุบไว้ก่อน --}}
             <template x-if="!blocked && awaiting && !suggestOpen">
               <div class="chat-suggest-hint">
-                <span>💬 แม่หมอกำลังรอคำตอบของลูกอยู่ค่ะ</span>
+                <span>💬 {{ $P['self'] }}กำลังรอคำตอบอยู่ค่ะ</span>
                 <button type="button" class="chip" style="padding:5px 12px;font-size:12px" @click="suggestOpen = true">
                   ดูคำถามแนะนำ
                 </button>
@@ -404,7 +432,7 @@
                   <template x-for="(s, i) in suggestions" :key="i">
                     <button type="button" class="chip"
                             :disabled="thinking"
-                            :title="thinking ? 'แม่หมอกำลังตอบอยู่ — รอสักครู่นะคะ' : s.prompt"
+                            :title="thinking ? persona.self + 'กำลังตอบอยู่ — รอสักครู่นะคะ' : s.prompt"
                             @click="useChip(s.prompt)">
                       <span class="chip-icon" x-text="s.icon" aria-hidden="true"></span>
                       <span x-text="s.label"></span>
@@ -453,14 +481,14 @@
                 :title="blocked ? (blockedReason || 'วันนี้คุยครบโควตาแล้วค่ะ') : ''"
                 :placeholder="blocked
                     ? (blockedReason || 'วันนี้คุยครบแล้ว — พรุ่งนี้มาคุยกันใหม่นะคะ')
-                    : 'พิมพ์คุยกับแม่หมอได้เลย... (Shift+Enter ขึ้นบรรทัดใหม่)'"
+                    : 'พิมพ์คุยกับ' + persona.short + 'ได้เลย... (Shift+Enter ขึ้นบรรทัดใหม่)'"
                 autocomplete="off"
-                aria-label="ข้อความถึงแม่หมอ"></textarea>
+                aria-label="ข้อความถึง{{ $P['short'] }}"></textarea>
 
               <button type="submit" class="btn btn-primary chat-send"
                       :disabled="thinking || blocked || !draft.trim()"
                       :title="blocked ? (blockedReason || 'วันนี้คุยครบโควตาแล้ว')
-                              : (thinking ? 'แม่หมอกำลังตอบอยู่' : (!draft.trim() ? 'พิมพ์ข้อความก่อนส่ง' : 'ส่งข้อความ'))"
+                              : (thinking ? persona.self + 'กำลังตอบอยู่' : (!draft.trim() ? 'พิมพ์ข้อความก่อนส่ง' : 'ส่งข้อความ'))"
                       aria-label="ส่งข้อความ">
                 <svg x-show="!thinking" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
                 <svg x-show="thinking" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="animation:morPulse 1.2s infinite"><circle cx="12" cy="12" r="9"/></svg>
@@ -473,7 +501,7 @@
         @else
           {{-- gate ไม่ผ่าน: ไม่โชว์ช่องพิมพ์ที่กดไม่ได้ให้เก้อ — CTA อยู่ด้านบนแล้ว --}}
           <div style="text-align:center;padding:18px 8px 4px;color:var(--ink-dim);font-size:14px">
-            เข้าสู่ระบบด้านบนเพื่อเริ่มคุยกับแม่หมอ
+            เข้าสู่ระบบด้านบนเพื่อเริ่มคุยกับ{{ $P['short'] }}
           </div>
         @endif
       </div>
@@ -492,6 +520,8 @@
 document.addEventListener('alpine:init', () => {
   Alpine.data('chatBot', (cfg) => ({
     messages: cfg.messages || [],
+    room: cfg.room || 'maemor',
+    persona: cfg.persona || { name: 'แม่หมอจันทรา', short: 'แม่หมอ', self: 'แม่หมอ', busy: 'กำลังเพ่งไพ่...' },
     suggestions: cfg.suggestions || [],
     topics: cfg.topics || [],
     awaiting: !!cfg.awaiting,
@@ -803,13 +833,13 @@ document.addEventListener('alpine:init', () => {
             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
             'Idempotency-Key': idem,
           },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: text, room: this.room }),
         });
 
         // 419 = CSRF/session หมดอายุ — เดิมขึ้นว่า "ระบบขัดข้อง" ผู้ใช้เลยลองส่งซ้ำเรื่อย ๆ
         if (r.status === 419) {
           mine.state = 'failed';
-          this.say('เซสชันหมดอายุค่ะ — กรุณารีเฟรชหน้าแล้วเข้าสู่ระบบใหม่ ข้อความของลูกยังอยู่ ไม่ได้ถูกส่งและไม่ถูกคิดเงิน');
+          this.say('เซสชันหมดอายุค่ะ — กรุณารีเฟรชหน้าแล้วเข้าสู่ระบบใหม่ ข้อความที่พิมพ์ไว้ยังอยู่ ไม่ได้ถูกส่งและไม่ถูกคิดเงิน');
           return;
         }
 
@@ -829,17 +859,22 @@ document.addEventListener('alpine:init', () => {
           if (j.reason_code === 'daily_limit') {     // ครบโควตาคุยฟรีวันนี้
             this.dailyLeft = 0;
             this.blocked = true;
-            this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้แม่หมอรอฟังต่อนะคะ';
+            this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้' + this.persona.self + 'รอฟังต่อนะคะ';
             this.say(j.error || 'วันนี้คุยครบแล้วค่ะ พรุ่งนี้มาคุยกันใหม่นะคะ');
           } else {                                   // ส่งถี่เกินไป
             mine.state = 'failed';
-            this.say('พิมพ์เร็วเกินไปนะคะลูก — รอสักครู่แล้วกด "ลองส่งใหม่" ได้เลย');
+            this.say('พิมพ์เร็วไปนิดนะคะ — รอสักครู่แล้วกด "ลองส่งใหม่" ได้เลย');
           }
           return;
         }
 
-        if (r.status === 409) {                      // ข้อความเดิมกำลังส่งอยู่
-          this.say('ข้อความก่อนหน้ากำลังส่งอยู่ค่ะ รอสักครู่นะคะ');
+        if (r.status === 409) {
+          if (j.reason_code === 'busy_other') {      // อีกแท็บ/แอพกำลังรอคำตอบ — ข้อความนี้ยังไม่ถูกส่ง
+            mine.state = 'failed';
+            this.say(j.error || 'กำลังตอบข้อความก่อนหน้าอยู่ค่ะ รอสักครู่แล้วกด "ลองส่งใหม่" ได้เลย');
+            return;
+          }
+          this.say('ข้อความก่อนหน้ากำลังส่งอยู่ค่ะ รอสักครู่นะคะ');   // ข้อความเดิมกำลังส่งอยู่
           return;
         }
 
@@ -873,17 +908,17 @@ document.addEventListener('alpine:init', () => {
         if (typeof j.next_cost === 'number' && j.next_cost > 0
             && this.dailyLimit > 0 && !this.costNotified) {
           this.costNotified = true;
-          this.say('โควตาคุยฟรีวันนี้หมดแล้วนะคะลูก 🌙 ข้อความถัดไปแม่หมอจะหักจากเครดิตครั้งละ ฿'
+          this.say('โควตาคุยฟรีวันนี้หมดแล้วนะคะ 🌙 ข้อความถัดไป' + this.persona.self + 'จะหักจากเครดิตครั้งละ ฿'
             + j.next_cost + ' ค่ะ (พรุ่งนี้ได้โควตาฟรีใหม่)');
         }
 
         if (j.blocked === true) {
           this.blocked = true;
-          this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้แม่หมอรอฟังต่อนะคะ';
+          this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้' + this.persona.self + 'รอฟังต่อนะคะ';
         } else if (typeof j.blocked === 'undefined' && this.dailyLimit > 0 && this.dailyLeft <= 0) {
           // เซิร์ฟเวอร์รุ่นเก่ายังไม่ส่ง blocked (ช่วง deploy คาบเกี่ยว) → ใช้เกณฑ์เดิม
           this.blocked = true;
-          this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้แม่หมอรอฟังต่อนะคะ';
+          this.blockedReason = 'วันนี้คุยครบแล้ว — พรุ่งนี้' + this.persona.self + 'รอฟังต่อนะคะ';
         }
       } catch (e) {
         // แยกให้ชัดว่า "ส่งไม่ถึงเซิร์ฟเวอร์" — ลองใหม่ได้โดยไม่เสี่ยงโดนคิดเงินซ้ำ

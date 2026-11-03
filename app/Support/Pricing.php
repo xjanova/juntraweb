@@ -78,6 +78,7 @@ class Pricing
     {
         return [
             'tarot_single'   => 'เปิดไพ่ 1 ใบ',
+            'tarot_quick'    => 'เปิดไพ่ดูไวกับน้องบุษบา 3 ใบ',
             'tarot_three'    => 'เปิดไพ่ 3 ใบ',
             'tarot_love'     => 'เปิดไพ่ความรัก 5 ใบ',
             'tarot_career'   => 'เปิดไพ่การงาน-การเงิน 5 ใบ',

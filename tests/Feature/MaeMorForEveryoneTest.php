@@ -111,7 +111,9 @@ class MaeMorForEveryoneTest extends TestCase
         $user = $this->phoneMember();
 
         $this->actingAs($user)->get(route('chat.index'))->assertOk();
-        $this->assertSame('สวัสดีค่ะลูก', ChatMessage::where('role', 'assistant')->value('content'), 'คำทักทายมาจากแม่หมอจริง');
+        // 🔮 (2026-11-03) คำทักทายประกอบในเครื่องจากห้องแม่หมอ — เปิดหน้าเฉย ๆ ไม่ยิง AI (ห้องฝั่ง Thaiprompt เปิดตอนส่งข้อความแรก)
+        $this->assertContains(ChatMessage::where('role', 'assistant')->value('content'), config('chat_rooms.rooms.maemor.greetings'));
+        $this->assertSame(0, $this->sentTo('/server/chat/start'), 'เปิดหน้าแชทไม่ต้องรอ AI');
 
         $res = $this->actingAs($user)->postJson(route('chat.send'), ['message' => 'วันนี้เหนื่อยจังเลยค่ะแม่หมอ'])
             ->assertOk()

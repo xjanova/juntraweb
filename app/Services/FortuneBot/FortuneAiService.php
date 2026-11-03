@@ -5,6 +5,7 @@ namespace App\Services\FortuneBot;
 use App\Models\Reading;
 use App\Models\User;
 use App\Services\AiOracle;
+use App\Support\ChatRooms;
 use App\Support\TarotSpreads;
 use Illuminate\Support\Facades\Log;
 
@@ -72,6 +73,10 @@ class FortuneAiService
             // วันเกิด (ไม่บังคับ) ที่ลูกค้ากรอกตอนเลือกไพ่ — เฉพาะแพ็กเกจที่ใช้ดวงดาวประกอบ
             'birth_date' => $key && TarotSpreads::wantsBirthDate($key) ? data_get($reading->payload, 'birth_date') : null,
             'customer_name' => $this->addressableName($user?->name) ?: null,
+            // 🔮 (2026-11-03) ผู้พยากรณ์ของห้องที่ขายแพ็กเกจนี้ (quick → บุษบา · kunsai → คุณไสย · อื่น ๆ → แม่หมอ)
+            //    ส่งเฉพาะโปรไฟล์ใหม่และเมื่อเปิด CHAT_PERSONA_UPSTREAM แล้ว (ปิดอยู่ = คำขอหน้าตาเดิมทุกไบต์)
+            //    Thaiprompt เลือกบล็อกคำทำนายจาก spread_key อยู่แล้ว ฟิลด์นี้เป็นตัวยืนยันซ้ำ
+            'persona' => $profile ? ChatRooms::upstreamPersona(ChatRooms::personaForSpread($key)) : null,
         ], fn ($v) => $v !== null && $v !== '');
 
         if ($this->bot->canRead($user)) {

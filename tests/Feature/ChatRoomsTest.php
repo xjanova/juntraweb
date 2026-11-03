@@ -1,0 +1,372 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\ChatConversation;
+use App\Models\ChatMessage;
+use App\Models\Reading;
+use App\Models\Setting;
+use App\Models\TarotCard;
+use App\Models\TarotReadingCard;
+use App\Models\User;
+use App\Services\Chat\ChatOffers;
+use App\Support\ChatPolicy;
+use App\Support\ChatRooms;
+use App\Support\Pricing;
+use App\Support\TarotSpreads;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+/**
+ * 🔮 (2026-11-03) ห้องผู้พยากรณ์ 3 ห้อง — บุษบา ฿39 · แม่หมอ ฿99 · คุณไสย ฿139
+ *
+ * สิ่งที่ล็อกไว้:
+ *  - ยังไม่เปิด CHAT_PERSONA_UPSTREAM = เว็บทำงานเหมือนเดิมทุกอย่าง (เข้าห้องแม่หมอตรง ไม่ส่ง persona)
+ *    เพราะ Thaiprompt รุ่นที่ยังไม่รู้จัก persona จะให้แม่หมอตอบในห้องบุษบา = บุคลิกไม่ตรงห้อง
+ *  - เปิดแล้ว: หน้าเลือกห้อง · ห้องแยกต่อผู้พยากรณ์ · persona ไปกับทุกข้อความ
+ *  - ข้อความทีละข้อความต่อคน (409) · ห้องปิดส่งไม่ได้ (403)
+ */
+class ChatRoomsTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private const TP = 'https://main.thaiprompt.online';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Setting::put('thaiprompt_base_url', self::TP, 'thaiprompt');
+        Setting::put('thaiprompt_client_id', 'juntra-client', 'thaiprompt');
+        Setting::put('thaiprompt_client_secret', 'juntra-secret', 'thaiprompt', true);
+        Setting::put('pricing_chat_message', '2', 'pricing', false);
+        Setting::put('pricing_chat_message_enabled', '0', 'pricing', false);
+        Cache::flush();
+
+        Http::fake(function (Request $req) {
+            $url = $req->url();
+
+            return match (true) {
+                str_ends_with($url, '/oauth/token') => Http::response(['access_token' => 'srv-token', 'expires_in' => 3600]),
+                str_ends_with($url, '/server/chat/start') => Http::response(['data' => ['session_id' => 'sess-1']], 201),
+                str_ends_with($url, '/server/chat/send') => Http::response(['data' => ['session_id' => 'sess-1', 'reply' => 'รับฟังอยู่ค่ะ', 'kind' => 'reply']]),
+                default => Http::response(['message' => 'unexpected ' . $url], 500),
+            };
+        });
+    }
+
+    /** เปิดทุกห้อง: Thaiprompt รู้จัก persona แล้ว + แพ็กเกจ "ดูไว" ของบุษบาเปิดขาย */
+    private function allRoomsOpen(): void
+    {
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Setting::put('tarot_kunsai_visible', '1', 'pricing', false);
+        Cache::flush();
+    }
+
+    private function member(): User
+    {
+        return User::factory()->create(['thaiprompt_token' => null]);
+    }
+
+    /** @return list<array> payload ที่ส่งไป /server/chat/* */
+    private function chatCalls(string $path): array
+    {
+        return collect(Http::recorded())
+            ->filter(fn ($pair) => str_ends_with($pair[0]->url(), $path))
+            ->map(fn ($pair) => $pair[0]->data())
+            ->values()
+            ->all();
+    }
+
+    public function test_room_products_and_prices(): void
+    {
+        $this->assertSame('quick', ChatRooms::spread('busaba'));
+        $this->assertSame('celtic', ChatRooms::spread('maemor'));
+        $this->assertSame('kunsai', ChatRooms::spread('kunsai'));
+        $this->assertEquals(39, Pricing::for('tarot_quick'));
+        $this->assertEquals(139, Pricing::for('tarot_kunsai'));
+
+        // persona ของคำทำนายหาจากแพ็กเกจ — ซื้อจากหน้า /tarot ตรง ๆ ก็ได้ผู้พยากรณ์ที่ถูกห้อง
+        $this->assertSame('busaba', ChatRooms::personaForSpread('quick'));
+        $this->assertSame('kunsai', ChatRooms::personaForSpread('kunsai'));
+        $this->assertSame('maemor', ChatRooms::personaForSpread('love'));
+        $this->assertSame('maemor', ChatRooms::personaForSpread(null));
+    }
+
+    public function test_quick_spread_stays_hidden_until_the_owner_turns_it_on(): void
+    {
+        $this->assertArrayNotHasKey('quick', TarotSpreads::all());
+
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Cache::flush();
+        $this->assertArrayHasKey('quick', TarotSpreads::all());
+        $this->assertSame(3, TarotSpreads::cardCount('quick'));
+    }
+
+    public function test_without_the_flag_the_chat_page_is_exactly_the_old_mae_mor_room(): void
+    {
+        $user = $this->member();
+
+        $this->actingAs($user)->get('/chat')
+            ->assertOk()
+            ->assertViewIs('pages.chat.index')
+            ->assertSee('แม่หมอจันทรา')
+            ->assertDontSee('เปลี่ยนผู้พยากรณ์');
+
+        $this->assertSame('maemor', ChatConversation::where('user_id', $user->id)->value('persona'));
+        $this->assertFalse(ChatRooms::isOpen('busaba'));
+        $this->assertFalse(ChatRooms::isOpen('kunsai'));
+
+        // ไม่ส่ง persona เลย — คำขอหน้าตาเดิมทุกไบต์
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'สวัสดีค่ะ'])->assertOk();
+        foreach (array_merge($this->chatCalls('/server/chat/start'), $this->chatCalls('/server/chat/send')) as $payload) {
+            $this->assertArrayNotHasKey('persona', $payload);
+        }
+    }
+
+    public function test_closed_room_cannot_be_entered_or_messaged(): void
+    {
+        $user = $this->member();
+
+        $this->actingAs($user)->get('/chat?room=busaba')
+            ->assertRedirect(route('chat.index', ['pick' => 1]));
+
+        $this->actingAs($user)
+            ->postJson('/chat/send', ['message' => 'สวัสดี', 'room' => 'busaba'])
+            ->assertStatus(403)
+            ->assertJsonPath('reason_code', 'room_closed');
+
+        // หน้าเลือกห้องยังเปิดดูได้ — ห้องที่ปิดขึ้น "เร็ว ๆ นี้"
+        $this->actingAs($user)->get('/chat?pick=1')
+            ->assertOk()
+            ->assertViewIs('pages.chat.rooms')
+            ->assertSee('เร็ว ๆ นี้');
+    }
+
+    public function test_with_all_rooms_open_a_new_visitor_picks_a_room_first(): void
+    {
+        $this->allRoomsOpen();
+
+        $this->actingAs($this->member())->get('/chat')
+            ->assertOk()
+            ->assertViewIs('pages.chat.rooms')
+            ->assertSee('น้องบุษบา')
+            ->assertSee('แม่หมอจันทรา')
+            ->assertSee('คุณไสย')
+            ->assertSee('฿39')
+            ->assertSee('฿99')
+            ->assertSee('฿139');
+    }
+
+    public function test_each_oracle_gets_its_own_room_and_persona_goes_upstream(): void
+    {
+        $this->allRoomsOpen();
+        $user = $this->member();
+
+        $this->actingAs($user)->get('/chat?room=busaba')->assertOk()->assertSee('น้องบุษบา')->assertSee('เปลี่ยนผู้พยากรณ์');
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'งานใหม่จะผ่านไหม', 'room' => 'busaba'])->assertOk();
+
+        $this->actingAs($user)->get('/chat?room=kunsai')->assertOk();
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'รู้สึกเหมือนโดนของ', 'room' => 'kunsai'])->assertOk();
+
+        $rooms = ChatConversation::where('user_id', $user->id)->pluck('persona')->sort()->values()->all();
+        $this->assertSame(['busaba', 'kunsai'], $rooms);
+
+        $sent = collect($this->chatCalls('/server/chat/send'))->pluck('persona')->all();
+        $this->assertSame(['busaba', 'kunsai'], $sent);
+        $this->assertSame(['busaba', 'kunsai'], collect($this->chatCalls('/server/chat/start'))->pluck('persona')->all());
+
+        // ข้อความลงห้องที่ถูกต้อง
+        $busaba = ChatConversation::where('user_id', $user->id)->where('persona', 'busaba')->firstOrFail();
+        $this->assertTrue($busaba->messages()->where('role', 'user')->where('content', 'งานใหม่จะผ่านไหม')->exists());
+    }
+
+    public function test_one_package_per_room_only_once_the_rooms_are_live(): void
+    {
+        // ก่อนเปิดห้อง: การ์ดตามเรื่องแบบเดิม (ไม่เปลี่ยนสิ่งที่ลูกค้าเห็นบน prod)
+        $this->assertGreaterThan(1, count(\App\Services\Chat\ChatOffers::forRoom('maemor', 'love')));
+
+        $this->allRoomsOpen();
+        $keys = fn (string $room, string $topic) => array_column(\App\Services\Chat\ChatOffers::forRoom($room, $topic), 'key');
+
+        $this->assertSame(['tarot_celtic'], $keys('maemor', 'love'));
+        $this->assertSame(['tarot_quick'], $keys('busaba', 'career'));
+        $this->assertSame(['tarot_kunsai'], $keys('kunsai', 'general'));
+        // เรื่องของ/คุณไสยในห้องอื่น → การ์ดคุณไสย ตรงกับที่ผู้พยากรณ์บอกว่า "ต้องให้แม่หมอส่องให้โดยเฉพาะ"
+        $this->assertSame(['tarot_kunsai'], $keys('busaba', 'kunsai'));
+        $this->assertSame(['tarot_kunsai'], $keys('maemor', 'kunsai'));
+    }
+
+    public function test_opening_a_room_does_not_call_the_ai(): void
+    {
+        $this->allRoomsOpen();
+
+        $this->actingAs($this->member())->get('/chat?room=maemor')->assertOk();
+
+        // คำทักทายประกอบในเครื่อง — เปิดหน้าเฉย ๆ ไม่ถือ worker ไปรอ AI
+        $this->assertSame([], $this->chatCalls('/server/chat/start'));
+        $this->assertSame([], $this->chatCalls('/server/chat/send'));
+    }
+
+    public function test_one_message_at_a_time_per_person(): void
+    {
+        $user = $this->member();
+        $this->actingAs($user)->get('/chat')->assertOk();
+
+        $held = Cache::lock("chat:inflight:u{$user->id}", 60);
+        $this->assertTrue($held->get());
+
+        $this->actingAs($user)
+            ->postJson('/chat/send', ['message' => 'ส่งจากอีกแท็บ'])
+            ->assertStatus(409)
+            ->assertJsonPath('reason_code', 'busy_other');
+
+        $held->release();
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ส่งใหม่'])->assertOk();
+    }
+
+    /** คำพยากรณ์ที่อ่านเสร็จแล้ว 1 ใบ ของแพ็กเกจ $spread */
+    private function finishedReading(User $user, string $spread): Reading
+    {
+        $reading = Reading::create([
+            'user_id' => $user->id, 'session_token' => "reading-{$spread}-{$user->id}", 'type' => "tarot_{$spread}",
+            'question' => 'เรื่องที่ค้างใจ', 'payload' => ['cost' => 99], 'result' => 'คำพยากรณ์ฉบับเต็ม',
+        ]);
+        $card = TarotCard::create([
+            'slug' => "card-{$spread}", 'name_en' => 'Test Card', 'name_th' => 'ไพ่ทดสอบ',
+            'arcana' => 'major', 'suit' => 'major', 'number' => 1,
+            'upright_meaning_th' => 'ตั้งตรง', 'reversed_meaning_th' => 'กลับหัว', 'active' => true,
+        ]);
+        TarotReadingCard::create([
+            'reading_id' => $reading->id, 'tarot_card_id' => $card->id,
+            'position' => 1, 'position_label' => 'ใบที่ 1', 'reversed' => false,
+        ]);
+
+        return $reading;
+    }
+
+    public function test_a_kunsai_reading_still_opens_a_chat_while_its_room_is_closed(): void
+    {
+        // ยังไม่เปิด flag: ห้องคุณไสยปิด แต่แพ็กเกจคุณไสยขายอยู่ — ลูกค้าจ่ายแล้วกด "ถามแม่หมอ" ต้องได้คุยต่อ
+        Setting::put('tarot_kunsai_visible', '1', 'pricing', false);
+        Cache::flush();
+        $user = $this->member();
+        $reading = $this->finishedReading($user, 'kunsai');
+
+        $this->actingAs($user)->post(route('chat.from-reading', $reading))->assertRedirect(route('chat.index'));
+        $this->actingAs($user)->get(route('chat.index'))->assertOk()->assertViewIs('pages.chat.index');
+
+        $room = ChatConversation::where('reading_id', $reading->id)->firstOrFail();
+        $this->assertSame('maemor', $room->persona);
+        $this->assertStringStartsWith('แม่หมอเห็นไพ่ทั้ง 1 ใบ', $room->messages()->value('content'));
+
+        // คำทำนายก็ไม่ส่ง persona ตอนยังไม่เปิด flag
+        $this->assertSame([], array_filter(collect(Http::recorded())->map(fn ($p) => $p[0]->data()['persona'] ?? null)->all()));
+    }
+
+    public function test_a_busaba_reading_is_greeted_in_busaba_voice(): void
+    {
+        $this->allRoomsOpen();
+        $user = $this->member();
+        $reading = $this->finishedReading($user, 'quick');
+
+        $this->actingAs($user)->post(route('chat.from-reading', $reading))->assertRedirect(route('chat.index'));
+
+        $room = ChatConversation::where('reading_id', $reading->id)->firstOrFail();
+        $this->assertSame('busaba', $room->persona);
+        $greeting = $room->messages()->value('content');
+        $this->assertStringStartsWith('บุษบาเห็นไพ่ทั้ง 1 ใบ', $greeting);
+        $this->assertStringContainsString('ของคุณ', $greeting);
+        $this->assertStringNotContainsString('แม่หมอ', $greeting);
+    }
+
+    public function test_room_texts_speak_in_the_rooms_voice_and_mae_mor_text_is_unchanged(): void
+    {
+        Setting::put('chat_daily_limit', '10', 'chat', false);
+
+        $this->assertSame(
+            'วันนี้ลูกคุยกับแม่หมอครบ 10 ข้อความแล้วค่ะ ✨ พรุ่งนี้แม่หมอรอฟังเรื่องราวต่อนะคะ — หรือถ้าอยากรู้ลึกถึงดวงชะตา ให้แม่หมอเปิดไพ่ดูแบบเจาะจงได้เลยค่ะ 🔮',
+            ChatPolicy::limitMessage(),
+        );
+        $busaba = ChatPolicy::limitMessage('busaba');
+        $this->assertStringContainsString('วันนี้คุณคุยกับบุษบาครบ 10 ข้อความ', $busaba);
+        $this->assertStringNotContainsString('แม่หมอ', $busaba);
+    }
+
+    public function test_invite_matches_the_card_that_is_actually_shown(): void
+    {
+        $this->allRoomsOpen();
+        $user = $this->member();
+
+        // เรื่องของในห้องบุษบา → การ์ดคุณไสย → คำพูดต้องส่งต่อ ไม่ใช่ "บุษบาเปิดไพ่ 3 ใบให้"
+        $this->assertSame(['tarot_kunsai'], array_column(ChatOffers::forRoom('busaba', 'kunsai', $user), 'key'));
+        $this->assertSame(config('chat_rooms.rooms.busaba.handoff'), ChatOffers::invite('kunsai', 'busaba', $user));
+
+        // เพิ่งเปิดไพ่ของห้องไป (ติดข้อห้ามเปิดซ้ำ) → ไม่มีการ์ด → ห้ามพูดว่า "กดการ์ดด้านล่าง"
+        Setting::put('tarot_quick_cooldown_days', '7', 'tarot', false);
+        Cache::flush();
+        Reading::create([
+            'user_id' => $user->id, 'session_token' => 'q1', 'type' => 'tarot_quick',
+            'question' => 'งานใหม่จะผ่านไหม', 'payload' => ['cost' => 39], 'result' => 'ผ่าน',
+        ]);
+        $this->assertSame([], ChatOffers::forRoom('busaba', 'career', $user));
+        $line = ChatOffers::invite('career', 'busaba', $user);
+        $this->assertSame(config('chat_rooms.rooms.busaba.no_offer'), $line);
+        $this->assertStringNotContainsString('การ์ดด้านล่าง', $line);
+
+        // ห้องแม่หมอคงคำชวนเดิมทุกตัวอักษร
+        $this->assertStringStartsWith('ได้เลยค่ะลูก แม่หมอจะเปิดไพ่ดูเรื่องหัวใจให้นะคะ', ChatOffers::invite('love', 'maemor', $user));
+    }
+
+    public function test_a_room_without_its_oracle_answers_busy_for_free_and_keeps_the_free_quota(): void
+    {
+        $this->allRoomsOpen();
+        Setting::put('chat_daily_limit', '10', 'chat', false);
+        // Thaiprompt ทางของเว็บใช้ไม่ได้ + ลูกค้ามี token บอทเดิม — ห้องบุษบาห้ามถอยไปให้บอทแม่หมอตอบ
+        Setting::put('thaiprompt_client_id', '', 'thaiprompt');
+        Cache::flush();
+        $user = User::factory()->create(['thaiprompt_token' => 'user-token']);
+
+        $this->actingAs($user)->get('/chat?room=busaba')->assertOk();
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'งานใหม่เป็นยังไงบ้าง', 'room' => 'busaba'])
+            ->assertOk()
+            ->assertJsonPath('degraded', true)
+            ->assertJsonPath('reply', config('chat_rooms.rooms.busaba.busy_reply'))
+            ->assertJsonPath('daily_left', 10);
+
+        $this->assertSame(0, ChatPolicy::dailyUsed($user));
+        $this->assertFalse(ChatMessage::where('content', 'งานใหม่เป็นยังไงบ้าง')->exists());
+        $this->assertSame([], Http::recorded()->all(), 'ไม่มีคำขอออกไปเลย — ไม่ถอยไปบอทแม่หมอ');
+    }
+
+    public function test_a_stale_tab_without_a_room_field_lands_in_mae_mor_room(): void
+    {
+        $this->allRoomsOpen();
+        $user = $this->member();
+
+        $this->actingAs($user)->get('/chat?room=busaba')->assertOk();
+        // แท็บเก่า (ก่อนมีห้อง) ส่งมาโดยไม่มี room — ต้องไม่ไปโผล่ห้องบุษบาที่เพิ่งเปิดอีกแท็บ
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'จากแท็บเก่า'])->assertOk();
+
+        $room = ChatMessage::where('content', 'จากแท็บเก่า')->firstOrFail()->conversation;
+        $this->assertSame('maemor', $room->persona);
+    }
+
+    public function test_kunsai_price_migration_only_moves_the_old_default(): void
+    {
+        $migration = require database_path('migrations/2026_11_03_000002_raise_kunsai_price_to_139.php');
+
+        Setting::put('pricing_tarot_kunsai', '99', 'pricing', false);
+        $migration->up();
+        $this->assertSame('139', Setting::where('key', 'pricing_tarot_kunsai')->value('value'));
+
+        // ราคาที่แอดมินตั้งเองไว้ ไม่แตะ
+        Setting::put('pricing_tarot_kunsai', '150', 'pricing', false);
+        $migration->up();
+        $this->assertSame('150', Setting::where('key', 'pricing_tarot_kunsai')->value('value'));
+    }
+}

@@ -169,9 +169,11 @@ class JuntraServerClient
      *                                Thaiprompt วางไว้ใน system message ทุกรอบ · Thaiprompt รุ่นเก่าเมินฟิลด์นี้เฉย ๆ
      * @param  int|null  $thaipromptUserId  🌙 (2026-11-03 FB web-only) id บัญชี Thaiprompt ของลูกค้า — ให้แม่หมอรู้จักลูกค้าที่ย้ายมาจากเพจ
      * @param  string|null  $handoff  🌙 (2026-11-03) nonce (uuid) จากลิงก์ /chat/continue/{handoff} — Thaiprompt ใช้ได้ครั้งเดียว
+     * @param  string|null  $persona  🔮 (2026-11-03) ผู้พยากรณ์ของห้อง maemor|busaba|kunsai — ผูกกับห้องตั้งแต่เปิด
+     *                                null = ไม่ส่งฟิลด์ (คำขอหน้าตาเดิมทุกไบต์ = แม่หมอ) · ChatRooms::upstreamPersona()
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatStart(int|string $userRef, ?string $context = null, ?int $thaipromptUserId = null, ?string $handoff = null): array
+    public function chatStart(int|string $userRef, ?string $context = null, ?int $thaipromptUserId = null, ?string $handoff = null, ?string $persona = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
@@ -181,6 +183,7 @@ class JuntraServerClient
             'context'  => $this->chatContext($context),
             'thaiprompt_user_id' => $thaipromptUserId !== null && $thaipromptUserId > 0 ? $thaipromptUserId : null,
             'handoff'  => $handoff,
+            'persona'  => $persona,
         ], fn ($v) => $v !== null)));
         if ($resp?->successful() && is_array($resp->json('data'))) {
             return ['status' => 'ok', 'data' => $resp->json('data')];
@@ -194,15 +197,19 @@ class JuntraServerClient
      * ส่งข้อความถึงแม่หมอ — คืน reply + kind ('reply'|'guard'|'offer') + offer_topic
      *
      * @param  int|null  $thaipromptUserId  🌙 (2026-11-03) ให้ Thaiprompt สร้างความจำจากเพจใหม่ได้เมื่อห้องหมดอายุ (ไม่ consume handoff)
+     * @param  string|null  $persona  🔮 ผู้พยากรณ์ของห้อง — ส่งซ้ำทุกรอบเหมือน context (ห้องฝั่ง Thaiprompt หมดอายุ
+     *                                แล้วเปิดใหม่เงียบ ๆ ก็ยังได้บุคลิกเดิม) · null = ไม่ส่ง
+     * @param  int  $timeout  วินาทีที่รอ AI — ผู้เรียกที่มีงบเวลาคุมอยู่ (ChatController) ส่งที่เหลือมา
+     *                        ให้คำขอทั้งก้อนจบก่อน Apache ตัดที่ ~60 วิ
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null): array
+    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
         }
         $resp = $this->send(fn (PendingRequest $http) => $http
-            ->timeout(45) // AI ตอบช้าได้
+            ->timeout(max(5, min(45, $timeout))) // AI ตอบช้าได้
             ->post($this->url('/chat/send'), array_filter([
                 'user_ref'   => (string) $userRef,
                 'name'       => $name !== null ? mb_substr($name, 0, 80) : null,
@@ -214,10 +221,15 @@ class JuntraServerClient
                 //    ห้องนั้นก็ยังตอบ 200 แบบ "ไม่มีประวัติ" (ไม่ใช่ error) เราจึงไม่มีทางรู้ว่าต้องป้อนบริบทใหม่
                 'context'    => $this->chatContext($context),
                 'thaiprompt_user_id' => $thaipromptUserId !== null && $thaipromptUserId > 0 ? $thaipromptUserId : null,
+                'persona'    => $persona,
             ], fn ($v) => $v !== null && $v !== '')));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {
             return ['status' => 'ok', 'data' => $resp->json('data')];
+        }
+        // 429/5xx = ฝั่งนั้นแน่นหรือ AI ล่ม — ยิงซ้ำทันทีมีแต่ซ้ำเติม (ผู้เรียกดู lastFailure() ก่อนลองใหม่)
+        if ($resp !== null && ($resp->status() === 429 || $resp->status() >= 500)) {
+            $this->lastFailure = 'busy';
         }
         $this->logMiss('chatSend', $resp);
 
@@ -443,6 +455,16 @@ class JuntraServerClient
      * Thaiprompt ไม่ยอมรับตัวตนของเว็บ (token ไม่ได้ / 401 / 403) — ผู้เรียกถอยไปใช้ทางเดิม
      * (และ watchdog จะเตือนแอดมินเรื่องสาย) แทนการโยนสลิปทุกใบไปรอแอดมิน
      */
+    /**
+     * เหตุที่คำขอล่าสุดไม่สำเร็จ: 'network' (ต่อไม่ติด/หมดเวลา) · 'busy' (429/5xx) · 'refused' · null
+     * ใช้ตัดสินว่าควรลองใหม่ไหม — ห้องหมดอายุฝั่ง Thaiprompt ไม่ใช่ error (ได้ 200 แบบไม่มีประวัติ)
+     * การลองใหม่จึงช่วยได้แค่ตอนได้คำตอบว่าง ไม่ใช่ตอนเซิร์ฟเวอร์ล่ม
+     */
+    public function lastFailure(): ?string
+    {
+        return $this->lastFailure;
+    }
+
     private function missing(?Response $resp): bool
     {
         if ($resp === null) {

@@ -131,13 +131,19 @@ class ChatPolicy
         return $left !== null && $left <= 0;
     }
 
-    /** ข้อความตอนครบเพดาน — เตะเบา ๆ แล้วชวนไปเปิดไพ่ ไม่ใช่ error แข็ง ๆ */
-    public static function limitMessage(): string
+    /**
+     * ข้อความตอนครบเพดาน — เตะเบา ๆ แล้วชวนไปเปิดไพ่ ไม่ใช่ error แข็ง ๆ
+     *
+     * 🔮 (2026-11-03) พูดด้วยคำเรียกของห้อง · ไม่ส่งห้อง = ห้องแม่หมอ ข้อความเดิมทุกตัวอักษร
+     */
+    public static function limitMessage(?string $room = null): string
     {
         $limit = self::dailyLimit();
+        $self = ChatRooms::selfName($room ?? ChatRooms::DEFAULT);
+        $customer = ChatRooms::customer($room ?? ChatRooms::DEFAULT);
 
-        return "วันนี้ลูกคุยกับแม่หมอครบ {$limit} ข้อความแล้วค่ะ ✨ พรุ่งนี้แม่หมอรอฟังเรื่องราวต่อนะคะ — "
-            .'หรือถ้าอยากรู้ลึกถึงดวงชะตา ให้แม่หมอเปิดไพ่ดูแบบเจาะจงได้เลยค่ะ 🔮';
+        return "วันนี้{$customer}คุยกับ{$self}ครบ {$limit} ข้อความแล้วค่ะ ✨ พรุ่งนี้{$self}รอฟังเรื่องราวต่อนะคะ — "
+            ."หรือถ้าอยากรู้ลึกถึงดวงชะตา ให้{$self}เปิดไพ่ดูแบบเจาะจงได้เลยค่ะ 🔮";
     }
 
     /**

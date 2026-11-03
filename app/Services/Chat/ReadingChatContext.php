@@ -6,6 +6,7 @@ use App\Models\ChatConversation;
 use App\Models\Reading;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Thaiprompt\JuntraServerClient;
+use App\Support\ChatRooms;
 use App\Support\TarotSpreads;
 
 /**
@@ -118,17 +119,23 @@ final class ReadingChatContext
         return mb_substr($head.$result, 0, self::MAX_CHARS);
     }
 
-    /** คำทักทายของห้องที่ผูกกับไพ่ — ประกอบในเครื่อง ไม่ต้องเสียรอบถาม AI (ไม่คิดเงิน) */
-    public static function greeting(Reading $reading): string
+    /**
+     * คำทักทายของห้องที่ผูกกับไพ่ — ประกอบในเครื่อง ไม่ต้องเสียรอบถาม AI (ไม่คิดเงิน)
+     *
+     * 🔮 (2026-11-03) พูดด้วยคำเรียกของห้อง (บุษบา → "บุษบา…ของคุณ") · ไม่ส่ง = ห้องแม่หมอ ข้อความเดิมทุกตัวอักษร
+     */
+    public static function greeting(Reading $reading, ?string $persona = null): string
     {
+        $self = ChatRooms::selfName($persona ?? ChatRooms::DEFAULT);
+        $customer = ChatRooms::customer($persona ?? ChatRooms::DEFAULT);
         $n = $reading->tarotCards()->count();
         $spreadName = TarotSpreads::nameForType((string) $reading->type) ?? 'ไพ่ยิปซี';
         $hint = TarotSpreads::keyFromType((string) $reading->type) === 'year'
             ? 'จะถามเจาะเดือนไหนก็ได้เลยค่ะ'
             : 'พิมพ์คำถามด้านล่างได้เลยค่ะ';
 
-        return "แม่หมอเห็นไพ่ทั้ง {$n} ใบจากการเปิด \"{$spreadName}\" ของลูก และคำพยากรณ์ฉบับเต็มแล้วนะคะ ✨ "
-            ."อยากให้แม่หมอเจาะลึกเรื่องไหนเป็นพิเศษจากไพ่ชุดนี้คะ? {$hint}";
+        return "{$self}เห็นไพ่ทั้ง {$n} ใบจากการเปิด \"{$spreadName}\" ของ{$customer} และคำพยากรณ์ฉบับเต็มแล้วนะคะ ✨ "
+            ."อยากให้{$self}เจาะลึกเรื่องไหนเป็นพิเศษจากไพ่ชุดนี้คะ? {$hint}";
     }
 
     /** ชื่อห้องในประวัติแชท / รายการห้องในแอพ */
