@@ -52,7 +52,9 @@ body.theme-juntra-payakorn {
   overflow-x: hidden; line-height: 1.55;
 }
 html { scroll-behavior: smooth; }
-body.theme-juntra-payakorn button { font-family: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+/* รีเซ็ตปุ่มของธีม — ยกเว้น .btn ซึ่งมีหน้าตาของตัวเอง
+   (เดิมรีเซ็ตทุกปุ่ม: specificity 0,1,2 ชนะ .btn-primary 0,1,0 → <button class="btn btn-primary"> กลายเป็นปุ่มใสทั้งเว็บ) */
+body.theme-juntra-payakorn button:not(.btn) { font-family: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
 
 .thai-italic, em, i { font-style: italic; padding-right: .12em; padding-bottom: .06em; }
 .display { font-family: var(--font-display); font-weight: 500; letter-spacing: .01em; }
