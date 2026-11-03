@@ -230,13 +230,13 @@
                       <div class="offer-bottom">
                         <span class="offer-price" x-text="priceLabel(o.price)"></span>
                         <button type="button" class="btn btn-primary offer-go" x-show="canAfford(o)"
-                                :disabled="m.offerBusy" @click="startOffer(m, o)"
+                                :disabled="!!m.offerBusy" @click="startOffer(m, o)"
                                 x-text="m.offerBusy === o.key ? 'กำลังพาไป...' : (o.kind === 'deep' ? 'เริ่มดูดวง' : 'เลือกไพ่เลย')"></button>
                       </div>
                       {{-- เครดิตไม่พอ: ทางง่ายสุด = สแกนจ่ายเท่าที่ขาดแล้วพาไปเปิดไพ่เอง
                            (หลายคนไม่เข้าใจเรื่อง "เติมเครดิต") ส่วนคนคล่องยังเลือกเติมเก็บไว้ได้ --}}
                       <div class="offer-pay" x-show="!canAfford(o)">
-                        <button type="button" class="btn btn-primary offer-go offer-pay-go" :disabled="m.offerBusy"
+                        <button type="button" class="btn btn-primary offer-go offer-pay-go" :disabled="!!m.offerBusy"
                                 @click="canTopupInChat ? payAndOpen(m, o) : (window.location.href = topupUrl)"
                                 x-text="payLabel(o)"></button>
                         <div class="offer-pay-note" x-show="canTopupInChat"
@@ -343,7 +343,7 @@
                             <strong x-text="m.pay.then.offer.label"></strong>
                           </div>
                           <div class="pay-actions" style="justify-content:center">
-                            <button type="button" class="btn btn-primary offer-go" :disabled="m.pay.then.msg.offerBusy"
+                            <button type="button" class="btn btn-primary offer-go" :disabled="!!m.pay.then.msg.offerBusy"
                                     @click="startOffer(m.pay.then.msg, m.pay.then.offer)"
                                     x-text="m.pay.then.offer.kind === 'deep' ? 'เริ่มดูดวงเลย' : 'ไปเลือกไพ่เลย'"></button>
                           </div>
