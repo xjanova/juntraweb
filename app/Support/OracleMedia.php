@@ -81,6 +81,63 @@ final class OracleMedia
         return $out;
     }
 
+    /**
+     * ห้องที่ "พูด" บนหน้าเลือกไพ่/ผลทำนาย — แพ็กเกจคุณไสยเป็นของห้องคุณไสยเสมอ
+     * นอกนั้นเป็นห้องที่ลูกค้าเพิ่งคุยอยู่ (session chat_room) ไม่มี = แม่หมอจันทรา
+     */
+    public static function personaFor(?string $spreadKey): string
+    {
+        if ($spreadKey === 'kunsai') {
+            return 'kunsai';
+        }
+        $room = session('chat_room');
+
+        return ChatRooms::normalize(is_string($room) ? $room : null);
+    }
+
+    /**
+     * ประโยคที่แม่หมอพูดเมื่อเปิดหน้าผลทำนาย ตามสถานะของใบนั้น
+     *  - กำลังอ่าน → เปิดไพ่ แล้วบอกให้รอ · อ่านไม่สำเร็จ → ขอโทษ (เครดิตไม่หาย)
+     *  - คุณไสย → ผล "พบของ" (เจอ / ไม่เจอ / ไม่ชัด) · ชุดอื่น → ผลฟันธง (ดี / ต้องระวัง)
+     *  - ไม่รู้โทน (คำทำนายแบบข้อความยาว) → ชวนถามต่อ — ห้ามเดาว่า "มาดี" แล้วผิด
+     *
+     * @param  array{ok: bool, by_type: array}  $parsed  ผลจาก ReadingSections::parse()
+     * @return list<string>
+     */
+    public static function readingCues(\App\Models\Reading $reading, array $parsed): array
+    {
+        if ($reading->isInProgress()) {
+            return ['reveal_cards', 'reading_wait'];
+        }
+        if ($reading->isFailed()) {
+            return ['reading_failed'];
+        }
+
+        $sections = $parsed['ok'] ? ($parsed['sections'] ?? []) : [];
+        foreach ($sections as $s) {
+            if (($s['type'] ?? null) === 'diagnosis') {
+                $found = (string) ($s['fields']['พบของ'] ?? '');
+
+                return [match (true) {
+                    $found === '', str_contains($found, 'ไม่ชัด'), str_contains($found, 'ไม่แน่') => 'kunsai_unclear',
+                    str_starts_with($found, 'ไม่') => 'kunsai_clear',
+                    default => 'kunsai_found',
+                }];
+            }
+        }
+        foreach ($sections as $s) {
+            if (($s['type'] ?? null) === 'verdict' && isset($s['result'])) {
+                return [match (ReadingSections::verdictTone($s['result'])) {
+                    'green' => 'verdict_good',
+                    'red', 'amber' => 'verdict_caution',
+                    default => 'followup_ask',
+                }];
+            }
+        }
+
+        return ['followup_ask'];
+    }
+
     private static function url(string $path): string
     {
         return asset($path) . '?v=' . filemtime(public_path($path));

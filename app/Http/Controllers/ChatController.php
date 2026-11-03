@@ -138,6 +138,8 @@ class ChatController extends Controller
             'dailyLeft'    => $dailyLeft ?? 0,
             'readonly'     => false, // live chat room — input is active
             'suggestions'  => $this->suggestionsFor($conversation, $reading),
+            // คุยต่อจากผลทำนาย → เปิดเสียงแล้วแม่หมอชวนถามต่อ แทนคำทักทายทั่วไป
+            'fromReading'  => $reading !== null,
             'topics'       => ChatSuggestions::topics(),
             // แม่หมอกำลังถามกลับอยู่ไหม — ถ้าใช่ UI จะยุบแถบปุ่มคำถามลัด
             // เพื่อไม่ให้ผู้ใช้กดแล้วบทสนทนาหลุดโฟลว์ที่แม่หมอกำลังเดินอยู่

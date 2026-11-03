@@ -9,6 +9,9 @@
   $cardBackUrl = $cardBack ? Storage::disk('public')->url($cardBack) : null;
 @endphp
 
+{{-- 🔊 แม่หมอชวนตั้งจิตตอนเข้าหน้า · เลือกครบ = "ครบแล้ว" (ถ้าลูกค้าเปิดเสียงไว้) --}}
+<x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spread)" :cues="['shuffle_focus']" />
+
 <section class="canvas" style="padding-top:160px">
   <div style="max-width:1400px;margin:0 auto"
        x-data="cardFan({
@@ -187,6 +190,7 @@
         } else if (this.picked.length < this.needed) {
           this.picked.push(id);
           if (this.picked.length === this.needed) {
+            window.dispatchEvent(new CustomEvent('oracle-say', { detail: { key: 'pick_complete' } }));
             this.$nextTick(() => document.getElementById('reveal-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
           }
         }
