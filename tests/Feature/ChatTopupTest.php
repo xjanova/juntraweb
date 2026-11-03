@@ -77,6 +77,46 @@ class ChatTopupTest extends TestCase
         ]);
     }
 
+    /**
+     * ปุ่ม "สแกนจ่าย ฿X แล้วเปิดไพ่เลย" ส่งยอด = ที่ขาด (ปัดขึ้นเป็นบาท) ซึ่งไม่ใช่ยอดแพ็กเกจกลม ๆ
+     * ล็อกว่า: รับยอดแปลก ๆ ได้ และเศษสตางค์ต้อง "บวกเพิ่ม" เสมอ
+     * ถ้าวันไหนเศษถูกหักออก เงินเข้าแล้วยังเปิดไพ่ไม่ได้ ลูกค้าจ่ายแล้วติดค้าง
+     */
+    public function test_exact_shortfall_topup_always_covers_the_package(): void
+    {
+        $user = $this->member();
+        $wallet = app(WalletService::class);
+        $wallet->credit($user, 62.40, 'เครดิตเดิม');
+
+        $price = 99.0;
+        $shortfall = (int) ceil($price - 62.40);      // 37 — ตรงกับ shortfall() ฝั่ง JS
+
+        $res = $this->actingAs($user)->postJson('/chat/topup', ['amount' => $shortfall])->assertOk();
+        $this->assertSame((float) $shortfall, (float) $res->json('base_amount'));
+
+        $wallet->confirmTopupAuto(WalletTransaction::findOrFail($res->json('id')), ['test' => true]);
+
+        $balance = (float) $this->actingAs($user)->getJson('/chat/topup/'.$res->json('id'))->json('balance');
+        $this->assertGreaterThanOrEqual($price, $balance, 'จ่ายตามยอดที่ขาดแล้วต้องพอเปิดแพ็กเกจ');
+    }
+
+    /** หน้าแชทต้องส่งขั้นต่ำ/สูงสุดเติมเงินให้ JS — ยอดที่ขาดต่ำกว่าขั้นต่ำต้องปัดขึ้น ไม่ใช่โดนปฏิเสธ */
+    public function test_chat_page_offers_pay_and_open_with_topup_limits(): void
+    {
+        config(['pricing.min_topup' => 20, 'pricing.max_topup' => 50000]);
+        $user = $this->member();
+
+        $html = $this->actingAs($user)->get('/chat')->assertOk()->getContent();
+
+        $this->assertStringContainsString('payAndOpen(m, o)', $html);
+        $this->assertStringContainsString('minTopup: 20', $html);
+        $this->assertStringContainsString('maxTopup: 50000', $html);
+        $this->assertStringContainsString('หรือเติมเครดิตเก็บไว้หลายครั้ง', $html);
+
+        // ยอดต่ำกว่าขั้นต่ำ = ระบบไม่รับ → JS ต้องปัดขึ้นเป็น min_topup เสมอ
+        $this->actingAs($user)->postJson('/chat/topup', ['amount' => 5])->assertStatus(422);
+    }
+
     public function test_reports_clearly_when_promptpay_is_not_configured(): void
     {
         $user = User::factory()->create(['thaiprompt_token' => 'tok-x']);

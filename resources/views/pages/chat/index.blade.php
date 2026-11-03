@@ -80,6 +80,8 @@
          topupStatusUrl: @js(route('chat.topup.status', ['tx' => '__ID__'])),
          topupSlipUrl: @js(route('chat.topup.slip', ['tx' => '__ID__'])),
          bundles: @js(array_slice((array) config('pricing.topup_bundles', [50, 100, 200, 500]), 0, 4)),
+         minTopup: @js((int) config('pricing.min_topup', 20)),
+         maxTopup: @js((int) config('pricing.max_topup', 50000)),
          {{-- ปุ่มไปต่อหลังเติมเงิน — บริการที่แอดมินปิดไว้ (ServiceGate) ไม่แสดง --}}
          nextSteps: @js(array_values(array_filter([
            ['icon' => '🔮', 'label' => 'เปิดไพ่ยิปซี', 'url' => route('tarot.index')],
@@ -230,9 +232,17 @@
                         <button type="button" class="btn btn-primary offer-go" x-show="canAfford(o)"
                                 :disabled="m.offerBusy" @click="startOffer(m, o)"
                                 x-text="m.offerBusy === o.key ? 'กำลังพาไป...' : (o.kind === 'deep' ? 'เริ่มดูดวง' : 'เลือกไพ่เลย')"></button>
-                        <button type="button" class="btn btn-ghost offer-go" x-show="!canAfford(o)"
-                                @click="canTopupInChat ? openTopup() : (window.location.href = topupUrl)">
-                          เติมเครดิต
+                      </div>
+                      {{-- เครดิตไม่พอ: ทางง่ายสุด = สแกนจ่ายเท่าที่ขาดแล้วพาไปเปิดไพ่เอง
+                           (หลายคนไม่เข้าใจเรื่อง "เติมเครดิต") ส่วนคนคล่องยังเลือกเติมเก็บไว้ได้ --}}
+                      <div class="offer-pay" x-show="!canAfford(o)">
+                        <button type="button" class="btn btn-primary offer-go offer-pay-go" :disabled="m.offerBusy"
+                                @click="canTopupInChat ? payAndOpen(m, o) : (window.location.href = topupUrl)"
+                                x-text="payLabel(o)"></button>
+                        <div class="offer-pay-note" x-show="canTopupInChat"
+                             x-text="payAmount(o) > shortfall(o) ? 'จ่ายแล้วพาไปต่อให้เองค่ะ · ส่วนที่เกินเก็บเป็นเครดิตไว้ใช้ครั้งหน้า' : 'จ่ายแล้วพาไปต่อให้เองค่ะ'"></div>
+                        <button type="button" class="offer-alt" x-show="canTopupInChat" @click="openTopup()">
+                          หรือเติมเครดิตเก็บไว้หลายครั้ง
                         </button>
                       </div>
                     </div>
@@ -287,9 +297,18 @@
                         เข้าบัญชี <strong x-text="m.pay.promptpay_name"></strong>
                       </div>
 
-                      <div class="pay-wait">
+                      <div class="pay-sub" style="text-align:center;margin-top:8px" x-show="m.pay.then && !m.pay.superseded">
+                        จ่ายแล้ว{{ $P['self'] }}พาไป<span x-text="m.pay.then?.offer.kind === 'deep' ? 'ดูดวง' : 'เลือกไพ่'"></span>
+                        <strong x-text="m.pay.then?.offer.label"></strong> ให้เองเลยค่ะ
+                      </div>
+
+                      {{-- ถูกแทนด้วยการ์ดยอดใหม่ — หยุดรอที่ใบนี้ แต่ถ้าโอนไปแล้วเงินก็ยังเข้าตามปกติ --}}
+                      <div class="pay-wait" x-show="!m.pay.superseded">
                         <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
                         <span x-text="m.pay.waited < 600 ? persona.self + 'กำลังรอเงินเข้าอยู่ค่ะ...' : 'ยังไม่พบเงินเข้า — แนบสลิปให้' + persona.self + 'ได้เลยค่ะ'"></span>
+                      </div>
+                      <div class="pay-sub" style="text-align:center;margin-top:10px" x-show="m.pay.superseded">
+                        ใช้ยอดใหม่ด้านล่างแทนนะคะ (ถ้าโอนยอดนี้ไปแล้ว ระบบเติมให้เองค่ะ)
                       </div>
 
                       <div class="pay-actions">
@@ -316,10 +335,24 @@
                       <div class="tick" aria-hidden="true">✓</div>
                       <div class="pay-title" style="margin-bottom:2px">เติมเครดิตสำเร็จแล้วค่ะ</div>
                       <div class="amt" x-text="'฿' + Number(m.pay.payable).toFixed(2)"></div>
-                      <div class="pay-sub" style="margin-top:8px">
+                      {{-- จ่ายมาเพื่อเปิดแพ็กเกจนี้ → พาไปต่อเอง (ปุ่มสำรองเผื่อ redirect ไม่ไป) --}}
+                      <template x-if="m.pay.then && canAfford(m.pay.then.offer)">
+                        <div>
+                          <div class="pay-sub" style="margin-top:8px">
+                            <span x-text="m.pay.then.msg.offerBusy ? 'กำลังพาไป...' : 'พร้อมแล้วค่ะ'"></span>
+                            <strong x-text="m.pay.then.offer.label"></strong>
+                          </div>
+                          <div class="pay-actions" style="justify-content:center">
+                            <button type="button" class="btn btn-primary offer-go" :disabled="m.pay.then.msg.offerBusy"
+                                    @click="startOffer(m.pay.then.msg, m.pay.then.offer)"
+                                    x-text="m.pay.then.offer.kind === 'deep' ? 'เริ่มดูดวงเลย' : 'ไปเลือกไพ่เลย'"></button>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="pay-sub" style="margin-top:8px" x-show="!(m.pay.then && canAfford(m.pay.then.offer))">
                         ยอดคงเหลือ <strong x-text="'฿' + Number(balance).toFixed(2)"></strong> — อยากให้{{ $P['self'] }}ดูเรื่องไหนต่อดีคะ
                       </div>
-                      <div class="pay-actions" style="justify-content:center">
+                      <div class="pay-actions" style="justify-content:center" x-show="!(m.pay.then && canAfford(m.pay.then.offer))">
                         <template x-for="s in nextSteps" :key="s.url">
                           <a :href="s.url" class="chip chip-strong">
                             <span class="chip-icon" x-text="s.icon"></span><span x-text="s.label"></span>
@@ -649,20 +682,81 @@ document.addEventListener('alpine:init', () => {
       document.body.appendChild(f);
       f.submit();
     },
+    // ยอดที่ขาด (บาท ปัดขึ้น) — คิดเป็นสตางค์กัน float เพี้ยน
+    shortfall(o) {
+      const cents = Math.round(Number(o.price) * 100) - Math.round(Number(this.balance) * 100);
+      return cents > 0 ? Math.ceil(cents / 100) : 0;
+    },
+    // ยอดที่ให้สแกนจ่าย = ที่ขาด แต่ไม่ต่ำกว่าขั้นต่ำเติมเงิน (ระบบรับเติมต่ำสุด min_topup)
+    payAmount(o) {
+      return Math.min(cfg.maxTopup || 50000, Math.max(cfg.minTopup || 20, this.shortfall(o)));
+    },
+    payLabel(o) {
+      if (!this.canTopupInChat) return 'เติมเครดิต';   // เติมในแชทไม่ได้ → พาไปหน้ากระเป๋าเงินแบบเดิม
+      const verb = Number(this.balance) > 0 ? 'จ่ายเพิ่ม' : 'สแกนจ่าย';
+      return verb + ' ฿' + this.payAmount(o).toLocaleString('th-TH') + ' แล้ว' + (o.kind === 'deep' ? 'เริ่มดูดวง' : 'เปิดไพ่เลย');
+    },
+    /**
+     * จ่ายตรงยอดแล้วไปต่อเลย — สร้าง QR ยอดที่ขาดทันที ไม่ต้องเลือกจำนวนเอง
+     * พอเงินเข้า (SMS หรือสลิป) afterPaid() จะพาไปเปิดแพ็กเกจนี้ให้เอง
+     */
+    payAndOpen(m, o) {
+      if (m.offerBusy) return;
+      const then = { msg: m, offer: o };
+      const amount = this.payAmount(o);
+      const open = this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && !x.pay?.superseded);
+      if (open) {
+        // กดซ้ำ/กดแพ็กเกจอื่นระหว่างรอ: ใบเดิมยอดพอ → ใช้ใบเดิม เปลี่ยนแค่ปลายทาง
+        if (open.pay.step === 'qr' && Number(open.pay.base_amount) >= amount) {
+          open.pay.then = then;
+          this.scrollToBottom(true);
+          return;
+        }
+        if (open.pay.step === 'choose') {
+          if (open.pay.busy) return;          // กำลังสร้าง QR อยู่ — รอผลก่อน
+          open.pay.then = then;
+          this.chooseAmount(open, amount);
+          return;
+        }
+        // ใบเดิมยอดไม่พอสำหรับแพ็กเกจนี้ → เลิกรอใบเดิม ออก QR ใหม่
+        open.pay.superseded = true;
+      }
+      const card = this.openTopup(then, true);
+      this.chooseAmount(card, amount);
+    },
     say(text) {                 // ข้อความจาก "ระบบ" ไม่ใช่คำพูดของแม่หมอ
       return this.push('assistant', this.escape(text).replace(/\n/g, '<br>'), 'system');
     },
 
     /* ---------- เติมเงินในแชท ---------- */
-    openTopup() {
+    openTopup(then = null, fresh = false) {
       // มีการ์ดที่ยังจ่ายไม่เสร็จอยู่แล้วก็เลื่อนไปหาใบเดิม ไม่สร้างซ้อน
-      const open = this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done');
-      if (open) { this.scrollToBottom(true); return; }
+      const open = fresh ? null : this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && !x.pay?.superseded);
+      if (open) { this.scrollToBottom(true); return open; }
 
-      const m = this.push('assistant', '', 'ok');
-      m.kind = 'topup';
-      m.pay = { step: 'choose', busy: false, uploading: false, error: '', notice: '', waited: 0 };
+      // kind/pay ต้องใส่ตอน push — ใส่ทีหลังบนอ็อบเจกต์ดิบจะไม่ผ่าน proxy ของ Alpine
+      const m = this.push('assistant', '', 'ok', '', {
+        kind: 'topup',
+        pay: { step: 'choose', busy: false, uploading: false, error: '', notice: '', waited: 0, then, superseded: false },
+      });
       this.scrollToBottom(true);
+      return m;
+    },
+
+    /** เงินเข้าแล้ว (จาก poll หรือสลิป) — อัปเดตยอด ปลดล็อกแชท และพาไปแพ็กเกจที่ตั้งใจจ่าย */
+    afterPaid(m, balance) {
+      clearInterval(this.payTimer);
+      m.pay.step = 'done';
+      if (balance !== undefined && balance !== null && Number.isFinite(Number(balance))) this.balance = Number(balance);
+      // เติมเงินผ่านแล้วต้องพิมพ์ต่อได้ทันที ไม่ต้องรีเฟรชหน้า
+      if (this.blockedReason.includes('เครดิต')) {
+        this.blocked = false;
+        this.blockedReason = '';
+      }
+      this.scrollToBottom(true);
+      const t = m.pay.then;
+      // หน่วงให้เห็นว่า "สำเร็จ" ก่อนเปลี่ยนหน้า — ผู้สูงอายุตกใจถ้าหน้าเด้งทันที
+      if (t && this.canAfford(t.offer)) setTimeout(() => this.startOffer(t.msg, t.offer), 1500);
     },
 
     async chooseAmount(m, amount) {
@@ -712,17 +806,7 @@ document.addEventListener('alpine:init', () => {
           });
           if (!r.ok) return;
           const j = await r.json();
-          if (j.paid) {
-            clearInterval(this.payTimer);
-            m.pay.step = 'done';
-            this.balance = j.balance;
-            // เติมเงินผ่านแล้วต้องพิมพ์ต่อได้ทันที ไม่ต้องรีเฟรชหน้า
-            if (this.blockedReason.includes('เครดิต')) {
-              this.blocked = false;
-              this.blockedReason = '';
-            }
-            this.scrollToBottom(true);
-          }
+          if (j.paid && m.pay.step !== 'done') this.afterPaid(m, j.balance);
         } catch (_) { /* เน็ตสะดุดชั่วคราว — รอบหน้าลองใหม่ */ }
       }, 5000);
     },
@@ -766,14 +850,7 @@ document.addEventListener('alpine:init', () => {
 
         // ตรวจสลิปผ่านทันที (SlipOK) → ข้ามการรอ SMS ไปหน้าสำเร็จได้เลย
         if (j.paid) {
-          clearInterval(this.payTimer);
-          m.pay.step = 'done';
-          if (typeof j.balance === 'number') this.balance = j.balance;
-          if (this.blockedReason.includes('เครดิต')) {
-            this.blocked = false;
-            this.blockedReason = '';
-          }
-          this.scrollToBottom(true);
+          if (m.pay.step !== 'done') this.afterPaid(m, j.balance);
           return;
         }
 
