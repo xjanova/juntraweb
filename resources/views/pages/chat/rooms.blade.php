@@ -24,6 +24,9 @@
       </p>
     </div>
 
+    {{-- 🔴 (2026-11-04, owner) ตัวเลขสดหน้าห้อง — ออนไลน์ตอนนี้ / ดูดวงไปแล้ว / คิวเปิดไพ่ (เลขจริงทั้งหมด) --}}
+    <x-live-room-stats />
+
     @if (session('status'))
       <div class="flash" role="status" style="text-align:center;margin-bottom:18px">{{ session('status') }}</div>
     @endif
