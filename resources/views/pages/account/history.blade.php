@@ -46,7 +46,10 @@
         @php
           $m = $meta[$r->type] ?? ['label' => $r->type, 'icon' => 'sparkle', 'color' => 'var(--gold)'];
           $cost = $r->payload['cost'] ?? null;
+          // 🎭 ไพ่ยิปซีที่อ่านเสร็จแล้ว = เปิดดูแบบโรงละครได้ (หน้าผลขึ้นม่านให้แตะเริ่ม)
+          $theater = str_starts_with((string) $r->type, 'tarot') && ! $r->isInProgress() && ! $r->isFailed() && trim((string) $r->result) !== '';
         @endphp
+        <div style="display:grid;gap:6px">
         <a href="{{ route('reading.show', $r) }}" class="panel"
            style="padding:22px;display:block;text-decoration:none;border-color:{{ $m['color'] }}2e;position:relative;overflow:hidden">
           <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:{{ $m['color'] }}"></div>
@@ -67,6 +70,11 @@
             <span class="btn btn-ghost" style="padding:10px 22px;flex-shrink:0;pointer-events:none">ดูผล →</span>
           </div>
         </a>
+        @if ($theater)
+          <a href="{{ route('tarot.show', ['reading' => $r, 'theater' => 1]) }}"
+             style="justify-self:end;font-size:12.5px;color:var(--gold);text-decoration:none;padding:6px 14px;border:1px solid rgba(244,207,106,.3);border-radius:999px">▶ ฟังคำทำนายแบบโรงละคร</a>
+        @endif
+        </div>
       @empty
         <div class="panel" style="text-align:center;padding:48px 24px">
           <p style="color:var(--ink-dim);margin-bottom:18px">
