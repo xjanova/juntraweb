@@ -1541,3 +1541,62 @@
 @media (prefers-reduced-motion: reduce) {
   .oracle-stage > .oracle-clip { display: none; }
 }
+
+/* ── ใบรับรอง DBD Registered (2026-11-04) — ตราที่ footer + ส่วนใบรับรองบนหน้าแรก ทุกธีม
+      ข้อมูลอยู่ที่ config/business.php · เจาะจง ≥2 คลาสเพราะ CSS ธีมโหลดทีหลังและชนะคลาสเดี่ยว */
+.dbd-badge { display: inline-flex; align-items: center; margin-top: 14px; padding: 6px 10px; border-radius: 10px; background: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.35); transition: transform .2s; }
+.dbd-badge:hover { transform: translateY(-2px); }
+.dbd-badge img { display: block; width: 104px; height: auto; }
+
+.dbd-cert-section .dbd-cert { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 48px; align-items: center; max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+.dbd-cert-section .dbd-cert-img { display: block; border-radius: 18px; overflow: hidden; border: 1px solid rgba(231,201,122,.35); box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 40px rgba(231,201,122,.12); background: #fff; transition: transform .3s; }
+.dbd-cert-section .dbd-cert-img.is-showcase { background: transparent; }
+.dbd-cert-section .dbd-cert-img:hover { transform: translateY(-4px); }
+.dbd-cert-section .dbd-cert-img img { display: block; width: 100%; height: auto; }
+.dbd-cert-section .dbd-cert-logo { display: block; width: 104px; height: auto; margin-bottom: 18px; padding: 6px 10px; border-radius: 10px; background: #fff; box-sizing: content-box; }
+.dbd-cert-section .dbd-cert-text h2 { margin: 10px 0 14px; line-height: 1.6; font-size: clamp(22px, 3vw, 32px); }
+.dbd-cert-section .dbd-cert-text p { color: var(--ink-mute, #b9aecb); line-height: 1.8; margin: 0 0 20px; }
+.dbd-cert-section .dbd-cert-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin: 0 0 26px; }
+.dbd-cert-section .dbd-cert-facts dt { font-size: 12px; letter-spacing: .08em; color: var(--gold-2, #e7c97a); margin: 0 0 2px; }
+.dbd-cert-section .dbd-cert-facts dd { margin: 0; color: var(--ink, #f3ecff); font-size: 15px; }
+@media (max-width: 760px) {
+  .dbd-cert-section .dbd-cert { grid-template-columns: 1fr; gap: 28px; }
+  .dbd-cert-section .dbd-cert-img { max-width: 360px; margin: 0 auto; }
+}
+
+/* ── เรื่องราวการดูดวงออนไลน์ (2026-11-04) — components/online-stories */
+.online-stories .story-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.online-stories .story-card { display: flex; flex-direction: column; border-radius: 20px; overflow: hidden; border: 1px solid rgba(231,201,122,.2); background: rgba(20,12,36,.6); transition: transform .3s, border-color .3s; }
+.online-stories .story-card:hover { transform: translateY(-4px); border-color: rgba(231,201,122,.45); }
+.online-stories .story-art { aspect-ratio: 3 / 2; overflow: hidden; }
+.online-stories .story-art img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .7s; }
+.online-stories .story-card:hover .story-art img { transform: scale(1.05); }
+.online-stories .story-body { display: flex; flex-direction: column; flex: 1; padding: 20px 22px 24px; }
+.online-stories .story-eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--gold-2, #e7c97a); margin-bottom: 6px; }
+.online-stories .story-body h3 { margin: 0 0 10px; font-size: 19px; line-height: 1.5; color: var(--ink, #f3ecff); }
+.online-stories .story-body p { margin: 0 0 16px; color: var(--ink-mute, #b9aecb); font-size: 14.5px; line-height: 1.8; flex: 1; }
+.online-stories .story-link { color: var(--gold-2, #e7c97a); font-size: 14px; align-self: flex-start; }
+@media (max-width: 1100px) { .online-stories .story-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .online-stories .story-grid { grid-template-columns: 1fr; } }
+
+/* ── คำถามที่พบบ่อย (2026-11-04) — components/home-faq */
+.home-faq .faq-list { max-width: 860px; margin: 0 auto; padding: 0 24px; display: grid; gap: 12px; }
+.home-faq .faq-item { border: 1px solid rgba(231,201,122,.22); border-radius: 16px; background: rgba(20,12,36,.55); padding: 0 22px; transition: border-color .3s; }
+.home-faq .faq-item[open] { border-color: rgba(231,201,122,.5); }
+.home-faq .faq-item summary { list-style: none; cursor: pointer; padding: 18px 28px 18px 0; position: relative; }
+.home-faq .faq-item summary::-webkit-details-marker { display: none; }
+.home-faq .faq-item summary::after { content: "+"; position: absolute; right: 0; top: 50%; transform: translateY(-50%); color: var(--gold-2, #e7c97a); font-size: 22px; transition: transform .3s; }
+.home-faq .faq-item[open] summary::after { transform: translateY(-50%) rotate(45deg); }
+.home-faq .faq-item summary h3 { margin: 0; font-size: 16.5px; line-height: 1.6; color: var(--ink, #f3ecff); font-weight: 500; }
+.home-faq .faq-item p { margin: 0 0 18px; color: var(--ink-mute, #b9aecb); line-height: 1.85; font-size: 15px; }
+
+/* ── โซเชียลทางการ (2026-11-04) — components/social-links · วงกลมสีประจำแบรนด์ + โลโก้ขาว */
+.social-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.social-links .social-link { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin: 0; border-radius: 50%; color: #fff; transition: transform .2s, box-shadow .2s; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+.social-links .social-link:hover { transform: translateY(-2px); color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.social-links .social-link svg { width: 20px; height: 20px; }
+.social-links .social-facebook { background: #0866FF; }
+.social-links .social-line { background: #06C755; }
+.social-links .social-tiktok { background: #000; box-shadow: -2px -2px 0 #25F4EE inset, 2px 2px 0 #FE2C55 inset, 0 4px 12px rgba(0,0,0,.35); }
+.social-links .social-youtube { background: #FF0000; }
+.social-links .social-instagram { background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285AEB 90%); }

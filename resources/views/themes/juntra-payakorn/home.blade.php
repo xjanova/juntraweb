@@ -4,7 +4,17 @@
 
 @section('content')
 
-<section class="hero" id="top">
+{{-- สไลด์แม่หมอใน hero (2026-11-04) — ไฟล์ไหนยังไม่มีก็ข้าม ไม่มีสักไฟล์ = hero แบบเดิม (ข้อความกลางจอ) --}}
+@php
+  $heroSlides = collect([
+      ['src' => 'images/juntra/hero/maemor-1.webp', 'alt' => 'แม่หมอจันทราวางไพ่ยิปซีบนโต๊ะไม้แกะสลักลายไทย พร้อมอ่านดวงให้ท่าน'],
+      ['src' => 'images/juntra/hero/maemor-2.webp', 'alt' => 'แม่หมอจันทราเพ่งลูกแก้วคริสตัลที่เปล่งแสงดวงดาว'],
+      ['src' => 'images/juntra/hero/maemor-3.webp', 'alt' => 'แม่หมอจันทรายืนใต้พระจันทร์เต็มดวงบนระเบียงศาลาไทยยามค่ำคืน'],
+      ['src' => 'images/juntra/hero/maemor-4.webp', 'alt' => 'แม่หมอจันทรายื่นไพ่ทาโรต์ให้ท่านเลือกหนึ่งใบ'],
+      ['src' => 'images/juntra/hero/maemor-5.webp', 'alt' => 'แม่หมอจันทราอวยพรหน้ากงล้อจักรราศีสีทอง'],
+  ])->filter(fn ($s) => file_exists(public_path($s['src'])))->values();
+@endphp
+<section class="hero{{ $heroSlides->isNotEmpty() ? ' has-slides' : '' }}" id="top">
   <div class="hero-bg">
     <img src="{{ asset('images/juntra/hero-bg.webp') }}" alt="">
   </div>
@@ -13,6 +23,7 @@
     <div class="ring r2"></div>
     <div class="ring r3"></div>
   </div>
+  <div class="hero-layout">
   <div class="hero-inner">
     <div class="hero-eyebrow"><span class="dot"></span> ศาสตร์แห่งโหราศาสตร์ &amp; มูเตลู</div>
     <h1 style="padding:50px 0 14px">
@@ -30,6 +41,8 @@
       </a>
       <a href="#services" class="btn btn-ghost">ดูแพ็กเกจไพ่ทั้งหมด →</a>
     </div>
+  </div>
+  <x-hero-slides :slides="$heroSlides" />
   </div>
   <div class="scroll-cue" aria-hidden="true">
     <span>SCROLL</span>
@@ -211,6 +224,10 @@
 </section>
 @endserviceopen
 
+<x-online-stories />
+
+<x-dbd-certificate />
+
 <section class="section" id="voices">
   <div class="section-head reveal">
     <div class="section-eyebrow">Voices of Believers</div>
@@ -239,6 +256,8 @@
     @endforeach
   </div>
 </section>
+
+<x-home-faq />
 
 <section class="section" id="cta">
   <div class="cta-strip reveal">

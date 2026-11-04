@@ -1,5 +1,6 @@
 @extends('layouts.app')
 @section('title', "ดวงราศี{$zodiac->name_th}")
+@section('description', "ดูดวงราศี{$zodiac->name_th}รายวัน อัปเดตทุกวัน ทั้งความรัก การงาน การเงิน และสุขภาพ จากแม่หมอจันทรา")
 
 @section('content')
 @php

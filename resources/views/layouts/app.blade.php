@@ -8,7 +8,19 @@
 <meta name="color-scheme" content="dark">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <title>@yield('title', config('app.name', 'แม่หมอจันทรา')) — ทำนายดวงด้วย AI ศักดิ์สิทธิ์</title>
-<meta name="description" content="@yield('description', 'แม่หมอจันทรา / จันทราพยากรณ์ ผสานศาสตร์ดวงดาวโบราณกับปัญญาประดิษฐ์ — ดวงรายวัน ไพ่ยิปซี เลขศาสตร์ AI Chat ดูดวง')">
+{{-- ── SEO (2026-11-04) — กติกาทั้งหมดอยู่ที่ App\Support\Seo
+     description: หน้าไหนประกาศ @section('description') เองใช้ของหน้า ไม่งั้นใช้ของ Seo ตาม route
+     robots: เก็บเข้าดัชนีเฉพาะหน้าที่อยู่ใน allowlist (Seo::INDEXABLE) — หน้าบัญชี/วอลเลต/ผลคำทำนาย = noindex
+     canonical: ตัด query ทิ้ง (/chat?pick=1, ?ref=…) ไม่ให้นับเป็นหน้าซ้ำ --}}
+{{-- @section('x', 'ข้อความ') ถูก e() มาแล้วหนึ่งรอบ — decode กลับก่อน ไม่งั้น {{ }} ข้างล่าง escape ซ้ำเป็น &amp;amp; --}}
+@php($seoDescription = View::hasSection('description') ? trim(html_entity_decode(View::getSection('description'), ENT_QUOTES | ENT_HTML5, 'UTF-8')) : \App\Support\Seo::description())
+<meta name="description" content="{{ $seoDescription }}">
+@if (\App\Support\Seo::indexable())
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<link rel="canonical" href="{{ \App\Support\Seo::canonical() }}">
+@else
+<meta name="robots" content="noindex,follow">
+@endif
 
 {{-- ── Social preview ────────────────────────────────────────────────
      ทั้งเว็บเคยไม่มี og:image เลยสักหน้า (มีหน้า /download หน้าเดียวที่
@@ -19,13 +31,17 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ config('app.name', 'จันทราพยากรณ์') }}">
 <meta property="og:locale" content="th_TH">
-<meta property="og:url" content="{{ url()->current() }}">
+<meta property="og:url" content="{{ \App\Support\Seo::canonical() }}">
 <meta property="og:title" content="@yield('title', config('app.name', 'แม่หมอจันทรา'))">
-<meta property="og:description" content="@yield('description', 'แม่หมอจันทรา / จันทราพยากรณ์ ผสานศาสตร์ดวงดาวโบราณกับปัญญาประดิษฐ์ — ดวงรายวัน ไพ่ยิปซี เลขศาสตร์ AI Chat ดูดวง')">
+<meta property="og:description" content="{{ $seoDescription }}">
 <meta property="og:image" content="@yield('og-image', asset('images/juntra/og-default.jpg'))">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0a0612">
+<link rel="sitemap" type="application/xml" href="{{ route('seo.sitemap') }}">
+<link rel="alternate" type="text/markdown" title="llms.txt" href="{{ route('seo.llms') }}">
+<script type="application/ld+json">{!! \App\Support\Seo::jsonLd(\App\Support\Seo::siteGraph()) !!}</script>
 
 {{-- favicon เดิมชี้ logo.png ขนาด 1 MB เต็ม ๆ (1024×1024) โหลดทุกหน้าเพื่อวาด 16px
      ตอนนี้ย่อไว้ล่วงหน้าแล้ว: favicon 64px = 8 KB, apple-touch 180px = 36 KB

@@ -767,3 +767,52 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
   .nav::after { height: 20px; bottom: -10px; }
   .footer::before { top: -22px; height: 52px; width: min(300px, 80%); }
 }
+
+/* ============ HERO SLIDES (2026-11-04) — ข้อความซ้าย สไลด์แม่หมอขวา เฟดวน
+   มีผลเฉพาะ .hero.has-slides (มีไฟล์ภาพอย่างน้อยหนึ่งภาพ) — ไม่มีภาพ = hero กลางจอแบบเดิม */
+.hero-layout { display: contents; }
+.hero.has-slides .hero-layout {
+  display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+  gap: 56px; align-items: center; width: 100%; max-width: 1200px; padding: 0 24px;
+}
+.hero.has-slides .hero-inner { text-align: left; padding: 110px 0 120px; max-width: none; }
+/* ภาพพื้นหลังเดิมมีหน้าแม่หมออยู่แล้ว — หรี่+เบลอให้เป็นแค่บรรยากาศ ไม่แย่งซีนกับสไลด์ */
+.hero.has-slides .hero-bg img { filter: blur(6px) brightness(.5) saturate(1.1); }
+.hero.has-slides h1 { font-size: clamp(38px, 4.6vw, 68px); }
+.hero.has-slides .hero-sub { margin-left: 0; }
+.hero.has-slides .hero-cta { justify-content: flex-start; }
+.hero-slides {
+  position: relative; aspect-ratio: 4 / 5; width: 100%; max-width: 460px; justify-self: center;
+  border-radius: 28px; overflow: hidden; isolation: isolate;
+  border: 1px solid rgba(231,201,122,.45);
+  box-shadow: 0 30px 80px rgba(0,0,0,.55), 0 0 60px rgba(176,122,255,.18);
+  background: rgba(10,6,18,.6);
+}
+.hero-slides::after { /* ขอบทองด้านใน + ไล่มืดล่างให้จุดอ่านง่าย */
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255,236,190,.12);
+  background: linear-gradient(180deg, rgba(10,6,18,0) 70%, rgba(10,6,18,.55));
+}
+.hero-slide {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  opacity: 0; transform: scale(1.02);
+  transition: opacity 1.4s ease, transform 7s linear;
+}
+.hero-slide.is-active, .hero-slides:not(.is-ready) .hero-slide:first-of-type { opacity: 1; transform: scale(1.08); }
+.hero-slide-dots { position: absolute; z-index: 3; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; gap: 4px; }
+.hero-slide-dots button {
+  width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; position: relative;
+}
+.hero-slide-dots button::before { /* จุดเล็ก แต่พื้นที่กด 24px */
+  content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px;
+  border-radius: 999px; background: rgba(255,247,224,.45); transition: all .3s;
+}
+.hero-slide-dots button.is-active::before { width: 22px; margin-left: -11px; background: var(--gold-2); }
+@media (max-width: 900px) {
+  .hero.has-slides .hero-layout { grid-template-columns: 1fr; gap: 0; }
+  .hero.has-slides .hero-inner { text-align: center; padding: 100px 0 32px; }
+  .hero.has-slides .hero-sub { margin-left: auto; }
+  .hero.has-slides .hero-cta { justify-content: center; }
+  .hero-slides { max-width: 360px; margin-bottom: 90px; }
+}
+@media (prefers-reduced-motion: reduce) { .hero-slide { transition: none; transform: none !important; } }
