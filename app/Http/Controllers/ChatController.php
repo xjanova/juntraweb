@@ -140,6 +140,8 @@ class ChatController extends Controller
             'room'         => $conversation->persona,
             'rooms'        => ChatRooms::cards(),
             'offerCards'   => $this->offerCardsFor($conversation, $user),
+            // 🔮 (2026-11-05) แพ็กเกจของห้องวางบนโต๊ะในห้องพยากรณ์ — กดเปิดไพ่ได้ตลอด ไม่ต้องรอแม่หมอยื่นการ์ด
+            'tableOffers'  => $gate['allowed'] ? array_slice(ChatOffers::forRoom((string) $conversation->persona, 'general', $user), 0, 3) : [],
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => $cost,
