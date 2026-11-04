@@ -768,38 +768,34 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
   .footer::before { top: -22px; height: 52px; width: min(300px, 80%); }
 }
 
-/* ============ HERO SLIDES (2026-11-04) — ข้อความซ้าย สไลด์แม่หมอขวา เฟดวน
+/* ============ HERO SLIDES (2026-11-04) — สไลด์แม่หมอเป็นพื้นหลังเต็มจอ เฟดวน + ซูมช้า
+   เจ้าของสั่ง "แบล็คกราวด์สไลด์ เต็มจอ" (รอบแรกทำเป็นการ์ดขวา — ผิด)
+   ภาพเป็นแนวตั้ง 4:5 หน้าแม่หมออยู่กลางภาพช่วงบน → จอคอม: ข้อความชิดซ้าย ไล่มืดซ้าย ให้หน้าแม่หมอโผล่กลาง-ขวา
+   จอมือถือ: หน้าแม่หมออยู่บน ข้อความลงล่าง ไล่มืดจากล่าง
    มีผลเฉพาะ .hero.has-slides (มีไฟล์ภาพอย่างน้อยหนึ่งภาพ) — ไม่มีภาพ = hero กลางจอแบบเดิม */
-.hero-layout { display: contents; }
-.hero.has-slides .hero-layout {
-  display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
-  gap: 56px; align-items: center; width: 100%; max-width: 1200px; padding: 0 24px;
+.hero.has-slides { justify-content: flex-start; text-align: left; }
+.hero.has-slides .hero-inner {
+  width: 100%; max-width: 1200px; margin: 0 auto; padding: 110px 24px 150px;
+  pointer-events: none; /* กล่องข้อความกว้างเต็มแถว — ไม่บังจุดเลือกภาพ */
 }
-.hero.has-slides .hero-inner { text-align: left; padding: 110px 0 120px; max-width: none; }
-/* ภาพพื้นหลังเดิมมีหน้าแม่หมออยู่แล้ว — หรี่+เบลอให้เป็นแค่บรรยากาศ ไม่แย่งซีนกับสไลด์ */
-.hero.has-slides .hero-bg img { filter: blur(6px) brightness(.5) saturate(1.1); }
-.hero.has-slides h1 { font-size: clamp(38px, 4.6vw, 68px); }
-.hero.has-slides .hero-sub { margin-left: 0; }
+.hero.has-slides .hero-inner > * { pointer-events: auto; max-width: 620px; }
+.hero.has-slides h1 { font-size: clamp(38px, 4.6vw, 68px); text-shadow: 0 4px 30px rgba(10,6,18,.75); }
+.hero.has-slides .hero-sub { margin-left: 0; color: var(--ink); text-shadow: 0 2px 16px rgba(10,6,18,.9); }
 .hero.has-slides .hero-cta { justify-content: flex-start; }
-.hero-slides {
-  position: relative; aspect-ratio: 4 / 5; width: 100%; max-width: 460px; justify-self: center;
-  border-radius: 28px; overflow: hidden; isolation: isolate;
-  border: 1px solid rgba(231,201,122,.45);
-  box-shadow: 0 30px 80px rgba(0,0,0,.55), 0 0 60px rgba(176,122,255,.18);
-  background: rgba(10,6,18,.6);
-}
-.hero-slides::after { /* ขอบทองด้านใน + ไล่มืดล่างให้จุดอ่านง่าย */
-  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255,236,190,.12);
-  background: linear-gradient(180deg, rgba(10,6,18,0) 70%, rgba(10,6,18,.55));
+.hero-slides { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: var(--bg-0); }
+.hero-slides::after { /* ไล่มืดซ้าย (อ่านข้อความ) + กลืนกับส่วนถัดไปด้านล่าง */
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(10,6,18,.9) 0%, rgba(10,6,18,.68) 32%, rgba(10,6,18,.12) 62%, rgba(10,6,18,.3) 100%),
+    linear-gradient(180deg, rgba(10,6,18,.45) 0%, rgba(10,6,18,0) 22%, rgba(10,6,18,0) 62%, var(--bg-0) 100%);
 }
 .hero-slide {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  opacity: 0; transform: scale(1.02);
-  transition: opacity 1.4s ease, transform 7s linear;
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 14%;
+  opacity: 0; transform: scale(1); transform-origin: 50% 20%; /* ซูมจากช่วงหน้า หัวไม่ถูกดันขึ้นไปใต้เมนู */
+  transition: opacity 1.6s ease, transform 8s linear;
 }
-.hero-slide.is-active, .hero-slides:not(.is-ready) .hero-slide:first-of-type { opacity: 1; transform: scale(1.08); }
-.hero-slide-dots { position: absolute; z-index: 3; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; gap: 4px; }
+.hero-slide.is-active, .hero-slides:not(.is-ready) .hero-slide:first-of-type { opacity: 1; transform: scale(1.06); }
+.hero-slide-dots { position: absolute; z-index: 3; right: 24px; bottom: 36px; display: flex; gap: 4px; }
 .hero-slide-dots button {
   width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; position: relative;
 }
@@ -809,10 +805,17 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
 }
 .hero-slide-dots button.is-active::before { width: 22px; margin-left: -11px; background: var(--gold-2); }
 @media (max-width: 900px) {
-  .hero.has-slides .hero-layout { grid-template-columns: 1fr; gap: 0; }
-  .hero.has-slides .hero-inner { text-align: center; padding: 100px 0 32px; }
+  .hero.has-slides { align-items: flex-end; text-align: center; }
+  /* ครึ่งบนของจอให้หน้าแม่หมอ ข้อความเริ่มกลางจอ (เลื่อนลงอ่านต่อได้) */
+  .hero.has-slides .hero-inner { padding: 44svh 20px 72px; }
+  .hero.has-slides .hero-inner > * { max-width: none; }
   .hero.has-slides .hero-sub { margin-left: auto; }
   .hero.has-slides .hero-cta { justify-content: center; }
-  .hero-slides { max-width: 360px; margin-bottom: 90px; }
+  .hero-slide { object-position: 50% 12%; }
+  .hero-slides::after {
+    background: linear-gradient(180deg, rgba(10,6,18,.35) 0%, rgba(10,6,18,0) 18%, rgba(10,6,18,0) 34%, rgba(10,6,18,.7) 52%, rgba(10,6,18,.9) 75%, var(--bg-0) 100%);
+  }
+  .hero-slide-dots { left: 0; right: 0; bottom: 18px; justify-content: center; }
+  .hero.has-slides .scroll-cue { display: none; } /* จอเล็กที่ด้านล่างให้จุดเลือกภาพ */
 }
 @media (prefers-reduced-motion: reduce) { .hero-slide { transition: none; transform: none !important; } }

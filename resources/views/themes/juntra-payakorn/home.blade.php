@@ -4,7 +4,8 @@
 
 @section('content')
 
-{{-- สไลด์แม่หมอใน hero (2026-11-04) — ไฟล์ไหนยังไม่มีก็ข้าม ไม่มีสักไฟล์ = hero แบบเดิม (ข้อความกลางจอ) --}}
+{{-- สไลด์แม่หมอเป็นพื้นหลังเต็มจอของ hero (2026-11-04 — เจ้าของสั่ง "แบล็คกราวด์สไลด์ เต็มจอ" ไม่ใช่การ์ด)
+     ไฟล์ไหนยังไม่มีก็ข้าม ไม่มีสักไฟล์ = hero แบบเดิม (ภาพพื้นหลังเดียว + ข้อความกลางจอ) --}}
 @php
   $heroSlides = collect([
       ['src' => 'images/juntra/hero/maemor-1.webp', 'alt' => 'แม่หมอจันทราวางไพ่ยิปซีบนโต๊ะไม้แกะสลักลายไทย พร้อมอ่านดวงให้ท่าน'],
@@ -15,15 +16,18 @@
   ])->filter(fn ($s) => file_exists(public_path($s['src'])))->values();
 @endphp
 <section class="hero{{ $heroSlides->isNotEmpty() ? ' has-slides' : '' }}" id="top">
-  <div class="hero-bg">
-    <img src="{{ asset('images/juntra/hero-bg.webp') }}" alt="">
-  </div>
-  <div class="hero-orbit" aria-hidden="true">
-    <div class="ring"></div>
-    <div class="ring r2"></div>
-    <div class="ring r3"></div>
-  </div>
-  <div class="hero-layout">
+  @if ($heroSlides->isNotEmpty())
+    <x-hero-slides :slides="$heroSlides" />
+  @else
+    <div class="hero-bg">
+      <img src="{{ asset('images/juntra/hero-bg.webp') }}" alt="">
+    </div>
+    <div class="hero-orbit" aria-hidden="true">
+      <div class="ring"></div>
+      <div class="ring r2"></div>
+      <div class="ring r3"></div>
+    </div>
+  @endif
   <div class="hero-inner">
     <div class="hero-eyebrow"><span class="dot"></span> ศาสตร์แห่งโหราศาสตร์ &amp; มูเตลู</div>
     <h1 style="padding:50px 0 14px">
@@ -41,8 +45,6 @@
       </a>
       <a href="#services" class="btn btn-ghost">ดูแพ็กเกจไพ่ทั้งหมด →</a>
     </div>
-  </div>
-  <x-hero-slides :slides="$heroSlides" />
   </div>
   <div class="scroll-cue" aria-hidden="true">
     <span>SCROLL</span>
