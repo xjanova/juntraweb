@@ -15,6 +15,13 @@
       <div class="eyebrow">CHOOSE YOUR ORACLE</div>
       <h1 class="display" style="font-size:clamp(32px,4.5vw,56px);margin-bottom:10px">เลือก<em>ผู้พยากรณ์</em></h1>
       <p class="lede" style="margin:0 auto">{{ $chatLede ?? 'คุยฟรีทุกวัน' }} · อยากให้เปิดไพ่เมื่อไรค่อยเลือก ราคาไพ่หักตอนเปิดไพ่เท่านั้น</p>
+      {{-- 🤖 (2026-11-04, owner) บอกตรง ๆ ว่าผู้พยากรณ์ทุกห้องคือ AI — คำโฆษณาต้องไม่เกินที่ระบบทำจริง:
+           ไพ่อ่านจากความหมายของสำรับ 78 ใบ (database/data/tarot_meanings.php → TarotPromptBuilder ส่งความหมายของทุกใบไปด้วย)
+           ห้องแชทไม่ได้คำนวณดาว จึงไม่อ้างเรื่องดาวตรงนี้ --}}
+      <p class="mx-auto mt-3 max-w-xl text-center text-sm leading-relaxed text-white/75">
+        <x-ai-badge class="mr-1" />
+        <span>ผู้พยากรณ์ทุกห้องคือ<strong class="font-semibold text-white">หมอดู AI</strong> เปิดไพ่แล้วอ่านจากความหมายในตำราไพ่ 78 ใบ ตามใบและตำแหน่งที่ท่านเปิดได้จริง — ไม่เดา ไม่มโน</span>
+      </p>
     </div>
 
     @if (session('status'))
@@ -38,6 +45,7 @@
             <div class="room-art-fade" aria-hidden="true"></div>
             <div class="room-badges">
               <span class="room-badge">{{ str_pad($i + 1, 2, '0', STR_PAD_LEFT) }} / {{ str_pad(count($rooms), 2, '0', STR_PAD_LEFT) }}</span>
+              <x-ai-badge size="md" />
               @if ($r['open'])
                 <span class="room-badge is-online"><span class="mor-online"></span> ออนไลน์</span>
               @else

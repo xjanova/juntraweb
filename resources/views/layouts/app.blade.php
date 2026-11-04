@@ -7,7 +7,7 @@
      ที่เปิด Auto Dark Theme จะกลับสีปุ่มทองเป็นดำและวาด native control ผิดโทน --}}
 <meta name="color-scheme" content="dark">
 <meta name="csrf-token" content="{{ csrf_token() }}">
-<title>@yield('title', config('app.name', 'แม่หมอจันทรา')) — ทำนายดวงด้วย AI ศักดิ์สิทธิ์</title>
+<title>@yield('title', config('app.name', 'แม่หมอจันทรา')) — หมอดู AI อ่านจากตำราจริง</title>
 {{-- ── SEO (2026-11-04) — กติกาทั้งหมดอยู่ที่ App\Support\Seo
      description: หน้าไหนประกาศ @section('description') เองใช้ของหน้า ไม่งั้นใช้ของ Seo ตาม route
      robots: เก็บเข้าดัชนีเฉพาะหน้าที่อยู่ใน allowlist (Seo::INDEXABLE) — หน้าบัญชี/วอลเลต/ผลคำทำนาย = noindex
