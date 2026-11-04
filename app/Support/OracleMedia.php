@@ -55,6 +55,32 @@ final class OracleMedia
     }
 
     /**
+     * 🎵 เพลงบรรเลงของห้อง (โรงละครคำทำนาย) ที่มีไฟล์แล้ว — ลำดับตาม manifest
+     *
+     * @return list<string>
+     */
+    public static function music(string $persona): array
+    {
+        $out = [];
+        foreach (self::musicPaths($persona) as $path) {
+            if (is_file(public_path($path))) {
+                $out[] = self::url($path);
+            }
+        }
+
+        return $out;
+    }
+
+    /** @return list<string> path ใต้ public/ ของเพลงทุกเพลงตาม manifest */
+    public static function musicPaths(string $persona): array
+    {
+        $dir = self::dir($persona);
+
+        return array_map(fn (string $file) => "{$dir}/music/{$file}",
+            array_values((array) config('oracle_media.rooms.'.ChatRooms::normalize($persona).'.music', [])));
+    }
+
+    /**
      * path ของคลิปทั้งหมดตาม manifest (ไม่สนว่ามีไฟล์หรือยัง) — ให้เทสต์ใช้เช็คความครบ
      *
      * @return list<array{webm: string, mp4: string}>

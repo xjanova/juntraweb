@@ -16,6 +16,7 @@ use Tests\TestCase;
  *  - คลิปเล็กพอสำหรับมือถือ (≤ 1.5 MB ต่อไฟล์)
  *  - เสียง: ไฟล์ไหนยังไม่มี = เงียบ (ไม่ส่ง URL ไปหน้าเว็บ) · ไม่มีไฟล์เลย = ไม่มีปุ่มลำโพง
  *  - ประโยคเสียงห้ามมีราคา · ไม่มี voice ID ใน manifest (เจ้าของเปลี่ยนเสียงได้ที่หลังบ้าน Thaiprompt)
+ *  - 🎵 เพลงบรรเลงโรงละคร: ทุกห้องมี 2 เพลง ไฟล์มีจริง เป็น mp3 ขนาดพอดีมือถือ (2026-11-04)
  *  - คอมโพเนนต์ไม่เล่นเสียงเอง: <video> muted ทุกตัว ไม่มี autoplay
  */
 class OracleMediaTest extends TestCase
@@ -43,6 +44,26 @@ class OracleMediaTest extends TestCase
 
             // ทุกคลิปของห้องส่งถึงหน้าเว็บครบ (ไม่มีตัวไหนตกหล่นเพราะไฟล์หาย)
             $this->assertCount(count($paths), OracleMedia::loops($persona));
+        }
+    }
+
+    public function test_every_room_has_two_theater_music_tracks_on_disk(): void
+    {
+        foreach (ChatRooms::keys() as $persona) {
+            $paths = OracleMedia::musicPaths($persona);
+            $this->assertCount(2, $paths, "ห้อง {$persona} ต้องมีเพลงบรรเลง 2 เพลง (สลับเฟดข้ามกัน)");
+
+            foreach ($paths as $path) {
+                $full = public_path($path);
+                $this->assertFileExists($full, "manifest อ้างถึง {$path} แต่ไม่มีไฟล์");
+                $this->assertStringEndsWith('.mp3', $path);
+                // 96 kbps ≈ 0.72 MB/นาที — เพลงยาวสุดราว 4 นาทีต้องไม่เกิน 4 MB (มือถือโหลดตอนเปิดโรงละคร)
+                $this->assertLessThanOrEqual(4_000_000, filesize($full), "{$path} ใหญ่เกินไปสำหรับมือถือ");
+                $head = (string) file_get_contents($full, false, null, 0, 3);
+                $this->assertTrue(str_starts_with($head, 'ID3') || ord($head[0] ?? 'x') === 0xFF, "{$path} ไม่ใช่ mp3 (ต้องขึ้นต้นด้วย ID3 หรือ frame sync)");
+            }
+
+            $this->assertCount(2, OracleMedia::music($persona));
         }
     }
 
