@@ -18,6 +18,9 @@ class PendingTopupsWidget extends BaseWidget
 {
     protected static ?string $heading = 'รายการเติมเงินที่รอตรวจสอบ';
     protected static ?int $sort = 2;
+
+    /** ⚡ วาดพร้อมหน้า — รายการรอตรวจมีไม่กี่แถว ไม่ต้องยิง /livewire/update แยกอีกรอบหลังหน้าโหลด */
+    protected static bool $isLazy = false;
     protected int|string|array $columnSpan = 'full';
 
     public static function canView(): bool

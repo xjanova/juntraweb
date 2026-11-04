@@ -87,12 +87,12 @@ class MaeMorCommissions extends Page
         $admin = app(MaeMorAdmin::class);
         $dates = array_filter(['date_from' => $this->dateFrom, 'date_to' => $this->dateTo]);
 
-        $list = $admin->commissions([
+        // รายการ + ภาพรวม ยิงพร้อมกัน (เดิมต่อคิว ~1 วิ ทุกครั้งที่เปิดหน้า/เปลี่ยนตัวกรอง)
+        ['list' => $list, 'overview' => $overview] = $admin->commissionsWithOverview([
             'status' => $this->status,
             'level' => $this->level,
             'search' => trim($this->search),
-        ] + $dates, $this->listPage);
-        $overview = $admin->overview($dates);
+        ], $dates, $this->listPage);
 
         $this->error = $list['ok'] ? null : $list['message'];
         $this->rows = $list['ok'] ? (array) ($list['data']['data'] ?? []) : [];

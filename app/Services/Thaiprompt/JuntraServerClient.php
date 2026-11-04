@@ -4,6 +4,7 @@ namespace App\Services\Thaiprompt;
 
 use App\Models\Setting;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -338,6 +339,89 @@ class JuntraServerClient
             default => $http->timeout($timeout)->post($url, $payload),
         });
 
+        return $this->affiliateResult($resp, $path);
+    }
+
+    /**
+     * ⚡ อ่านหลายเส้นของผังแม่หมอ "พร้อมกัน" (GET เท่านั้น) — ผลแต่ละเส้นเหมือนเรียก affiliate() ทีละตัว
+     *
+     * ทำไมต้องมี (วัดบน prod 2026-11-04): คำขอไป Thaiprompt หนึ่งครั้งใช้ ~0.45–0.5 วิ
+     *   หน้า "ค่าแนะนำ" เรียก รายการ + ภาพรวม ต่อคิวกัน = ~1 วิ ก่อนหน้าจะเริ่มวาด
+     *   ยิงพร้อมกันเหลือเท่าเส้นที่ช้าที่สุดเส้นเดียว
+     *
+     * เรื่องเงินไม่เกี่ยว: ใช้กับการ "อ่าน" เท่านั้น คำสั่งที่เปลี่ยนข้อมูลยังเรียก affiliate() ทีละตัวตามเดิม
+     * token หมดอายุ (401) หรือ pool พัง → ถอยไปเรียกเส้นนั้นแบบปกติ (send() ขอ token ใหม่ให้เอง)
+     *
+     * @param  array<string, array{0: string, 1?: array}>  $calls  key => [path, query]
+     * @return array<string, array{status: string, code: int, data: ?array, reason_code: ?string, message: ?string}>
+     */
+    public function affiliateMany(array $calls, int $timeout = 10): array
+    {
+        if ($calls === []) {
+            return [];
+        }
+        if (! $this->isConfigured() || count($calls) === 1) {
+            // ไม่ได้ตั้งค่า = ทุกเส้นได้ unsupported เหมือนกัน · เส้นเดียวไม่ต้องใช้ pool
+            return array_map(fn (array $c) => $this->affiliate('GET', $c[0], $c[1] ?? [], $timeout), $calls);
+        }
+
+        $this->lastFailure = null;
+        $token = $this->token();
+        if ($token === null) {
+            $this->lastFailure = Cache::get(self::TOKEN_MISS) === 'refused' ? 'refused' : 'network';
+
+            return array_map(fn (array $c) => $this->affiliateResult(null, $c[0]), $calls);
+        }
+
+        try {
+            $responses = Http::pool(function (Pool $pool) use ($calls, $token, $timeout) {
+                foreach ($calls as $key => $c) {
+                    $pool->as((string) $key)->acceptJson()->withToken($token)->connectTimeout(4)->timeout($timeout)
+                        ->get($this->url('/affiliate' . $c[0]), $c[1] ?? []);
+                }
+            });
+        } catch (\Throwable $e) {
+            // ต่อไม่ติด/หมดเวลาทั้งชุด — ไม่ยิงซ้ำทีละเส้น ไม่งั้นแอดมินรอสองเท่าตอน Thaiprompt ล่ม
+            Log::warning('JuntraServerClient: pool threw', ['err' => mb_substr($e->getMessage(), 0, 200)]);
+            $this->lastFailure = 'network';
+
+            return array_map(fn (array $c) => $this->affiliateResult(null, $c[0]), $calls);
+        }
+
+        $out = [];
+        foreach ($calls as $key => $c) {
+            $resp = $responses[(string) $key] ?? null;
+
+            if ($resp instanceof Response && $resp->status() === 401) {
+                // token หมดอายุระหว่างทาง — ล้างเฉพาะ token ที่เพิ่งใช้ (เส้นแรกขอใหม่ เส้นถัดไปใช้ของใหม่ต่อ)
+                if (Cache::get(self::TOKEN_CACHE) === $token) {
+                    Cache::forget(self::TOKEN_CACHE);
+                }
+                $out[$key] = $this->affiliate('GET', $c[0], $c[1] ?? [], $timeout);
+
+                continue;
+            }
+            if (! $resp instanceof Response) {
+                // ต่อไม่ติด/หมดเวลา (pool คืน exception แทน response) — ไม่ยิงซ้ำ ไม่งั้นรอสองเท่าตอนฝั่งนั้นล่ม
+                Log::warning('JuntraServerClient: pooled request failed', ['path' => $c[0]]);
+                $this->lastFailure = 'network';
+                $out[$key] = $this->affiliateResult(null, $c[0]);
+
+                continue;
+            }
+            $out[$key] = $this->affiliateResult($resp, $c[0]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * แปลคำตอบของเส้น /affiliate เป็นสถานะเดียวกันทุกทางเรียก (ทีละตัว หรือ affiliateMany)
+     *
+     * @return array{status: string, code: int, data: ?array, reason_code: ?string, message: ?string}
+     */
+    private function affiliateResult(?Response $resp, string $path): array
+    {
         $code = $resp?->status() ?? 0;
         $json = $resp ? ($resp->json() ?: null) : null;
         $out = [
