@@ -9,8 +9,10 @@ use App\Models\Reading;
 use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Wallet\WalletService;
+use App\Support\OracleMedia;
 use App\Support\Pricing;
 use App\Support\ReadingCooldown;
+use App\Support\ReadingRoomLock;
 use App\Support\TarotSpreads;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -63,9 +65,18 @@ class TarotController extends Controller
             return $blocked;
         }
 
+        // 🔒 เริ่มทำนายแล้วเปลี่ยนห้องไม่ได้จนจบ/หมดเวลา — ไพ่ชุดของผู้พยากรณ์คนอื่นต้องรอก่อน
+        $room = OracleMedia::personaFor($data['spread']);
+        if ($blocked = $this->roomLockBlock($request, $room)) {
+            return $blocked;
+        }
+
         $request->session()->put('tarot_pick', [
-            'spread'   => $data['spread'],
-            'question' => $data['question'] ?? null,
+            'spread'     => $data['spread'],
+            'question'   => $data['question'] ?? null,
+            // ล็อกห้องนับจากตอนนี้ (ReadingRoomLock::fromPick) — ห้อง = ผู้พยากรณ์ที่จะอ่านไพ่ชุดนี้
+            'room'       => $room,
+            'started_at' => now()->getTimestamp(),
         ]);
 
         return redirect()->route('tarot.pick');
@@ -129,6 +140,10 @@ class TarotController extends Controller
         ]);
 
         $key       = $data['spread'];
+        // spread มาจากฟอร์ม — ส่งไพ่ชุดของห้องอื่นตรง ๆ ก็ต้องติดล็อกเหมือนกด "เริ่มพิธี"
+        if ($blocked = $this->roomLockBlock($request, OracleMedia::personaFor($key))) {
+            return $blocked;
+        }
         $needed    = TarotSpreads::cardCount($key);
         $cards     = $this->resolvePickedCards($data['picked'] ?? null, $needed);
         $positions = TarotSpreads::positionLabels($key);
@@ -214,6 +229,16 @@ class TarotController extends Controller
             : null;
     }
 
+    /** 🔒 ล็อกห้องระหว่างทำนาย — redirect พร้อมเหตุผล หรือ null ถ้าไปห้องนี้ได้ */
+    private function roomLockBlock(Request $request, string $room)
+    {
+        $message = ReadingRoomLock::blockMessage($request, $room);
+
+        return $message !== null
+            ? redirect()->route('tarot.index')->with('status', $message)
+            : null;
+    }
+
     private function chargeAndCreate(Request $request, $user, string $type, $cards, array $positions)
     {
         $cost = Pricing::for($type);
@@ -262,6 +287,8 @@ class TarotController extends Controller
                     'positions'    => $positions,
                     'cost'         => $cost,
                     'wallet_tx_id' => $tx?->id,
+                    // ห้องของผู้พยากรณ์ที่อ่านใบนี้ — ล็อกห้องระหว่างรอคำทำนาย (ReadingRoomLock::fromReading)
+                    'room'         => OracleMedia::personaFor(TarotSpreads::keyFromType($type)),
                     // เก็บไว้กับรายการ — แม่หมอใช้ตอนทำนาย และหลังบ้านเห็นว่าคำทำนายนี้มีดวงวันเกิดประกอบ
                     'birth_date'   => TarotSpreads::wantsBirthDate(TarotSpreads::keyFromType($type) ?? '')
                         ? $request->input('birth_date') : null,
