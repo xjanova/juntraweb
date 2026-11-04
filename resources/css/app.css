@@ -43,6 +43,12 @@
 
 .btn, .chip { -webkit-tap-highlight-color: transparent; }
 
+/* ไอคอนในปุ่ม (2026-11-04) — <svg> ที่มีแค่ viewBox ไม่มีขนาดในตัว ยืดเต็มความกว้างของปุ่ม
+   ธีม juntra-payakorn ไม่ได้กำหนดขนาดไว้ (มีแต่ธีมเก่า mae-mor-chantra) → ลูกศรกว้าง 170–300px
+   ปุ่มหน้าเลือกห้อง/ล็อกอิน/สมัคร/วอลเลตสูงเกือบ 200px · ตั้งที่ฐานจุดเดียว ทุกปุ่มทุกธีม
+   (em = ตามขนาดตัวอักษรของปุ่ม · ธีมหรือหน้าไหนอยากได้ขนาดอื่น ตั้งทับได้ เพราะ app.css โหลดก่อนธีม) */
+.btn svg, .chip svg { width: 1.15em; height: 1.15em; flex: none; }
+
 .btn:focus-visible,
 .chip:focus-visible,
 .icon-btn:focus-visible {
