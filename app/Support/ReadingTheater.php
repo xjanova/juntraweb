@@ -77,6 +77,10 @@ final class ReadingTheater
             ];
         }
 
+        // หลังไพ่: รูปที่แอดมินอัปโหลดมาก่อน ไม่มีค่อยใช้ลายหลังไพ่ของโรงละคร
+        $art = self::art($persona);
+        $back ??= $art['cardBack'];
+
         $isYear = $spread === 'year';
         $layout = match (true) {
             $isYear => 'wheel',
@@ -126,6 +130,7 @@ final class ReadingTheater
             'chapters' => $silent,
             'voice'    => $voice,
             'music'    => OracleMedia::music($persona),
+            'art'      => $art,
         ];
     }
 
@@ -394,6 +399,27 @@ final class ReadingTheater
             'url'      => $url,
             'duration' => is_numeric($v['duration'] ?? null) ? (float) $v['duration'] : $lastEnd,
             'chapters' => $chapters,
+        ];
+    }
+
+    /**
+     * ภาพฉากของห้อง (public/images/juntra/theater/) — ไฟล์ไหนยังไม่มีให้ null หน้าเว็บใช้ฉากวาดเองแทน
+     *
+     * @return array{backdrop: ?string, altar: ?string, moon: ?string, cardBack: ?string}
+     */
+    private static function art(string $persona): array
+    {
+        $url = function (string $file): ?string {
+            $path = "images/juntra/theater/{$file}";
+
+            return is_file(public_path($path)) ? asset($path) . '?v=' . filemtime(public_path($path)) : null;
+        };
+
+        return [
+            'backdrop' => $url("{$persona}-bg.webp"),
+            'altar'    => $url('altar.webp'),
+            'moon'     => $url('moon.webp'),
+            'cardBack' => $url('card-back.webp'),
         ];
     }
 

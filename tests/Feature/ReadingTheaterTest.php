@@ -185,6 +185,20 @@ class ReadingTheaterTest extends TestCase
         }
     }
 
+    public function test_stage_art_ships_for_every_room_and_backs_cards_without_admin_back(): void
+    {
+        foreach (['maemor', 'busaba', 'kunsai'] as $persona) {
+            $this->assertFileExists(public_path("images/juntra/theater/{$persona}-bg.webp"));
+        }
+        $t = ReadingTheater::build($this->threeCards());
+        $this->assertStringContainsString('/images/juntra/theater/' . $t['persona'] . '-bg.webp', (string) $t['art']['backdrop']);
+        foreach (['altar', 'moon', 'cardBack'] as $key) {
+            $this->assertNotNull($t['art'][$key], $key);
+        }
+        // ไม่มีหลังไพ่จากแอดมิน → ใช้ลายหลังไพ่ของโรงละคร
+        $this->assertSame($t['art']['cardBack'], $t['back']);
+    }
+
     public function test_unavailable_while_reading_or_failed(): void
     {
         $r = $this->threeCards();

@@ -26,8 +26,17 @@ export function createCSSStage(host, cfg, hooks) {
     root.style.setProperty('--rtc-sky', colors.sky);
 
     const skyEl = div('rtc-sky', root);
+    if (cfg.art && cfg.art.backdrop) {
+        // ภาพฉากหลังของห้อง — url มาจากเซิร์ฟเวอร์เราเอง (ReadingTheater::art) ใส่ผ่าน CSS custom property
+        skyEl.style.setProperty('--rtc-art', `url("${cfg.art.backdrop.replace(/"/g, '%22')}")`);
+        skyEl.classList.add('has-art');
+    }
     div('rtc-stars', skyEl);
     const moon = div('rtc-moon', skyEl);
+    if (cfg.art && cfg.art.moon) {
+        moon.style.setProperty('--rtc-moon', `url("${cfg.art.moon.replace(/"/g, '%22')}")`);
+        moon.classList.add('has-art');
+    }
 
     // กลุ่มดาวราศี
     let constEl = null;

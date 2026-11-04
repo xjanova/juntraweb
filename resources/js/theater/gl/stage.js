@@ -106,6 +106,9 @@ export async function createGLStage(host, cfg, hooks) {
     const uTime = { value: 0 };
     const disposables = [target];
     const track = (o) => { disposables.push(o); return o; };
+    // สร้างก่อนของที่โหลดภาพ — callback ของภาพเรียก pacer.wake() ได้ทุกเมื่อ
+    const pacer = new Pacer();
+    const billboards = [];   // ของที่หันหน้าเข้ากล้องเสมอ (เปลวเทียนห้องคุณไสย)
 
     // ───────── ท้องฟ้า + ดวงจันทร์ ─────────
     const sky = new THREE.Mesh(track(new THREE.SphereGeometry(90, 32, 16)), track(new THREE.ShaderMaterial({
@@ -123,7 +126,7 @@ export async function createGLStage(host, cfg, hooks) {
     const moonSize = cfg.persona === 'maemor' ? 19 : 14;
     const moonMat = track(new THREE.ShaderMaterial({
         vertexShader: S.QUAD_VERT, fragmentShader: S.MOON_FRAG, transparent: true, depthWrite: false,
-        uniforms: { uTime, uAmp: { value: 0 }, uGlow: { value: new THREE.Color(colors.b).lerp(new THREE.Color('#ffffff'), 0.35) } },
+        uniforms: { uTime, uAmp: { value: 0 }, uGlow: { value: new THREE.Color(colors.b).lerp(new THREE.Color('#ffffff'), 0.35) }, uMap: { value: null } },
     }));
     const moon = new THREE.Mesh(track(new THREE.PlaneGeometry(1, 1)), moonMat);
     moon.scale.setScalar(moonSize);
@@ -143,6 +146,43 @@ export async function createGLStage(host, cfg, hooks) {
     moon.position.set(stageW * 0.55 + 9, stageTop + 10, -38);
 
     const loader = new THREE.TextureLoader();
+
+    // ภาพฉากหลังของห้อง — แผ่นติดกล้อง ไกลกว่าจันทร์ (โหลดไม่ได้ = ใช้ฟ้าวาดเองต่อ)
+    const BACKDROP_DIST = 95;
+    const backdropMat = track(new THREE.ShaderMaterial({
+        vertexShader: S.QUAD_VERT, fragmentShader: S.BACKDROP_FRAG, transparent: true, depthWrite: false,
+        uniforms: {
+            uMap: { value: null }, uAlpha: { value: 0 }, uAspect: { value: 1 }, uImgAspect: { value: 1.5 },
+            uShift: { value: new THREE.Vector2() }, uZoom: { value: 0.92 },
+        },
+    }));
+    const backdrop = new THREE.Mesh(track(new THREE.PlaneGeometry(1, 1)), backdropMat);
+    backdrop.position.z = -BACKDROP_DIST;
+    backdrop.renderOrder = -9;
+    backdrop.frustumCulled = false;
+    backdrop.visible = false;
+    camera.add(backdrop);
+    scene.add(camera);
+    if (cfg.art && cfg.art.moon) {
+        loader.load(cfg.art.moon, (t) => {
+            t.colorSpace = THREE.SRGBColorSpace;
+            track(t);
+            moonMat.uniforms.uMap.value = t;
+            moonMat.defines = { MOON_TEX: '' };
+            moonMat.needsUpdate = true;
+            pacer.wake();
+        }, undefined, () => {});
+    }
+    if (cfg.art && cfg.art.backdrop) {
+        loader.load(cfg.art.backdrop, (t) => {
+            t.colorSpace = THREE.SRGBColorSpace;
+            track(t);
+            backdropMat.uniforms.uMap.value = t;
+            backdropMat.uniforms.uImgAspect.value = t.image.width / t.image.height;
+            backdrop.visible = true;
+            pacer.wake();
+        }, undefined, () => {});
+    }
     const backTex = drawCardBack(colors);
     track(backTex);
     if (cfg.back) {
@@ -217,8 +257,22 @@ export async function createGLStage(host, cfg, hooks) {
     const altarR = Math.max(3.2, stageW * 0.62);
     const altar = new THREE.Mesh(track(new THREE.PlaneGeometry(altarR * 2, altarR * 2)), track(new THREE.ShaderMaterial({
         vertexShader: S.QUAD_VERT, fragmentShader: S.ALTAR_FRAG,
-        uniforms: { uRim: { value: new THREE.Color(colors.b) }, uBase: { value: new THREE.Color(colors.sky).lerp(new THREE.Color('#000000'), 0.35) } },
+        uniforms: {
+            uRim: { value: new THREE.Color(colors.b) }, uBase: { value: new THREE.Color(colors.sky).lerp(new THREE.Color('#000000'), 0.35) },
+            uMap: { value: placeholder }, uTex: { value: 0 }, uTint: { value: new THREE.Color(colors.a) },
+            uRecolor: { value: cfg.persona === 'maemor' ? 0 : 1 },
+        },
     })));
+    if (cfg.art && cfg.art.altar) {
+        loader.load(cfg.art.altar, (t) => {
+            t.colorSpace = THREE.SRGBColorSpace;
+            t.anisotropy = 8;   // โต๊ะเอียงมากจากมุมกล้อง — ไม่มี anisotropy ลายขอบจะเบลอ
+            track(t);
+            altar.material.uniforms.uMap.value = t;
+            altar.material.uniforms.uTex.value = 1;
+            pacer.wake();
+        }, undefined, () => {});
+    }
     altar.rotation.x = -Math.PI / 2;
     altar.position.set(0, stageBottom - 0.55, 1.2);
     scene.add(altar);
@@ -395,7 +449,7 @@ export async function createGLStage(host, cfg, hooks) {
         const pg = track(new THREE.PlaneGeometry(0.22, 0.36));
         const mat = track(new THREE.ShaderMaterial({
             vertexShader: S.PETAL_VERT, fragmentShader: S.PETAL_FRAG, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-            uniforms: { uTime, uBox: { value: new THREE.Vector3(stageW * 0.7 + 1.5, stageH * 0.7 + 2, 2.5) }, uColor: { value: new THREE.Color('#ffb7d5') } },
+            uniforms: { uTime, uBox: { value: new THREE.Vector3(stageW * 0.7 + 1.5, stageH * 0.7 + 2, 2.5) }, uColor: { value: new THREE.Color('#ff86b4') } },
         }));
         const inst = new THREE.InstancedMesh(pg, mat, N);
         const seeds = new Float32Array(N * 4);
@@ -455,6 +509,10 @@ export async function createGLStage(host, cfg, hooks) {
         // เลื่อนกรอบภาพให้ศูนย์กลางเวทีอยู่กลางพื้นที่ที่ไม่ถูกแผงคำบรรยาย/แถบบนบัง
         camera.setViewOffset(width, height, 0, (safe.bottom - safe.top) / 2, width, height);
         camera.updateProjectionMatrix();
+        // ฉากหลังเต็มกรอบกล้องที่ระยะ BACKDROP_DIST (+เผื่อขอบที่ view offset เลื่อนไป)
+        const bh = 2 * BACKDROP_DIST * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * (1 + Math.abs(safe.bottom - safe.top) / height);
+        backdrop.scale.set(bh * camera.aspect, bh, 1);
+        backdropMat.uniforms.uAspect.value = camera.aspect;
         renderer.setSize(width, height, false);
         composer.setSize(width, height);
     };
@@ -462,7 +520,6 @@ export async function createGLStage(host, cfg, hooks) {
     ro.observe(host);
 
     // ───────── วนวาด ─────────
-    const pacer = new Pacer();
     const applyTier = () => {
         tier = TIERS[tierIndex];
         renderer.setPixelRatio(pixelRatio());
@@ -523,7 +580,6 @@ export async function createGLStage(host, cfg, hooks) {
     let moving = true;
     let lastDealt = null;
     let dealAt = 0;
-    const billboards = [];
     const goalV = new THREE.Vector3();
     const update = (dt) => {
         const st = hooks.getState();
@@ -671,6 +727,15 @@ export async function createGLStage(host, cfg, hooks) {
         camera.position.copy(camPos);
         camera.lookAt(camTarget);
         moon.lookAt(camera.position);
+        if (backdrop.visible) {
+            // ค่อย ๆ ปรากฏแทนฟ้าวาดเอง · เลื่อน/ซูมตามกล้องแค่นิดเดียว = อยู่ไกลมาก
+            const bu = backdropMat.uniforms;
+            settle(bu.uAlpha.value, 1, 0.01);
+            bu.uAlpha.value = damp(bu.uAlpha.value, 1, 1.4, dt);
+            sky.visible = bu.uAlpha.value < 0.99;
+            bu.uShift.value.set(camTarget.x * 0.004 + parallax.x * 0.012, (camTarget.y - stageCenterY) * 0.004 + parallax.y * 0.008);
+            bu.uZoom.value = 0.84 + 0.1 * THREE.MathUtils.clamp(camPos.distanceTo(camTarget) / overviewDist, 0.4, 1.2);
+        }
         billboards.forEach((o) => o.quaternion.copy(camera.quaternion));
 
         // มีอะไรกำลังขยับ / ประกายยังไม่จบ / กำลังลากกราฟ = ยังไม่นิ่ง (ไม่ลดเหลือ 30 fps)

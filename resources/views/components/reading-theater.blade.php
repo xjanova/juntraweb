@@ -220,9 +220,17 @@
   .rt-oracle.is-speaking { box-shadow: 0 0 0 3px color-mix(in srgb, var(--room-2, #f4cf6a) 45%, transparent), 0 0 28px 4px color-mix(in srgb, var(--room-2, #f4cf6a) 50%, transparent); }
 
   .rt-panel { position: absolute; left: 0; right: 0; bottom: 104px; margin: 0 auto; width: min(720px, calc(100% - 24px));
-              max-height: 34vh; display: flex; flex-direction: column; padding: 12px 16px; border-radius: 18px;
+              max-height: 34vh; display: flex; flex-direction: column; padding: 14px 22px; border-radius: 14px;
               background: linear-gradient(160deg, rgba(22, 12, 52, .86), rgba(7, 4, 26, .9));
               border: 1px solid rgba(255, 255, 255, .1); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 18px 40px -20px #000; }
+  /* กรอบลายไทยชุดเดียวกับการ์ดทั้งเว็บ (frame-thai.webp ตัด 9 ส่วนด้วย border-image) */
+  .rt-panel::after, .rt-curtain-box::after { content: ""; position: absolute; inset: 3px; border: 14px solid transparent;
+             border-image: url("/images/juntra/frame-thai.webp") 92 / 14px round; opacity: .42; pointer-events: none; }
+  .rt-curtain-box { position: relative; }
+  .rt[data-persona="busaba"] :is(.rt-panel, .rt-curtain-box) { background: linear-gradient(160deg, rgba(12, 32, 70, .9), rgba(4, 12, 32, .93)); }
+  .rt[data-persona="kunsai"] :is(.rt-panel, .rt-curtain-box) { background: linear-gradient(160deg, rgba(64, 10, 24, .9), rgba(18, 4, 10, .93)); }
+  .rt-curtain-box::before { content: ""; position: absolute; left: 50%; top: -40px; width: min(300px, 78%); height: 62px; transform: translateX(-50%);
+             background: url("/images/juntra/ornament-crest.webp") center / contain no-repeat; pointer-events: none; }
   .rt-kind { font-size: 11px; letter-spacing: .08em; color: var(--room-2, #f4cf6a); margin-bottom: 4px; }
   .rt-sub { overflow-y: auto; font-size: 15.5px; line-height: 1.85; overscroll-behavior: contain; white-space: pre-line; }
   .rt-phrase { color: rgba(246, 239, 224, .5); transition: color .35s; }
@@ -267,6 +275,8 @@
   /* ── แบบ CSS 2.5D (ทางถอย) ─────────────────────────────────────── */
   .rtc { position: absolute; inset: 0; overflow: hidden; --amp: 0; }
   .rtc-sky { position: absolute; inset: 0; background: radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--rtc-a) 22%, var(--rtc-sky)), var(--rtc-sky) 70%); }
+  .rtc-sky.has-art { background: radial-gradient(90% 60% at 50% 38%, rgba(0, 0, 0, .28), transparent 70%), var(--rtc-art) 50% 78% / cover no-repeat, var(--rtc-sky); }
+  .rtc-sky.has-art .rtc-stars { opacity: .35; }
   .rtc-stars { position: absolute; inset: 0; opacity: .8;
                background-image: radial-gradient(1.2px 1.2px at 12% 18%, #fff, transparent 60%), radial-gradient(1px 1px at 32% 8%, #fff, transparent 60%),
                  radial-gradient(1.4px 1.4px at 58% 22%, #fff, transparent 60%), radial-gradient(1px 1px at 76% 12%, #fff, transparent 60%),
@@ -276,6 +286,7 @@
   .rtc-moon { position: absolute; right: 8%; top: 9%; width: 72px; height: 72px; border-radius: 50%; background: #fff5d4;
               box-shadow: 0 0 calc(30px + var(--amp, 0) * 50px) calc(6px + var(--amp, 0) * 16px) color-mix(in srgb, var(--rtc-b) 45%, transparent);
               transition: box-shadow .25s; }
+  .rtc-moon.has-art { background: var(--rtc-moon) center / 119% no-repeat; }
   .rtc-const { position: absolute; left: 50%; top: 22%; width: min(60vw, 300px); transform: translate(-50%, -30%); opacity: 0; transition: opacity .8s; text-align: center; }
   .rtc-const.is-on { opacity: 1; }
   .rtc-const svg { width: 100%; height: auto; overflow: visible; }

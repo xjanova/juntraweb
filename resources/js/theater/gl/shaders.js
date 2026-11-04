@@ -61,11 +61,33 @@ void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
+// ภาพฉากหลังของห้อง — ติดกล้อง ครอบเต็มจอแบบ cover (จอกว้างเก็บครึ่งล่างที่มีรายละเอียดไว้ก่อน)
+// uShift/uZoom ขยับช้ากว่าเวที = รู้สึกว่าอยู่ไกล · หรี่ลงให้ตัวหนังสือ/ไพ่เด่น · dither กันฟ้ามืดเป็นแถบ
+export const BACKDROP_FRAG = /* glsl */ `
+uniform sampler2D uMap;
+uniform float uAlpha;
+uniform float uAspect;
+uniform float uImgAspect;
+uniform vec2 uShift;
+uniform float uZoom;
+varying vec2 vUv;
+void main() {
+  vec2 vis = uAspect > uImgAspect ? vec2(1.0, uImgAspect / uAspect) : vec2(uAspect / uImgAspect, 1.0);
+  vec2 h = 0.5 * vis * uZoom;
+  vec2 c = vec2(0.5, mix(0.5, h.y, 0.55)) + uShift;
+  c = clamp(c, h, 1.0 - h);
+  vec3 col = texture2D(uMap, c + (vUv - 0.5) * 2.0 * h).rgb;
+  col *= 0.78 - 0.22 * smoothstep(0.25, 0.85, vUv.y) * (1.0 - abs(vUv.x - 0.5) * 1.4);
+  col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 510.0;
+  gl_FragColor = vec4(col, uAlpha);
+}`;
+
 // ดวงจันทร์ — แผ่นวงกลมมีหลุมจาง ๆ + รัศมีเรืองแสงที่สว่างขึ้นตามเสียงพูด (uAmp)
 export const MOON_FRAG = /* glsl */ `
 uniform float uAmp;
 uniform float uTime;
 uniform vec3 uGlow;
+uniform sampler2D uMap;
 varying vec2 vUv;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
 float noise(vec2 p) {
@@ -81,6 +103,13 @@ void main() {
   vec3 surface = vec3(1.05, 1.0, 0.92) * (0.85 - mare * 0.28) * (1.0 - pow(r / 0.31, 4.0) * 0.35);
   float breathe = 0.5 + 0.5 * sin(uTime * 0.7);
   float halo = exp(-max(r - 0.3, 0.0) * (9.0 - uAmp * 4.0)) * (0.22 + uAmp * 0.7 + breathe * 0.06);
+#ifdef MOON_TEX
+  // ภาพจันทร์จริง (ขอบจันทร์ = 0.42 ของภาพ) — ลดความเหลืองลงหน่อยแล้วย้อมตามแสงห้อง
+  vec3 t = texture2D(uMap, clamp(0.5 + p * (0.42 / 0.31), 0.0, 1.0)).rgb * step(r, 0.369);
+  float tl = dot(t, vec3(0.299, 0.587, 0.114));
+  surface = mix(t, vec3(tl), 0.3) * mix(vec3(1.0), uGlow, 0.25) * 0.9;
+  disc = max(disc, clamp(tl * 2.5, 0.0, 1.0));
+#endif
   vec3 col = surface * disc * 1.05 + uGlow * halo * (1.0 - disc) * 0.8;
   float a = clamp(disc + halo, 0.0, 1.0);
   if (a < 0.003) discard;
@@ -149,6 +178,10 @@ void main() {
 export const ALTAR_FRAG = /* glsl */ `
 uniform vec3 uRim;
 uniform vec3 uBase;
+uniform sampler2D uMap;
+uniform float uTex;
+uniform vec3 uTint;
+uniform float uRecolor;
 varying vec2 vUv;
 void main() {
   vec2 p = vUv * 2.0 - 1.0;
@@ -157,7 +190,12 @@ void main() {
   vec3 c = uBase * (1.0 - r * 0.55);
   c += uRim * smoothstep(0.93, 0.985, r) * (1.0 - smoothstep(0.985, 1.0, r)) * 0.5;
   c += uRim * 0.08 * smoothstep(0.62, 0.6, abs(r - 0.6) + 0.6) ;
-  gl_FragColor = vec4(c, 1.0);
+  // ภาพโต๊ะลงรักขอบลายกนก (พื้นม่วง) — ห้องอื่นย้อมเฉพาะพื้นมืดเป็นสีห้อง ลายทองคงเดิม
+  vec3 t = texture2D(uMap, vUv).rgb;
+  float lum = dot(t, vec3(0.299, 0.587, 0.114));
+  float base = (1.0 - smoothstep(0.06, 0.2, lum)) * uRecolor;
+  t = mix(t, uTint * lum * 3.2, base) * 0.85;
+  gl_FragColor = vec4(mix(c, t, uTex), 1.0);
 }`;
 
 // เส้นกราฟชีวิต — ลากตาม uDraw (u ของท่อ = ระยะตามเส้น) สีตามจุดดวงผ่าน vertex color
@@ -289,6 +327,7 @@ void main() {
   vec2 p = vUv * 2.0 - 1.0;
   float shape = 1.0 - (p.x * p.x) / max(0.05, (1.0 - p.y * p.y) * 0.35) - p.y * p.y * 0.2;
   if (shape < 0.0) discard;
-  vec3 c = mix(uColor, vec3(1.0), (1.0 - vUv.y) * 0.5) * vShade;
-  gl_FragColor = vec4(c * 0.9, 0.82);
+  // โคนกลีบอ่อนลงนิดเดียว — มากกว่านี้กลีบดูขาวเหมือนหิมะหลัง tone mapping
+  vec3 c = mix(uColor, vec3(1.0, 0.9, 0.94), (1.0 - vUv.y) * 0.25) * vShade;
+  gl_FragColor = vec4(c * 0.62, 0.78);
 }`;
