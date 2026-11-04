@@ -1,4 +1,4 @@
-{{-- สไลด์ภาพแม่หมอใน hero — เฟดวนไปเรื่อย ๆ (เจ้าของสั่ง 2026-11-04)
+{{-- สไลด์ภาพแม่หมอเป็นพื้นหลังเต็มจอของ hero — เฟดวนไปเรื่อย ๆ (เจ้าของสั่ง 2026-11-04)
 
      โหลดไว: ภาพแรกเท่านั้นที่โหลดพร้อมหน้า (fetchpriority=high + srcset 600/1200)
      ภาพที่เหลือเก็บ URL ไว้ใน data-* แล้วค่อยใส่ตอนหน้าโหลดเสร็จ — ไม่แย่งแบนด์วิดท์ภาพแรก
@@ -36,7 +36,7 @@
     @php($srcset = asset($small) . ' 600w, ' . asset($s['src']) . ' 1200w')
     <img @if ($k === 0) src="{{ asset($s['src']) }}" srcset="{{ $srcset }}" fetchpriority="high"
          @else data-src="{{ asset($s['src']) }}" data-srcset="{{ $srcset }}" @endif
-         sizes="(max-width: 900px) 80vw, 440px" width="1200" height="1500" decoding="async"
+         sizes="100vw" width="1200" height="1500" decoding="async"
          alt="{{ $s['alt'] }}" class="hero-slide" :class="{ 'is-active': i === {{ $k }} }">
   @endforeach
   @if ($slides->count() > 1)
