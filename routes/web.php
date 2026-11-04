@@ -17,6 +17,7 @@ use App\Http\Controllers\PalmistryController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ReadingController;
 use App\Http\Controllers\ReferralController;
+use App\Http\Controllers\SeoController;
 use App\Http\Controllers\TarotController;
 use App\Http\Controllers\WalletController;
 use Illuminate\Support\Facades\Route;
@@ -46,6 +47,11 @@ Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
 });
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
+
+// SEO (2026-11-04) — สร้างสดจากระบบ · ลบ public/robots.txt แล้ว ไม่งั้นไฟล์นิ่งจะบังเส้นนี้
+Route::get('/robots.txt', [SeoController::class, 'robots'])->name('seo.robots');
+Route::get('/sitemap.xml', [SeoController::class, 'sitemap'])->name('seo.sitemap');
+Route::get('/llms.txt', [SeoController::class, 'llms'])->name('seo.llms');
 
 // Affiliate invite landing — the Juntra app shares จันทรา.online/r/<code>.
 // Captures the referral code in a cookie + lands on home (was a 404 before).

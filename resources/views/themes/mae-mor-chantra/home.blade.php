@@ -251,6 +251,8 @@
   </div>
 </section>
 
+<x-dbd-certificate />
+
 <section class="canvas testimonials" id="voices">
   <div style="text-align:center;max-width:760px;margin:0 auto 0">
     <div class="eyebrow" style="display:inline-flex">เสียงจากผู้ที่เคยใช้บริการ</div>
