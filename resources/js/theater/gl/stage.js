@@ -10,7 +10,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { cardLayout, graphLayout, CARD_W, CARD_H, TONE_COLOR, VERDICT_COLOR, ROOM_COLORS } from '../layout.js';
-import { CONSTELLATIONS } from '../constellations.js';
+import { CONSTELLATIONS, starSize, starDelays } from '../constellations.js';
 import { Pacer, Governor, TIERS, startTier } from './pacer.js';
 import * as S from './shaders.js';
 
@@ -334,32 +334,61 @@ export async function createGLStage(host, cfg, hooks) {
     const constel = new THREE.Group();
     constel.position.set(0, stageTop + 5.5, -7);
     scene.add(constel);
-    let constLines = null;
-    let constCount = 0;
-    const constMat = { stars: null, lines: null };
+    // ตำแหน่งดาวจริง (constellations.js) · ดาวขนาดตามโชติมาตร · เส้นลากต่อเนื่องตามลำดับ มีประกายวิ่งนำหัวเส้น
+    // ดาวแต่ละดวงสว่างวาบตอนเส้นมาถึง แล้วกะพริบเบา ๆ — uDraw ตัวเดียวคุมทั้งชุด (0..1)
+    const constMat = { stars: null, lines: null, spark: null };
+    const constDraw = { value: 0 };
+    let constSeg = null;   // [ax, ay, bx, by] ต่อเส้น — หาตำแหน่งหัวเส้นให้ประกาย
+    let spark = null;
     const shape = cfg.zodiac ? CONSTELLATIONS[cfg.zodiac.slug] : null;
     if (shape) {
         const scale = 2.6;
-        const sp = new Float32Array(shape.stars.length * 3);
+        const n = shape.stars.length;
+        const sp = new Float32Array(n * 3);
         shape.stars.forEach((s, k) => { sp[k * 3] = s[0] * scale; sp[k * 3 + 1] = s[1] * scale; sp[k * 3 + 2] = 0; });
+        const delays = starDelays(shape);
         const sg = track(new THREE.BufferGeometry());
         sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+        sg.setAttribute('aSize', new THREE.BufferAttribute(Float32Array.from(shape.mag, starSize), 1));
+        sg.setAttribute('aDelay', new THREE.BufferAttribute(Float32Array.from(delays), 1));
+        sg.setAttribute('aPhase', new THREE.BufferAttribute(Float32Array.from({ length: n }, () => Math.random() * 6.283), 1));
         constMat.stars = track(new THREE.ShaderMaterial({
-            vertexShader: `uniform float uA; varying float vAlpha; void main(){ vec4 mv = modelViewMatrix*vec4(position,1.0); gl_Position = projectionMatrix*mv; gl_PointSize = 26.0*(10.0/-mv.z); vAlpha = uA; }`,
-            fragmentShader: S.POINT_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-            uniforms: { uA: { value: 0 }, uColor: { value: new THREE.Color('#fff6dc').multiplyScalar(1.6) } },
+            vertexShader: S.CONST_STAR_VERT, fragmentShader: S.CONST_STAR_FRAG,
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+            uniforms: { uA: { value: 0 }, uTime, uDraw: constDraw, uColor: { value: new THREE.Color('#fff6dc').multiplyScalar(1.6) } },
         }));
         constel.add(new THREE.Points(sg, constMat.stars));
-        const lp = new Float32Array(shape.lines.length * 6);
-        shape.lines.forEach(([a, b], k) => {
+
+        const L = shape.lines.length;
+        const lp = new Float32Array(L * 6);
+        const lt = new Float32Array(L * 2);
+        constSeg = shape.lines.map(([a, b], k) => {
             lp.set([sp[a * 3], sp[a * 3 + 1], 0, sp[b * 3], sp[b * 3 + 1], 0], k * 6);
+            lt.set([k / L, (k + 1) / L], k * 2);
+            return [sp[a * 3], sp[a * 3 + 1], sp[b * 3], sp[b * 3 + 1]];
         });
         const lg = track(new THREE.BufferGeometry());
         lg.setAttribute('position', new THREE.BufferAttribute(lp, 3));
-        constMat.lines = track(new THREE.LineBasicMaterial({ color: new THREE.Color(colors.b).multiplyScalar(1.4), transparent: true, opacity: 0 }));
-        constLines = new THREE.LineSegments(lg, constMat.lines);
-        constCount = shape.lines.length;
-        constel.add(constLines);
+        lg.setAttribute('aT', new THREE.BufferAttribute(lt, 1));
+        constMat.lines = track(new THREE.ShaderMaterial({
+            vertexShader: S.CONST_LINE_VERT, fragmentShader: S.CONST_LINE_FRAG,
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+            uniforms: { uA: { value: 0 }, uDraw: constDraw, uColor: { value: new THREE.Color(colors.b).lerp(new THREE.Color('#ffffff'), 0.25).multiplyScalar(1.3) } },
+        }));
+        constel.add(new THREE.LineSegments(lg, constMat.lines));
+
+        // ประกายหัวเส้น
+        const kg = track(new THREE.BufferGeometry());
+        kg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+        constMat.spark = track(new THREE.ShaderMaterial({
+            vertexShader: `uniform float uA; varying float vAlpha; void main(){ vec4 mv = modelViewMatrix*vec4(position,1.0); gl_Position = projectionMatrix*mv; gl_PointSize = 54.0*(10.0/-mv.z); vAlpha = uA; }`,
+            fragmentShader: S.CONST_STAR_FRAG.replace('varying float vTw;', 'const float vTw = 1.0;'),
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+            uniforms: { uA: { value: 0 }, uColor: { value: new THREE.Color(colors.b).lerp(new THREE.Color('#ffffff'), 0.6).multiplyScalar(1.8) } },
+        }));
+        spark = new THREE.Points(kg, constMat.spark);
+        spark.frustumCulled = false;
+        constel.add(spark);
     }
 
     // ───────── ฝุ่นแสงจันทร์ ─────────
@@ -565,7 +594,8 @@ export async function createGLStage(host, cfg, hooks) {
         if (!pacer.tick(now)) {
             return;
         }
-        const realDt = now - lastDraw;
+        // timestamp ของ rAF เฟรมแรกมาก่อน performance.now() ที่จับไว้ได้ — ห้าม dt ติดลบ (damp จะพุ่งเลยเป้า)
+        const realDt = Math.max(0, now - lastDraw);
         lastDraw = now;
         governor.sample(realDt, (1000 / pacer.hz) * pacer.every, pacer.idle, now);
         const dt = Math.min(0.05, realDt / 1000);
@@ -666,10 +696,22 @@ export async function createGLStage(host, cfg, hooks) {
         if (constMat.stars) {
             const tA = st.sky ? 1 : 0;
             settle(constMat.stars.uniforms.uA.value, tA);
-            constMat.stars.uniforms.uA.value = damp(constMat.stars.uniforms.uA.value, tA, 2, dt);
-            constMat.lines.opacity = constMat.stars.uniforms.uA.value * 0.85;
-            const draw = st.sky ? Math.ceil(Math.min(1, st.progress * 1.6 + 0.15) * constCount) : constCount;
-            constLines.geometry.setDrawRange(0, draw * 2);
+            const a = damp(constMat.stars.uniforms.uA.value, tA, 2, dt);
+            constMat.stars.uniforms.uA.value = a;
+            constMat.lines.uniforms.uA.value = a * 0.9;
+            // ลากเส้นตามเวลาที่เล่าบทพื้นดวง (จบราว 55% ของบท) — นอกบทนี้ค้างเต็มรูปไว้ตอนจางออก
+            const tD = st.sky ? Math.min(1, st.progress * 1.8 + 0.04) : 1;
+            settle(constDraw.value, tD, 0.001);
+            constDraw.value = damp(constDraw.value, tD, 3.2, dt);
+            // ประกายวิ่งนำหัวเส้น จางเมื่อลากครบ
+            const L = constSeg.length;
+            const head = Math.min(L - 1e-4, Math.max(0, constDraw.value * L));
+            const seg = constSeg[Math.floor(head)];
+            const f = head - Math.floor(head);
+            spark.geometry.attributes.position.setXYZ(0, seg[0] + (seg[2] - seg[0]) * f, seg[1] + (seg[3] - seg[1]) * f, 0.02);
+            spark.geometry.attributes.position.needsUpdate = true;
+            constMat.spark.uniforms.uA.value = a * (1 - THREE.MathUtils.smoothstep(constDraw.value, 0.97, 1));
+            if (st.sky && constDraw.value < 0.999) moving = true;
             if (zodiacLabel) {
                 anchor.position.set(constel.position.x, constel.position.y - 2.2, constel.position.z);
                 place(zodiacLabel, proj(anchor, tmpP), constMat.stars.uniforms.uA.value);

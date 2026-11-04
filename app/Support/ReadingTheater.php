@@ -3,7 +3,9 @@
 namespace App\Support;
 
 use App\Models\Reading;
+use App\Services\Thaiprompt\JuntraServerClient;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * 🎭 โรงละครคำทำนาย (2026-11-04) — แปลงคำทำนายไพ่ 1 ใบรายการเป็น "บท" ให้หน้าเว็บเล่น
@@ -92,7 +94,9 @@ final class ReadingTheater
         $graph = self::graph($cards, $by, $isYear);
         $zodiac = self::zodiac($by['birth'][0] ?? null, data_get($reading->payload, 'birth_date'));
 
-        $silent = self::silentChapters($reading, $by, $cards, $graph, $verdict, $isYear, (string) ($room['short'] ?? 'แม่หมอ'));
+        $life = self::life($reading);
+
+        $silent = self::silentChapters($reading, $by, $cards, $graph, $verdict, $isYear, (string) ($room['short'] ?? 'แม่หมอ'), $life);
         $voice = self::voice($reading, $cards, $isYear);
 
         // มีเสียงจริง → tone/energy จากบทเสียงใช้กับกราฟแบบที่ไม่มีป้าย (รายปีใช้ป้ายของคำทำนายเท่านั้น)
@@ -127,6 +131,7 @@ final class ReadingTheater
             'zodiac'   => $zodiac,
             'verdict'  => $verdict,
             'graph'    => $graph,
+            'life'     => $life,
             'chapters' => $silent,
             'voice'    => $voice,
             'music'    => OracleMedia::music($persona),
@@ -139,7 +144,7 @@ final class ReadingTheater
      *
      * @return list<array<string, mixed>>
      */
-    private static function silentChapters(Reading $reading, array $by, array $cards, array $graph, array $verdict, bool $isYear, string $oracle): array
+    private static function silentChapters(Reading $reading, array $by, array $cards, array $graph, array $verdict, bool $isYear, string $oracle, ?array $life = null): array
     {
         $out = [];
 
@@ -165,7 +170,11 @@ final class ReadingTheater
                     : "ไพ่ 1 ใบ ตอบเรื่องที่ถาม";
             }
         }
-        $out[] = self::chapter('graph', 'กราฟชีวิต', $isYear ? 'กราฟดวง 12 เดือน' : 'เส้นทางของไพ่', $story);
+        if ($life !== null) {
+            // มีกราฟมหาทักษา — บรรยายตัวเลขบนกราฟก่อน แล้วค่อยต่อเรื่องราวของไพ่
+            $story = trim(self::lifeStory($life)."\n\n".$story);
+        }
+        $out[] = self::chapter('graph', 'กราฟชีวิต', $life !== null ? 'กราฟชีวิตตามตำรามหาทักษา' : ($isYear ? 'กราฟดวง 12 เดือน' : 'เส้นทางของไพ่'), $story);
 
         // ไพ่ทีละใบ — หัวข้อ 🃏 ตามเลขตำแหน่ง · รายปีใช้ 📅 ตามลำดับเดือน · ไม่มีหัวข้อ = ความหมายตำราของใบนั้น
         $cardSections = [];
@@ -297,6 +306,71 @@ final class ReadingTheater
         }
 
         return ['kind' => $isYear ? 'year' : 'path', 'points' => $points, 'ring' => $ring];
+    }
+
+    /**
+     * 📈 กราฟชีวิตมหาทักษา (อายุ 0–100) ชุดเดียวกับรูปที่ลูกค้า LINE ได้ — คำนวณที่ Thaiprompt
+     *
+     * วันเกิด: ที่กรอกตอนเปิดไพ่ก่อน (อาจเป็นดวงของคนอื่น) ไม่มีค่อยใช้โปรไฟล์ · เวลา/ที่เกิดใช้จากโปรไฟล์
+     * เฉพาะเมื่อวันเกิดตรงกับโปรไฟล์ (ห้ามเอาเวลาเกิดของเจ้าของบัญชีไปผูกดวงคนอื่น)
+     * จำผลถึงสิ้นวัน (อายุ/ดาวแทรกเปลี่ยนตามวัน) · ล้ม = จำ "ไม่มี" 15 นาที ไม่ให้หน้าเว็บรอซ้ำทุกครั้ง
+     *
+     * @return array<string, mixed>|null null = ไม่มีวันเกิด/ต่อ Thaiprompt ไม่ได้ → โรงละครใช้กราฟเส้นทางไพ่ตามเดิม
+     */
+    private static function life(Reading $reading): ?array
+    {
+        $profile = $reading->user?->profile;
+        $own = $profile?->birth_date?->format('Y-m-d');
+        $date = data_get($reading->payload, 'birth_date');
+        $date = is_string($date) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : $own;
+        if ($date === null) {
+            return null;
+        }
+        $mine = $date === $own;
+        $time = $mine && is_string($profile->birth_time) && preg_match('/^(\d{2}:\d{2})/', $profile->birth_time, $m) ? $m[1] : null;
+        $place = $mine ? (trim((string) $profile->birth_place) ?: null) : null;
+
+        $key = 'theater:life:'.md5(implode('|', [$date, $time, $place, now()->format('Y-m-d')]));
+        $hit = Cache::get($key);
+        if ($hit !== null) {
+            return $hit === 'none' ? null : $hit;
+        }
+        $g = app(JuntraServerClient::class)->lifeGraph($date, $time, $place);
+        Cache::put($key, $g ?? 'none', $g !== null ? now()->endOfDay() : now()->addMinutes(15));
+
+        return $g;
+    }
+
+    /** คำบรรยายบทกราฟชีวิตจากตัวเลขบนกราฟ (โหมดเงียบ) */
+    private static function lifeStory(array $life): string
+    {
+        $cur = $life['current'] ?? [];
+        $lines = [];
+        $p = $cur['period'] ?? null;
+        $lines[] = 'ตอนนี้อายุ '.($cur['age'] ?? '-').' ปี'
+            .($p ? ' · ดาวเสวย'.$p['planet_th'].' อายุ '.self::age($p['from_age']).'–'.self::age($p['to_age']).' ปี (ช่วง'.$p['tone'].')' : '');
+        if (! empty($cur['sub'])) {
+            $lines[] = 'ดาวแทรก'.$cur['sub']['planet_th'].' ถึงราว '.Carbon::parse($cur['sub']['until_date'])->locale('th')->translatedFormat('j M').' '.(Carbon::parse($cur['sub']['until_date'])->year + 543);
+        }
+        foreach ([['peaks', 'ช่วงรุ่งของชีวิต'], ['lows', 'ช่วงควรระวัง']] as [$k, $label]) {
+            // 3 จุดเด่นสุด (มาเรียงตามคะแนน) แต่บรรยายเรียงตามอายุให้อ่านเป็นลำดับชีวิต
+            $ages = array_map(fn ($x) => $x['age'], array_slice((array) ($life[$k] ?? []), 0, 3));
+            sort($ages);
+            if ($ages !== []) {
+                $lines[] = $label.': '.implode(' · ', array_map(fn ($a) => 'อายุ '.$a, $ages));
+            }
+        }
+        foreach (array_slice((array) ($life['card'] ?? []), 0, 2) as $l) {
+            $lines[] = self::plain((string) $l);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /** อายุเป็นปีเต็มหรือทศนิยม 1 ตำแหน่ง (ช่วงดาวเสวยลงตัวเป็นปีเสมอ) */
+    private static function age(float|int $a): string
+    {
+        return fmod((float) $a, 1.0) === 0.0 ? (string) (int) $a : number_format((float) $a, 1);
     }
 
     /**

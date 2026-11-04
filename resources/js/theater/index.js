@@ -9,6 +9,7 @@
 import { Timeline, revealPlan, visualState } from './timeline.js';
 import { AudioRig } from './audio.js';
 import { createCSSStage } from './css/stage.js';
+import { renderLife } from './life.js';
 
 export function webglUsable() {
     try {
@@ -216,5 +217,5 @@ export function openTheater({ host, cfg, ui, autoplay = true, startIndex = 0, fo
 }
 
 // หน้าเว็บ (Alpine ใน components/reading-theater) เรียกผ่านตัวแปรนี้ — โมดูลโหลดแบบ defer จึงแจ้งเมื่อพร้อม
-window.JuntraTheater = { openTheater, webglUsable };
+window.JuntraTheater = { openTheater, webglUsable, renderLife };
 window.dispatchEvent(new Event('juntra-theater:loaded'));

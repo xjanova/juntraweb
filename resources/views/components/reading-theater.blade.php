@@ -67,6 +67,31 @@
         </nav>
       </header>
 
+      {{-- 📈 กราฟชีวิตมหาทักษา (อายุ 0–100) ตัวเลขชุดเดียวกับรูปใน LINE — ขึ้นเฉพาะบทกราฟชีวิต --}}
+      @if (! empty($theater['life']))
+        @php
+          $lifeNow = $theater['life']['current'] ?? [];
+          $lifePeriod = $lifeNow['period'] ?? null;
+          $lifeAge = fn ($a) => fmod((float) $a, 1.0) === 0.0 ? (int) $a : number_format((float) $a, 1);
+        @endphp
+        <div class="rt-life" :class="{ 'is-on': kind === 'graph' && !curtain }" aria-hidden="true" x-ref="life">
+          <div class="rt-life-card">
+            <div class="rt-life-head">
+              <span class="rt-life-title">กราฟชีวิต ตามตำรามหาทักษา</span>
+              <span class="rt-life-now-text">
+                ตอนนี้อายุ <strong>{{ $lifeNow['age'] ?? '-' }}</strong>
+                @if ($lifePeriod)
+                  · ดาวเสวย{{ $lifePeriod['planet_th'] }} อายุ {{ $lifeAge($lifePeriod['from_age']) }}–{{ $lifeAge($lifePeriod['to_age']) }} ปี
+                  <em class="rt-life-tone rt-life-tone-{{ ['ดี' => 'good', 'ร้าย' => 'bad'][$lifePeriod['tone']] ?? 'mid' }}">ช่วง{{ $lifePeriod['tone'] }}</em>
+                @endif
+              </span>
+            </div>
+            <div class="rt-life-chart" x-ref="lifeChart"></div>
+            <div class="rt-life-legend">อายุ (ปี) · <span class="is-gold">เส้นทอง</span> = คะแนนรายปี · <span class="is-good">▲ ช่วงรุ่ง</span> · <span class="is-bad">▼ ช่วงระวัง</span> · <span class="is-now">┊ ตอนนี้</span></div>
+          </div>
+        </div>
+      @endif
+
       {{-- ผู้พยากรณ์ของห้อง (คลิป idle เดิม) — แสงวงรอบตัวตอนกำลังเล่า --}}
       <div class="rt-oracle" :class="{ 'is-speaking': playing && audioMode }" aria-hidden="true">
         <x-oracle-stage :persona="$theater['persona']" :poster="$poster" :alt="$room['name'] ?? ''" />
@@ -290,8 +315,13 @@
   .rtc-const { position: absolute; left: 50%; top: 22%; width: min(60vw, 300px); transform: translate(-50%, -30%); opacity: 0; transition: opacity .8s; text-align: center; }
   .rtc-const.is-on { opacity: 1; }
   .rtc-const svg { width: 100%; height: auto; overflow: visible; }
-  .rtc-const line { stroke: var(--rtc-b); stroke-width: .02; opacity: .8; }
-  .rtc-const circle { fill: #fff6dc; filter: drop-shadow(0 0 .05px #fff); }
+  .rtc-const line { stroke: var(--rtc-b); stroke-width: .02; opacity: .8; stroke-dasharray: 1; stroke-dashoffset: 0; }
+  .rtc-const circle { fill: #fff6dc; filter: drop-shadow(0 0 .05px #fff); transform-box: fill-box; transform-origin: center; }
+  .rtc-const.is-on line { animation: rtc-const-draw .55s calc(.3s + var(--i) * 4s) ease-out both; }
+  .rtc-const.is-on circle { animation: rtc-const-star .7s calc(.3s + var(--d) * 4s) cubic-bezier(.3, 1.6, .5, 1) both, rtc-const-tw 3s calc(1s + var(--d) * 4s) ease-in-out infinite; }
+  @keyframes rtc-const-draw { from { stroke-dashoffset: 1; } }
+  @keyframes rtc-const-star { from { opacity: 0; transform: scale(0); } 60% { transform: scale(1.8); } }
+  @keyframes rtc-const-tw { 50% { opacity: .65; } }
   .rtc-const-label { margin-top: 8px; color: var(--rtc-b); font-size: 16px; }
   .rtc-board { position: absolute; left: 50%; transform: translateX(-50%); transition: opacity .6s; }
   .rtc.is-sky .rtc-board { opacity: .15; }
@@ -326,6 +356,57 @@
   .rtc-ring-arc { fill: none; stroke-width: 6; stroke-linecap: round; stroke-dasharray: 0 1; transition: stroke-dasharray 1.2s ease-out; }
   .rtc-ring-label { position: relative; padding: 0 14%; text-align: center; font-weight: 600; font-size: clamp(13px, 3.4vw, 18px); display: flex; flex-direction: column; gap: 2px; }
   .rtc-ring-label small { font-weight: 400; font-size: 11px; opacity: .7; }
+
+  /* 📈 กราฟชีวิตมหาทักษา — สถานะสุดท้ายเป็นค่าตั้งต้น (ลดการเคลื่อนไหว = เห็นครบทันที) อนิเมชันแค่ "จาก" */
+  .rt-life { position: absolute; left: 0; right: 0; top: calc(var(--rt-safe-top, 110px) + 6px); bottom: calc(var(--rt-safe-bottom, 230px) + 2px);
+             display: grid; place-items: center; padding: 0 12px; z-index: 1; pointer-events: none;
+             opacity: 0; transform: translateY(14px) scale(.98); transition: opacity .55s ease, transform .7s cubic-bezier(.2, .8, .2, 1); }
+  .rt-life.is-on { opacity: 1; transform: none; }
+  .rt-life-card { position: relative; width: min(980px, 100%); height: 100%; max-height: 460px; display: flex; flex-direction: column;
+                  padding: 12px 16px 10px; border-radius: 16px; overflow: hidden;
+                  background: radial-gradient(120% 90% at 50% 0%, rgba(40, 26, 90, .78), rgba(8, 5, 28, .9));
+                  border: 1px solid rgba(244, 213, 141, .28); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 24px 60px -24px #000;
+                  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .rt[data-persona="busaba"] .rt-life-card { background: radial-gradient(120% 90% at 50% 0%, rgba(18, 44, 96, .8), rgba(4, 12, 32, .92)); }
+  .rt[data-persona="kunsai"] .rt-life-card { background: radial-gradient(120% 90% at 50% 0%, rgba(86, 16, 34, .8), rgba(18, 4, 10, .92)); }
+  .rt-life-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+                         background: linear-gradient(105deg, transparent 35%, rgba(255, 236, 180, .1) 50%, transparent 65%) -100% 0 / 220% 100% no-repeat; }
+  .rt-life.is-on .rt-life-card::after { animation: rt-life-sheen 1.6s .2s ease-out both; }
+  .rt-life-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; padding-bottom: 6px; }
+  .rt-life-title { font-size: 12px; letter-spacing: .06em; color: #f4d58d; }
+  .rt-life-now-text { font-size: 13.5px; color: rgba(246, 239, 224, .88); }
+  .rt-life-now-text strong { font-size: 20px; color: #f4d58d; padding: 0 2px; }
+  .rt-life-tone { font-style: normal; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin-left: 4px; font-size: 12px; }
+  .rt-life-tone-good { color: #0b2a19; background: #7ee0a1; }
+  .rt-life-tone-bad { color: #3a0d08; background: #ff8a7a; }
+  .rt-life-tone-mid { color: #1c1c2e; background: #e8e1c8; }
+  .rt-life-chart { position: relative; flex: 1; min-height: 0; }
+  .rt-life-chart svg { position: absolute; inset: 0; display: block; overflow: visible; font-family: inherit; }
+  .rt-life-legend { font-size: 11px; color: rgba(246, 239, 224, .58); text-align: right; padding-top: 4px; }
+  .rt-life-legend .is-gold { color: #f4d58d; } .rt-life-legend .is-good { color: #7ee0a1; }
+  .rt-life-legend .is-bad { color: #ff8a7a; } .rt-life-legend .is-now { color: #ff9d70; }
+  .rt-life-grid { stroke: rgba(255, 255, 255, .12); stroke-width: 1; }
+  .rt-life-axis { fill: rgba(246, 239, 224, .5); }
+  .rt-life-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 0; }
+  .rt-life-glow { opacity: .55; }
+  .rt-life.is-on .rt-life-chart:not(.is-static) .rt-life-band { animation: rt-life-band .7s calc(.15s + var(--d)) cubic-bezier(.2, .9, .3, 1.2) both; transform-box: fill-box; transform-origin: 50% 100%; }
+  .rt-life.is-on .rt-life-chart:not(.is-static) .rt-life-line { animation: rt-life-draw 2.4s .9s cubic-bezier(.45, .05, .25, 1) both; }
+  .rt-life.is-on .rt-life-chart:not(.is-static) .rt-life-area { animation: rt-life-fade 1.4s 1.6s ease both; }
+  .rt-life.is-on .rt-life-chart:not(.is-static) .rt-life-mark { animation: rt-life-pop .55s var(--d) cubic-bezier(.3, 1.6, .5, 1) both; }
+  .rt-life.is-on .rt-life-chart:not(.is-static) .rt-life-now { animation: rt-life-fade .6s var(--d) ease both; }
+  .rt-life.is-on .rt-life-pulse { animation: rt-life-pulse 1.8s 3.6s ease-out infinite; }
+  @keyframes rt-life-band { from { opacity: 0; transform: scaleY(.2); } }
+  @keyframes rt-life-draw { from { stroke-dashoffset: 1; } }
+  @keyframes rt-life-fade { from { opacity: 0; } }
+  @keyframes rt-life-pop { 0% { opacity: 0; transform: scale(0); } }
+  @keyframes rt-life-pulse { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(3); opacity: 0; } }
+  @keyframes rt-life-sheen { from { background-position: -100% 0; } to { background-position: 200% 0; } }
+  @media (max-width: 640px) {
+    .rt-life { padding: 0 8px; }
+    .rt-life-card { padding: 10px 10px 8px; border-radius: 12px; }
+    .rt-life-now-text { font-size: 12.5px; }
+    .rt-life-legend { font-size: 10px; text-align: center; }
+  }
 
   @media (prefers-reduced-motion: reduce) {
     .rt *, .rt *::before, .rt *::after { transition-duration: .01ms !important; animation: none !important; }
@@ -389,7 +470,7 @@ document.addEventListener('alpine:init', () => {
         try { this.musicOn = localStorage.getItem('theater:music') !== '0'; } catch (e) {}
         this.onPop = () => { if (this.open) { this.pushed = false; this.teardown(); } };
         window.addEventListener('popstate', this.onPop);
-        this.onResize = () => this.measure();
+        this.onResize = () => { this.measure(); if (this.kind === 'graph') this.drawLife(false); };
         window.addEventListener('resize', this.onResize);
         // เปิดจากหน้าประวัติ (?theater=1) — ต้องมีการแตะก่อนเล่นเสียง จึงขึ้นม่านให้แตะ
         if (opts.autoOpen) {
@@ -468,6 +549,7 @@ document.addEventListener('alpine:init', () => {
           this.phrases = phrasesOf(c.text);
           this.phrase = 0;
           this.$refs.sub && (this.$refs.sub.scrollTop = 0);
+          if (c.kind === 'graph') this.$nextTick(() => { this.measure(); this.drawLife(true); });
         }
         try {
           if (c.kind === 'outro') localStorage.removeItem(storeKey);
@@ -510,7 +592,19 @@ document.addEventListener('alpine:init', () => {
         if (!ctrl || !this.$refs.top) return;
         const H = this.$refs.dialog.clientHeight;
         const panelTop = this.$refs.panel.getBoundingClientRect().top;
-        ctrl.setSafe({ top: this.$refs.top.offsetHeight, bottom: Math.max(0, H - panelTop + 8) });
+        const safe = { top: this.$refs.top.offsetHeight, bottom: Math.max(0, H - panelTop + 8) };
+        ctrl.setSafe(safe);
+        // กล่องกราฟชีวิตวางในช่องเดียวกับเวที (ใต้แถบบน เหนือกล่องคำบรรยาย)
+        this.$refs.dialog.style.setProperty('--rt-safe-top', safe.top + 'px');
+        this.$refs.dialog.style.setProperty('--rt-safe-bottom', safe.bottom + 'px');
+      },
+
+      /** วาดกราฟชีวิตใหม่ — เข้าบทกราฟ = เล่นอนิเมชันใหม่ทุกครั้ง · จอเปลี่ยนขนาด = วาดนิ่ง */
+      drawLife(animate = true) {
+        const host = this.$refs.lifeChart;
+        if (!host || !cfg.life || !window.JuntraTheater || !window.JuntraTheater.renderLife) return;
+        host.classList.toggle('is-static', !animate);
+        window.JuntraTheater.renderLife(host, cfg.life);
       },
 
       toggle() { ctrl && ctrl.toggle(); },

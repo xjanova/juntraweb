@@ -331,3 +331,60 @@ void main() {
   vec3 c = mix(uColor, vec3(1.0, 0.9, 0.94), (1.0 - vUv.y) * 0.25) * vShade;
   gl_FragColor = vec4(c * 0.62, 0.78);
 }`;
+
+// 🌠 กลุ่มดาวราศี — ดาวขนาดตามโชติมาตร วาบตอนเส้นมาถึง (aDelay ≤ uDraw) แล้วกะพริบเบา ๆ
+export const CONST_STAR_VERT = /* glsl */ `
+uniform float uA;
+uniform float uTime;
+uniform float uDraw;
+attribute float aSize;
+attribute float aDelay;
+attribute float aPhase;
+varying float vAlpha;
+varying float vTw;
+void main() {
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mv;
+  float since = uDraw - aDelay;
+  float on = smoothstep(-0.02, 0.03, since);
+  float flare = on * (1.0 - smoothstep(0.0, 0.14, since));
+  vTw = 0.82 + 0.18 * sin(uTime * 2.1 + aPhase) * sin(uTime * 0.73 + aPhase * 1.7);
+  gl_PointSize = 34.0 * aSize * (1.0 + flare * 1.6) * (10.0 / -mv.z);
+  vAlpha = uA * on * (1.0 + flare);
+}`;
+
+export const CONST_STAR_FRAG = /* glsl */ `
+uniform vec3 uColor;
+varying float vAlpha;
+varying float vTw;
+void main() {
+  vec2 p = gl_PointCoord * 2.0 - 1.0;
+  float r = dot(p, p);
+  if (r > 1.0) discard;
+  float core = exp(-r * 9.0);
+  float halo = exp(-r * 2.6) * 0.35;
+  float spikes = (exp(-abs(p.x) * 26.0) + exp(-abs(p.y) * 26.0)) * (1.0 - r) * 0.45;
+  float a = (core + halo + spikes) * vAlpha * vTw;
+  gl_FragColor = vec4(uColor * a, a);
+}`;
+
+// เส้นกลุ่มดาว — aT = ตำแหน่งบนเส้นทั้งชุด 0..1 · เลย uDraw = ยังไม่ลาก · ใกล้หัวเส้นสว่างกว่า
+export const CONST_LINE_VERT = /* glsl */ `
+attribute float aT;
+varying float vT;
+void main() {
+  vT = aT;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+export const CONST_LINE_FRAG = /* glsl */ `
+uniform vec3 uColor;
+uniform float uA;
+uniform float uDraw;
+varying float vT;
+void main() {
+  if (vT > uDraw) discard;
+  float hot = 1.0 - smoothstep(0.0, 0.08, uDraw - vT);
+  float a = uA * (0.55 + 0.9 * hot);
+  gl_FragColor = vec4(uColor * a, a);
+}`;

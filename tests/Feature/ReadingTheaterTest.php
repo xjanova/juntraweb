@@ -3,11 +3,14 @@
 namespace Tests\Feature;
 
 use App\Models\Reading;
+use App\Models\Setting;
 use App\Models\TarotCard;
 use App\Models\TarotReadingCard;
 use App\Models\User;
 use App\Support\ReadingTheater;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -197,6 +200,86 @@ class ReadingTheaterTest extends TestCase
         }
         // ไม่มีหลังไพ่จากแอดมิน → ใช้ลายหลังไพ่ของโรงละคร
         $this->assertSame($t['art']['cardBack'], $t['back']);
+    }
+
+    /** กราฟชีวิตจาก Thaiprompt (ย่อ) — เก็บคำขอที่ส่งไว้ตรวจ */
+    private function fakeLifeGraph(int $status = 200): \ArrayObject
+    {
+        Setting::put('thaiprompt_base_url', 'https://tp.test', 'thaiprompt');
+        Setting::put('thaiprompt_client_id', 'cid', 'thaiprompt');
+        Setting::put('thaiprompt_client_secret', 'secret', 'thaiprompt', true);
+        $sent = new \ArrayObject;
+        Http::fake(function (HttpRequest $request) use ($status, $sent) {
+            if (str_contains($request->url(), '/oauth/token')) {
+                return Http::response(['access_token' => 'srv', 'expires_in' => 3600]);
+            }
+            $sent[] = $request->data();
+
+            return Http::response(['success' => $status === 200, 'data' => $status === 200 ? [
+                'max_age' => 100,
+                'current' => ['age' => 36, 'age_decimal' => 36.4, 'period' => ['planet_th' => 'พฤหัสบดี', 'from_age' => 33, 'to_age' => 39, 'tone' => 'ดี'], 'sub' => null],
+                'years' => [[0, 50], [1, 52]],
+                'periods' => [['planet' => 5, 'planet_th' => 'พฤหัสบดี', 'from_age' => 33, 'to_age' => 39, 'hex' => '#f08a24', 'tone' => 'ดี', 'text' => 'ได้ลาภ']],
+                'peaks' => [
+                    ['age' => 27, 'year_be' => 2560, 'score' => 80, 'main_planet_th' => 'ศุกร์', 'sub_planet_th' => 'พุธ'],
+                    ['age' => 12, 'year_be' => 2545, 'score' => 78, 'main_planet_th' => 'ศุกร์', 'sub_planet_th' => 'ศุกร์'],
+                ],
+                'lows' => [], 'card' => ['พฤหัสบดีเสวยอายุ (ช่วงดี): ได้ลาภ'], 'notes' => [],
+            ] : null], $status);
+        });
+
+        return $sent;
+    }
+
+    public function test_life_graph_from_thaiprompt_drives_the_graph_chapter(): void
+    {
+        $sent = $this->fakeLifeGraph();
+        $owner = User::factory()->create();
+        $owner->profile()->create(['birth_date' => '1990-05-16', 'birth_time' => '21:30', 'birth_place' => 'กรุงเทพ']);
+        $reading = $this->reading('tarot_three', "## 🃏 ใบที่ 1 · อดีต\nเรื่องเก่า\n", [['the-fool', 'อดีต', false]], [], $owner);
+
+        $t = ReadingTheater::build($reading);
+
+        $this->assertSame(36, $t['life']['current']['age']);
+        $graph = collect($t['chapters'])->firstWhere('kind', 'graph');
+        $this->assertSame('กราฟชีวิตตามตำรามหาทักษา', $graph['title']);
+        $this->assertStringContainsString('ดาวเสวยพฤหัสบดี อายุ 33–39 ปี (ช่วงดี)', $graph['text']);
+        // จุดเด่นมาเรียงตามคะแนน แต่บรรยายเรียงตามอายุ
+        $this->assertStringContainsString('ช่วงรุ่งของชีวิต: อายุ 12 · อายุ 27', $graph['text']);
+        // วันเกิดของเจ้าของบัญชีเอง → ส่งเวลา/ที่เกิดไปด้วย
+        $this->assertSame(['birth_date' => '1990-05-16', 'birth_time' => '21:30', 'birth_place' => 'กรุงเทพ'], $sent[0]);
+
+        // ครั้งต่อไปในวันเดียวกันใช้ผลที่จำไว้ ไม่ยิงซ้ำ
+        ReadingTheater::build($reading);
+        $this->assertCount(1, $sent);
+
+        $this->get(route('tarot.show', $reading))->assertDontSee('rt-life', false); // ไม่ใช่เจ้าของ = ไม่มีโรงละคร
+        $this->actingAs($owner)->get(route('tarot.show', $reading))->assertSee('rt-life-chart', false)->assertSee('ตอนนี้อายุ', false);
+    }
+
+    public function test_someone_elses_birth_date_never_gets_the_owners_birth_time(): void
+    {
+        $sent = $this->fakeLifeGraph();
+        $owner = User::factory()->create();
+        $owner->profile()->create(['birth_date' => '1990-05-16', 'birth_time' => '21:30', 'birth_place' => 'กรุงเทพ']);
+        $reading = $this->reading('tarot_three', "## 🃏 ใบที่ 1 · อดีต\nเรื่องเก่า\n", [['the-fool', 'อดีต', false]], ['birth_date' => '1975-11-23'], $owner);
+
+        ReadingTheater::build($reading);
+
+        $this->assertSame(['birth_date' => '1975-11-23'], $sent[0]);
+    }
+
+    public function test_life_graph_failure_keeps_the_card_path_graph_and_is_not_retried_every_view(): void
+    {
+        $sent = $this->fakeLifeGraph(503);
+        $reading = $this->threeCards(['birth_date' => '1990-05-16']);
+
+        $t = ReadingTheater::build($reading);
+        ReadingTheater::build($reading);
+
+        $this->assertNull($t['life']);
+        $this->assertSame('เส้นทางของไพ่', collect($t['chapters'])->firstWhere('kind', 'graph')['title']);
+        $this->assertCount(1, $sent);
     }
 
     public function test_unavailable_while_reading_or_failed(): void

@@ -3,7 +3,7 @@
 // ตัวคุมเรียก render(state) ตอนเปลี่ยนบท/ทุก 250 ms แล้วให้ CSS transition ทำส่วนที่เหลือ
 
 import { cardLayout, graphLayout, CARD_W, CARD_H, TONE_COLOR, VERDICT_COLOR, ROOM_COLORS } from '../layout.js';
-import { CONSTELLATIONS } from '../constellations.js';
+import { CONSTELLATIONS, starSize, starDelays } from '../constellations.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = (tag, attrs = {}) => {
@@ -44,10 +44,19 @@ export function createCSSStage(host, cfg, hooks) {
     if (shape) {
         constEl = div('rtc-const', skyEl);
         const s = svg('svg', { viewBox: '-1.2 -1.2 2.4 2.4', 'aria-hidden': 'true' });
-        shape.lines.forEach(([a, b]) => s.appendChild(svg('line', {
-            x1: shape.stars[a][0], y1: -shape.stars[a][1], x2: shape.stars[b][0], y2: -shape.stars[b][1],
-        })));
-        shape.stars.forEach(([x, y]) => s.appendChild(svg('circle', { cx: x, cy: -y, r: 0.045 })));
+        // ลากทีละเส้นตามลำดับ (--i) · ดาวขึ้นตอนเส้นมาถึง (--d) · ขนาดตามโชติมาตร
+        const L = shape.lines.length || 1;
+        shape.lines.forEach(([a, b], i) => {
+            const ln = svg('line', { x1: shape.stars[a][0], y1: -shape.stars[a][1], x2: shape.stars[b][0], y2: -shape.stars[b][1], pathLength: '1' });
+            ln.style.setProperty('--i', (i / L).toFixed(3));
+            s.appendChild(ln);
+        });
+        const delays = starDelays(shape);
+        shape.stars.forEach(([x, y], k) => {
+            const c = svg('circle', { cx: x, cy: -y, r: (0.022 + 0.04 * starSize(shape.mag[k])).toFixed(3) });
+            c.style.setProperty('--d', delays[k].toFixed(3));
+            s.appendChild(c);
+        });
         constEl.appendChild(s);
         const lab = div('rtc-const-label', constEl);
         lab.textContent = `${cfg.zodiac.glyph} ${cfg.zodiac.name}`;
