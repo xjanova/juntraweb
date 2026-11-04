@@ -2,6 +2,9 @@
    ทุกคลาสขึ้นต้น ct- และอยู่ใต้ .ct — เว็บมี .btn/.chip/.pos-label/.panel ของตัวเองอยู่แล้ว ห้ามชน
    ลำดับชั้น: ฉาก → ตัวละคร/แผงถาด (1) → ไพ่ 3D (2) → ป้าย (4) → HUD (5) → แผ่นยืนยัน (6) */
 html.ct-open, html.ct-open body { overflow: hidden; }
+/* hidden ต้องชนะ display ของคลาส (เช่น .ct-fallback เป็น grid) — ไม่งั้นกล่องสำรองบังไพ่ คลิกไม่ได้
+   ปุ่มดูพิธีซ้ำใช้ .btn ของเว็บ (มี display) ก็ต้องซ่อนจริงจนกว่าโรงละครจะพร้อม */
+.ct [hidden], .ct[hidden], [data-ct-open][hidden] { display: none !important; }
 .ct {
   --ct-night: #12091f;
   --ct-ink: #f7f1e8;
