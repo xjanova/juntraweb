@@ -9,6 +9,8 @@ export default defineConfig({
                 'resources/js/app.js',
                 // 🎭 โรงละครคำทำนาย (หน้าผลไพ่) — three.js ถูกแยก chunk และโหลดเมื่อเปิดโรงละครเท่านั้น
                 'resources/js/theater/index.js',
+                // 🃏 โรงละครเปิดไพ่ (หน้าเลือกไพ่ + หน้าผล) — three.js + HUD ลายทอง
+                'resources/js/card-theater/index.js',
                 'resources/css/themes/mae-mor-chantra.css',
                 'resources/css/themes/juntra-payakorn.css',
             ],
