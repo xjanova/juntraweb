@@ -137,13 +137,13 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
     Route::get('/conversation/{conversation}', 'show')
         ->middleware('auth')
         ->name('show');
-    // 🌙 (2026-11-03 FB web-only) ลูกค้าที่ย้ายมาจากแชทเพจ FB — แม่หมอคุยต่อจากเรื่องที่ทักไว้ในเพจ
+    // 🌙 (2026-11-03 FB web-only) ลูกค้าที่ย้ายมาจากแชทเพจ FB — 🔮 (2026-11-04) ลงหน้าเลือกห้องดูดวง
     Route::get('/continue/{handoff}', 'continue')
-        ->middleware(['auth', 'throttle:chat-send'])
+        ->middleware('auth')
         ->whereUuid('handoff')
         ->name('continue');
-    // ลิงก์เสีย/ถูกตัดทอน (ไม่ใช่ uuid) → ไปห้องแชทปกติ ไม่ให้ลูกค้าเจอหน้า 404
-    Route::redirect('/continue/{any?}', '/chat')
+    // ลิงก์เสีย/ถูกตัดทอน (ไม่ใช่ uuid) → หน้าเลือกห้อง ไม่ให้ลูกค้าเจอหน้า 404
+    Route::redirect('/continue/{any?}', '/chat?pick=1')
         ->where('any', '.*')
         ->name('continue.invalid');
 });
