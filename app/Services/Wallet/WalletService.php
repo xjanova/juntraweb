@@ -323,6 +323,9 @@ class WalletService
      * up to the available balance (never forces the wallet negative — if the
      * user already spent part of it, the shortfall is recorded in meta) and
      * flips the original top-up to 'refunded'.
+     *
+     * @deprecated หน้าแอดมินเปลี่ยนไปใช้ AdminWalletService::rollback() แล้ว (2026-11-04) —
+     *             มี audit + กันกดซ้ำ และปฏิเสธเมื่อยอดไม่พอแทนการหักเท่าที่มี
      */
     public function reverseTopup(WalletTransaction $tx, User $admin, ?string $reason = null): WalletTransaction
     {
@@ -415,7 +418,12 @@ class WalletService
         });
     }
 
-    /** Manual signed admin adjustment (promo credit, correction). Never goes negative. */
+    /**
+     * Manual signed admin adjustment (promo credit, correction). Never goes negative.
+     *
+     * @deprecated หน้าแอดมินเลิกใช้แล้ว (2026-11-04) — ใช้ AdminWalletService::adjust() ที่มี audit,
+     *             กันกดซ้ำ, ยอดอ้างอิง และปฏิเสธเมื่อยอดไม่พอ (ตัวนี้หักเท่าที่มีแบบเงียบ ๆ)
+     */
     public function adjust(User $user, float $signedAmount, string $reason, User $admin): WalletTransaction
     {
         $this->assertAdmin($admin);

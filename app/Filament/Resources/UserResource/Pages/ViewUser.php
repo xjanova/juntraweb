@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\UserResource\Pages;
 
 use App\Filament\Resources\UserResource;
+use App\Filament\Support\WalletAdminForms;
 use App\Models\User;
 use Filament\Actions;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -17,7 +18,36 @@ class ViewUser extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [Actions\EditAction::make()];
+        return [
+            // จัดการเงินจากหน้ารายละเอียดสมาชิก — ใช้ฟอร์มและกติกาเดียวกับปุ่มในตาราง
+            Actions\Action::make('adjustWallet')
+                ->label('เติม / หัก / คืนเงิน')
+                ->icon('heroicon-o-banknotes')
+                ->color('success')
+                ->visible(fn () => UserResource::canManageWalletOf($this->record))
+                ->modalHeading(fn () => 'จัดการเงินในวอลเลตของ ' . $this->record->name)
+                ->modalSubmitActionLabel('ยืนยันทำรายการ')
+                ->fillForm(fn () => WalletAdminForms::adjustFill($this->record->fresh('wallet')))
+                ->steps(WalletAdminForms::adjustSteps())
+                ->action(function (array $data) {
+                    WalletAdminForms::handleAdjust($this->record, $data);
+                    $this->record->refresh();
+                }),
+            Actions\Action::make('transferWallet')
+                ->label('โอนเครดิต')
+                ->icon('heroicon-o-arrows-right-left')
+                ->color('info')
+                ->visible(fn () => UserResource::canManageWalletOf($this->record))
+                ->modalHeading(fn () => 'โอนเครดิตจากวอลเลตของ ' . $this->record->name)
+                ->modalSubmitActionLabel('ยืนยันโอน')
+                ->fillForm(fn () => WalletAdminForms::transferFill($this->record->fresh('wallet')))
+                ->steps(WalletAdminForms::transferSteps())
+                ->action(function (array $data) {
+                    WalletAdminForms::handleTransfer($this->record, $data);
+                    $this->record->refresh();
+                }),
+            Actions\EditAction::make(),
+        ];
     }
 
     public function infolist(Infolist $infolist): Infolist

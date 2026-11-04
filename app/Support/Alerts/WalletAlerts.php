@@ -167,12 +167,16 @@ final class WalletAlerts
             $amount = (float) $adj->amount;
             $reverse = $adj->reference_type === 'wallet_transaction';
             $reason = (string) (((array) $adj->meta)['reason'] ?? '');
+            // รายการจากหน้าจัดการเงิน (AdminWalletService) บอกชนิดไว้ใน meta.admin_action
+            $adminAction = ((array) $adj->meta)['admin_action'] ?? null;
+            $label = $adminAction !== null
+                ? 'แอดมิน' . (\App\Models\WalletAdminAdjustment::ACTION_LABELS[$adminAction] ?? $adminAction) . ' ' . ($amount >= 0 ? '+' : '−')
+                : ($reverse ? 'เรียกคืนการเติมเงิน ' : ($amount >= 0 ? 'แอดมินเพิ่มเครดิต ' : 'แอดมินหักเครดิต '));
 
             AdminAlerts::send(new Alert(
                 key: 'wallet-adjust:' . $adj->id,
                 level: Alert::INFO,
-                title: ($reverse ? 'เรียกคืนการเติมเงิน ' : ($amount >= 0 ? 'แอดมินเพิ่มเครดิต ' : 'แอดมินหักเครดิต '))
-                    . '฿' . number_format(abs($amount), 2),
+                title: $label . '฿' . number_format(abs($amount), 2),
                 body: 'โดย ' . ($adj->approver?->name ?? ('#' . $adj->approved_by)) . ($reason !== '' ? "\nเหตุผล: " . $reason : ''),
                 facts: array_filter([
                     'ลูกค้า' => self::who($adj),
