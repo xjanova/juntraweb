@@ -30,7 +30,18 @@ html.ct-open, html.ct-open body { overflow: hidden; }
 .ct-actor.faint { opacity: .45; }
 .ct-actor img { position: absolute; left: 50%; bottom: -3%; height: 100%; transform: translateX(-50%); transform-origin: 50% 100%;
   animation: ct-breathe 5.5s ease-in-out infinite; filter: drop-shadow(0 0 18px rgba(200, 160, 255, .25)); }
-@keyframes ct-breathe { 50% { transform: translateX(-50%) translateY(-.6%) scaleY(1.008); } }
+@keyframes ct-breathe {
+  0%, 100% { transform: translateX(-50%) rotate(0deg); }
+  30% { transform: translateX(-50%) translateY(-.6%) scaleY(1.008) rotate(.35deg); }
+  70% { transform: translateX(-50%) translateY(-.3%) scaleY(1.004) rotate(-.35deg); }
+}
+/* พยักหน้า + เรืองแสงวูบ ทุกครั้งที่พลิกไพ่ — ใช้ property translate แยกจาก transform ของกล่อง จึงไม่ชนกัน */
+.ct-actor.nod { animation: ct-nod .9s ease-out; }
+@keyframes ct-nod {
+  0% { translate: 0 0; filter: none; }
+  35% { translate: 0 1.6%; filter: brightness(1.25) drop-shadow(0 0 24px var(--ct-room-a)); }
+  100% { translate: 0 0; filter: none; }
+}
 .ct-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(120% 90% at 50% 45%, transparent 40%, rgba(5, 2, 10, .78) 100%); }
 .ct canvas.ct-gl { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; display: block; touch-action: none; }
 
@@ -194,5 +205,5 @@ html.ct-open .oracle-voice-fab .oracle-voice-label { display: none; }
   .ct-sheet { bottom: 70px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ct-cta.pulse, .ct-actor img { animation: none; }
+  .ct-cta.pulse, .ct-actor img, .ct-actor.nod { animation: none; }
 }

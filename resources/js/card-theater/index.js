@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import './theater.css';
+import { sfx, music, voice, holdVoice, soundOn } from './sound';
 
 const STEPS = ['เข้าห้อง', 'สับไพ่', 'เลือกไพ่', 'วางไพ่', 'รอคำทำนาย', 'เปิดคำทำนาย'];
 const CW = 0.62;
@@ -200,6 +201,9 @@ function createTheater(root, cfg, useGL) {
     const R = cfg.room;
     const SP = cfg.spread;
     const N = SP.labels.length;
+    // บทเล่าเรื่องหลังเปิดไพ่ครบ (หน้าผลเท่านั้น) — ไม่มี = จบที่สรุปแบบเดิม
+    const STORY = !isPick && cfg.story && Array.isArray(cfg.story.chapters) && cfg.story.chapters.length ? cfg.story : null;
+    const tale = { i: -1, p: -1, phrases: [], playing: false, audio: null, voiced: false, timer: 0, tick: 0, wait: 0 };
     const $ = (sel) => root.querySelector(sel);
     const el = {
         bg: $('.ct-bg'), actor: $('.ct-actor'), actorImg: $('.ct-actor img'), tray: $('.ct-tray'), trayCount: $('.ct-count'),
@@ -403,6 +407,11 @@ function createTheater(root, cfg, useGL) {
         el.actor.classList.toggle('on', mode !== '');
         el.actor.classList.toggle('faint', mode === 'faint');
     }
+    // ผู้พยากรณ์พยักหน้า + เรืองแสงวูบ ทุกครั้งที่พลิกไพ่
+    function nod() {
+        el.actor.classList.remove('nod'); void el.actor.offsetWidth; el.actor.classList.add('nod');
+    }
+    let endSaid = false;
     function stageRect(full = false) {
         const short = !portrait && H < 520;
         const top = (portrait ? 70 : short ? 70 : 128) + safeTop;
@@ -423,7 +432,7 @@ function createTheater(root, cfg, useGL) {
         camera.aspect = W / H; camera.updateProjectionMatrix();
         visH = 2 * CAM_Z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)); visW = visH * camera.aspect; ppu = H / visH;
         if (state.phase === 'pick' || state.phase === 'confirm') { layoutFan(true); placeTray(true); }
-        if (['deal', 'wait', 'reveal', 'done'].includes(state.phase)) placeSpread(true);
+        if (['deal', 'wait', 'reveal', 'done', 'story'].includes(state.phase)) placeSpread(true);
     }
 
     // ───────── HUD ─────────
@@ -474,11 +483,15 @@ function createTheater(root, cfg, useGL) {
         if (g) g.firstChild.textContent = state.picked.length ? 'เลือกใหม่' : 'สุ่มให้';
     }
     function storyBar() {
-        const on = portrait && state.phase === 'reveal' && N > 1;
-        el.storybar.classList.toggle('on', on);
+        // เปิดไพ่ = จุดละใบ · เล่าเรื่อง = จุดละบท
+        const telling = state.phase === 'story' && STORY;
+        const n = telling ? STORY.chapters.length : N;
+        const at = telling ? tale.i : state.revealAt;
+        const on = portrait && (state.phase === 'reveal' || telling) && n > 1;
+        el.storybar.classList.toggle('on', !!on);
         if (!on) return;
-        if (el.storybar.children.length !== N) { el.storybar.replaceChildren(); for (let k = 0; k < N; k++) el.storybar.append(h('i')); }
-        [...el.storybar.children].forEach((d, k) => d.classList.toggle('on', k <= state.revealAt));
+        if (el.storybar.children.length !== n) { el.storybar.replaceChildren(); for (let k = 0; k < n; k++) el.storybar.append(h('i')); }
+        [...el.storybar.children].forEach((d, k) => d.classList.toggle('on', k <= at));
     }
     function pill() {
         el.spreadPill.replaceChildren(h('i', null, '✦'), `ชุดเปิดไพ่: ${SP.name.replace(/\s*\d+\s*ใบ$/, '')}`, h('span', 'ct-sep'), `${N} ใบ`);
@@ -496,6 +509,7 @@ function createTheater(root, cfg, useGL) {
         await wait(700);
         if (run !== state.run) return;
         for (let round = 0; round < 3; round++) {
+            sfx('riffle');
             cards.forEach((c, i) => {
                 const u = c.userData; const side = i % 2 ? 1 : -1; u.delay = (i % 26) * 0.006; u.rate = 9;
                 u.tgt = pose(side * (1.0 + (i % 7) * 0.05), baseY + Math.sin(i) * 0.15, i * 0.004 + 0.3, side * 0.35, Math.PI, 1.25);
@@ -588,8 +602,9 @@ function createTheater(root, cfg, useGL) {
         burst({ x: c.position.x, y: c.position.y, z: c.position.z });
         placeTray(false); updateFanTargets(); setCounter();
         const k = state.picked.length;
+        sfx('pick', k - 1);
         say(k < N ? [`ใบที่ ${k} · `, { em: SP.labels[k - 1] }, ` • เลือกต่ออีก ${N - k} ใบ`] : ['ครบแล้ว • กด ', { em: 'ยืนยันการเลือก' }], '', 'hint');
-        if (k === N) window.dispatchEvent(new CustomEvent('oracle-say', { detail: { key: 'pick_complete' } }));
+        if (k === N) voice('pick_complete');
     }
     async function autoPick() {
         const run = state.run;
@@ -620,6 +635,7 @@ function createTheater(root, cfg, useGL) {
             enough ? { label: cfg.cost > 0 ? `เปิดไพ่ · ${cfg.costText}` : 'เปิดไพ่ ✦', id: 'cast', pulse: true, on: cast }
                 : { label: 'เติมเงิน', href: cfg.topupUrl }]);
         say(enough ? ['ตรวจดูแล้วกด ', { em: 'เปิดไพ่' }, ` • ${R.self}จะวางไพ่และเริ่มอ่านทันที`] : 'ยอดเงินไม่พอ เติมเงินแล้วกลับมาเปิดไพ่ชุดนี้ต่อได้เลย', '', 'hint');
+        if (!enough) voice('credit_low');
     }
     function closeSheet() { el.sheet.classList.remove('on'); }
 
@@ -641,7 +657,7 @@ function createTheater(root, cfg, useGL) {
             slots.forEach((m) => { m.visible = false; }); el.tray.classList.remove('on');
             say(`${R.self}วางไพ่ลงตามตำแหน่ง…`, '', 'hint');
             cards.forEach((c) => { if (!c.userData.picked) { const u = c.userData; u.delay = Math.random() * 0.3; u.rate = 4; u.tgt = pose(c.position.x * 1.2, c.position.y - visH * 0.7, -1, c.rotation.z, Math.PI, 0.9, 0); } });
-            state.picked.forEach((c, k) => { const u = c.userData; u.delay = k * 0.12; u.rate = 5; u.glowT = 0.35; });
+            state.picked.forEach((c, k) => { const u = c.userData; u.delay = k * 0.12; u.rate = 5; u.glowT = 0.35; setTimeout(() => sfx('deal'), 180 + k * 120); });
             placeSpread(false);
             await wait(700 + N * 120);
             showLabels();
@@ -665,11 +681,13 @@ function createTheater(root, cfg, useGL) {
         spreadCards().forEach((c, k) => {
             const u = c.userData; const p = fit.at[k];
             const up = u.flipped ? 0 : Math.PI;
-            const focus = state.phase === 'reveal' && k === state.revealAt;
-            const dim = state.phase === 'reveal' && state.revealAt >= 0 && !focus;
+            const showing = state.phase === 'reveal' || state.phase === 'story';
+            const focus = showing && k === state.revealAt;
+            // เล่าบทที่ไม่ใช่ไพ่ใบไหน (พื้นดวง/กราฟ/สรุป) = หรี่ไพ่ทั้งโต๊ะ ให้เห็นผู้พยากรณ์ที่กำลังเล่า
+            const dim = showing && !focus && (state.revealAt >= 0 || state.phase === 'story');
             u.rate = snap ? 30 : u.rate || 6;
             u.tgt = focus ? pose(p.x + (cx - p.x) * pull, p.y + (cy - p.y) * pull, 2.4, 0, up, fit.s * zoom) : pose(p.x, p.y, k * 0.01, p.r, up, fit.s);
-            u.dimT = dim ? 0.38 : 1;
+            u.dimT = dim ? (state.phase === 'story' && state.revealAt < 0 ? 0.5 : 0.38) : 1;
         });
     }
     const spreadCards = () => (isPick ? state.picked : cards);
@@ -707,7 +725,8 @@ function createTheater(root, cfg, useGL) {
     let pollT = 0;
     function waitForReading() {
         renderSteps(4); oracle('faint'); dealResult();
-        setTimeout(startRing, 600);
+        setTimeout(() => { startRing(); sfx('ritual'); }, 600);
+        music.start(R.music);
         const started = Date.now();
         const lines = ['กำลังเชื่อมคำถามกับดวงชะตา…', 'ถอดพลังของไพ่ทีละใบ…', 'เรียบเรียงคำทำนาย…'];
         el.ritual.style.opacity = 1;
@@ -737,6 +756,9 @@ function createTheater(root, cfg, useGL) {
     let revealTimer = 0;
     async function beginReveal() {
         const run = state.run;
+        // ผลฟันธงพูดตอนเปิดไพ่ครบ ไม่ใช่ตอนเข้าหน้า (ก่อนลูกค้าเห็นไพ่)
+        holdVoice(); endSaid = false;
+        music.start(R.music);
         renderSteps(4); oracle('faint');
         say(`${R.self}อ่านไพ่ของคุณเสร็จแล้ว • กำลังเปิดทีละใบ`, SP.name);
         await texReady();
@@ -753,6 +775,7 @@ function createTheater(root, cfg, useGL) {
         storage(`ct-revealed-${cfg.readingId}`, '1');
         state.phase = 'reveal'; renderSteps(5); state.revealAt = -1; state.playing = true; oracle('faint');
         actions([{ label: '⏸', icon: true, aria: 'หยุด/เล่นต่อ', id: 'play', on: togglePlay }, { label: 'เปิดใบถัดไป', on: () => next(true) }]);
+        voice('reveal_cards');
         next();
     }
     function togglePlay() {
@@ -778,13 +801,16 @@ function createTheater(root, cfg, useGL) {
     }
     function next(manual) {
         if (state.phase !== 'reveal') return;
-        if (state.revealAt >= N - 1) { finish(); return; }
+        if (state.revealAt >= N - 1) { finish(true); return; }
         state.revealAt++;
         const c = cards[state.revealAt]; const u = c.userData;
         u.flipped = true; u.rate = 7; u.glowT = 1;
+        sfx('flip');
+        nod();
         cards.forEach((o, k) => { if (k !== state.revealAt) o.userData.glowT = o.userData.flipped ? 0.25 : 0.35; });
         placeSpread(false);
-        setTimeout(() => burst({ x: c.position.x, y: c.position.y, z: 0.6 }), 260);
+        const at = state.revealAt;
+        setTimeout(() => { burst({ x: c.position.x, y: c.position.y, z: 0.6 }); sfx('chime', at); }, 260);
         tell(state.revealAt);
         if (manual) clearTimeout(revealTimer);
         storyBar();
@@ -801,16 +827,171 @@ function createTheater(root, cfg, useGL) {
         const b = action('play'); if (b) b.textContent = '▶';
         showCard(state.revealAt - 1);
     }
-    function finish() {
+    // auto = เพิ่งเปิดไพ่ใบสุดท้าย → ต่อเข้าช่วงเล่าเรื่องเอง · ปุ่ม "กลับไปที่สรุป" = แค่สรุป
+    function finish(auto = false) {
+        stopTale();
         state.phase = 'done'; state.playing = false; state.revealAt = -1; clearTimeout(revealTimer); renderSteps(6);
         cards.forEach((c) => { c.userData.glowT = 0.3; });
-        placeSpread(false);
+        placeSpread(false); oracle('faint');
+        if (auto) {
+            sfx('finish');
+            bridge('done', { readingId: cfg.readingId, room: R.key, spread: SP.key, cards: cfg.cards.map((c, k) => ({ position: SP.labels[k], name: c.name, reversed: !!c.reversed })) });
+        }
+        if (auto && STORY) {
+            // เว้นจังหวะให้เห็นไพ่ครบทั้งโต๊ะก่อน แล้วผู้พยากรณ์เริ่มเล่าเอง
+            say(`เปิดไพ่ครบ ${N} ใบแล้ว • ${R.self}จะร้อยไพ่ทั้งหมดเป็นเรื่องเดียวให้ฟัง…`, SP.name);
+            actions([{ label: 'ข้ามไปอ่าน', ghost: true, on: () => close() }, { label: 'ฟังเลย ✦', pulse: true, on: () => tell0() }]);
+            const run = state.run;
+            tale.wait = setTimeout(() => { if (run === state.run && state.phase === 'done') tell0(); }, REDUCED ? 1800 : 3200);
+            return;
+        }
         say(`${R.self}เปิดไพ่ครบ ${N} ใบแล้ว • คำทำนายเต็มรออยู่ด้านล่าง แตะไพ่ใบไหนก็ได้เพื่อดูซ้ำ`, SP.name);
-        bridge('done', { readingId: cfg.readingId, room: R.key, spread: SP.key, cards: cfg.cards.map((c, k) => ({ position: SP.labels[k], name: c.name, reversed: !!c.reversed })) });
-        actions([{ label: 'ดูอีกครั้ง', ghost: true, on: replay }, { label: 'อ่านคำทำนาย ✦', pulse: true, on: () => close() }]);
+        if (!endSaid && !tale.voiced) { endSaid = true; setTimeout(() => voice(cfg.voiceEnd), 900); }
+        actions(STORY
+            ? [{ label: '↻', icon: true, aria: 'ดูเปิดไพ่อีกครั้ง', on: replay }, { label: 'ฟังเรื่องเล่า', ghost: true, on: () => tell0() }, { label: 'อ่านคำทำนาย ✦', pulse: true, on: () => close() }]
+            : [{ label: 'ดูอีกครั้ง', ghost: true, on: replay }, { label: 'อ่านคำทำนาย ✦', pulse: true, on: () => close() }]);
+    }
+
+    // ───────── เล่าเรื่อง: ผู้พยากรณ์ร้อยคำทำนายทั้งหมดเป็นเรื่องเดียว บนโต๊ะเดิม ─────────
+    // บทมาจาก ReadingTheater (เซิร์ฟเวอร์) · มีเสียงคำทำนาย + เปิดลำโพง = คำบรรยายเดินตามเสียง · ไม่มี = เดินตามความยาวข้อความ
+    // บทที่เล่าถึงไพ่ใบไหน = ใบนั้นลอยขึ้นมากลางโต๊ะ · บทอื่น = ไพ่หรี่ลง ผู้พยากรณ์เด่นขึ้น
+    // แบ่งข้อความเป็นช่วงสั้นพออ่านทัน (ภาษาไทยเว้นวรรคระหว่างประโยค) · ขึ้นบรรทัดใหม่ = ตัดช่วงเสมอ
+    function phrasesOf(text) {
+        const max = portrait ? 70 : 96;
+        const out = [];
+        String(text || '').split(/\n+/).forEach((para) => {
+            let cur = '';
+            para.split(/\s+/).filter(Boolean).forEach((w) => {
+                if (cur && (cur.length + 1 + w.length) > max) { out.push(cur); cur = w; } else cur = cur ? `${cur} ${w}` : w;
+            });
+            if (cur) out.push(cur);
+        });
+        return out.length ? out : [''];
+    }
+    function stopTale() {
+        clearTimeout(tale.timer); clearTimeout(tale.wait); clearInterval(tale.tick);
+        if (tale.audio) tale.audio.pause();
+        tale.playing = false;
+        music.lower(false);
+    }
+    function tell0() {
+        if (!STORY) return;
+        clearTimeout(tale.wait);
+        state.phase = 'story'; renderSteps(5); tale.playing = true; tale.i = -1; tale.voiced = false;
+        holdVoice();
+        cards.forEach((c) => { c.userData.flipped = true; });
+        taleActions();
+        if (STORY.voice && soundOn()) voiceFrom(0); else taleGo(0);
+    }
+    function taleActions() {
+        actions([
+            { label: tale.playing ? '⏸' : '▶', icon: true, aria: 'หยุด/เล่าต่อ', id: 'tplay', on: taleToggle },
+            { label: '⏭', icon: true, aria: 'บทถัดไป', on: () => taleJump(tale.i + 1) },
+            { label: 'อ่านคำทำนาย ✦', ghost: true, on: () => close() },
+        ]);
+    }
+    // เสียงคำทำนาย: เล่นจากเวลาเริ่มของบท k · เล่นไม่ได้ (ยังไม่ได้แตะหน้า/ไฟล์เสีย) = เล่าแบบตัวหนังสือต่อ
+    function voiceFrom(k) {
+        const c = STORY.chapters[k];
+        if (!tale.audio) {
+            tale.audio = new Audio(STORY.voice);
+            tale.audio.preload = 'auto';
+            tale.audio.addEventListener('ended', () => { if (state.phase === 'story' && tale.voiced) taleEnd(); });
+        }
+        const a = tale.audio; const run = state.run;
+        tale.voiced = true; music.lower(true);
+        try { a.currentTime = Math.max(0, c.start || 0); } catch (e) { /* ยังโหลดไม่ถึง — เริ่มต้นไฟล์ */ }
+        taleGo(k, false);
+        const p = a.play();
+        const fail = () => {
+            if (run !== state.run || state.phase !== 'story') return;
+            tale.voiced = false; music.lower(false); clearInterval(tale.tick); taleNext();
+        };
+        if (p && p.catch) p.catch(fail);
+        clearInterval(tale.tick);
+        tale.tick = setInterval(voiceTick, 200);
+    }
+    function voiceTick() {
+        const a = tale.audio;
+        if (!a || state.phase !== 'story' || !tale.voiced || a.paused) return;
+        if (!soundOn()) { // ปิดลำโพงกลางเรื่อง → เล่าต่อแบบตัวหนังสือจากช่วงเดิม
+            a.pause(); tale.voiced = false; music.lower(false); clearInterval(tale.tick); taleNext(); return;
+        }
+        const t = a.currentTime; const chs = STORY.chapters;
+        const k = chs.findIndex((c) => t < c.end);
+        if (k < 0) { taleEnd(); return; }
+        if (t < chs[k].start) return; // ช่วงเงียบระหว่างบท
+        if (k !== tale.i) taleGo(k, false);
+        const c = chs[k];
+        const f = (t - c.start) / Math.max(0.1, c.end - c.start);
+        phraseAt(Math.max(0, Math.min(tale.phrases.length - 1, Math.floor(f * tale.phrases.length))));
+    }
+    function taleGo(k, schedule = true) {
+        const chs = STORY.chapters;
+        if (k >= chs.length) { taleEnd(); return; }
+        k = Math.max(0, k);
+        const c = chs[k];
+        const changed = k !== tale.i;
+        tale.i = k; tale.phrases = phrasesOf(c.text); tale.p = -1;
+        if (changed) {
+            const card = Number.isInteger(c.card) && cards[c.card] ? c.card : -1;
+            state.revealAt = card;
+            cards.forEach((o, j) => { o.userData.glowT = j === card ? 1 : 0.25; });
+            oracle(card >= 0 ? 'faint' : 'on');
+            nod();
+            placeSpread(false);
+            if (card >= 0) sfx('chime', card);
+            storyBar();
+        }
+        phraseAt(0);
+        if (schedule) taleNext(true);
+    }
+    function phraseAt(p) {
+        if (p === tale.p) return;
+        tale.p = p;
+        const c = STORY.chapters[tale.i];
+        say(tale.phrases[p] || '', `${c.title} · บทที่ ${tale.i + 1}/${STORY.chapters.length}`);
+    }
+    // โหมดตัวหนังสือ: ช่วงละ ~12 ตัวอักษร/วินาที (อย่างน้อย 2.6 วิ ไม่เกิน 8 วิ)
+    function taleNext(fresh = false) {
+        clearTimeout(tale.timer);
+        if (!tale.playing || tale.voiced || state.phase !== 'story') return;
+        const run = state.run;
+        const ms = Math.max(2600, Math.min(8000, (tale.phrases[Math.max(0, tale.p)] || '').length * 85));
+        tale.timer = setTimeout(() => {
+            if (run !== state.run || state.phase !== 'story' || !tale.playing) return;
+            if (document.hidden) { taleNext(); return; } // สลับแท็บอยู่ = รอ ไม่เล่าข้าม
+            if (tale.p < tale.phrases.length - 1) { phraseAt(tale.p + 1); taleNext(); return; }
+            // จบบท — เปิดลำโพงทีหลังได้ยินเสียงตั้งแต่บทถัดไป
+            if (STORY.voice && soundOn() && tale.i + 1 < STORY.chapters.length) voiceFrom(tale.i + 1);
+            else taleGo(tale.i + 1);
+        }, fresh ? ms + 400 : ms);
+    }
+    function taleJump(k) {
+        if (state.phase !== 'story') return;
+        if (k >= STORY.chapters.length) { taleEnd(); return; }
+        k = Math.max(0, k);
+        if (tale.voiced && tale.audio) {
+            try { tale.audio.currentTime = STORY.chapters[k].start || 0; } catch (e) { /* ข้าม */ }
+            taleGo(k, false);
+            if (tale.playing) tale.audio.play().catch(() => {});
+        } else taleGo(k, tale.playing);
+    }
+    function taleToggle() {
+        tale.playing = !tale.playing;
+        const b = action('tplay'); if (b) b.textContent = tale.playing ? '⏸' : '▶';
+        if (tale.voiced && tale.audio) { if (tale.playing) tale.audio.play().catch(() => {}); else tale.audio.pause(); }
+        else if (tale.playing) taleNext(); else clearTimeout(tale.timer);
+    }
+    function taleEnd() {
+        const voiced = tale.voiced;
+        stopTale(); tale.voiced = voiced; // เล่าด้วยเสียงไปแล้ว = ไม่ต้องพูดผลซ้ำ
+        finish(false);
+        say(`${R.self}เล่าจบแล้ว • คำทำนายฉบับเต็มอยู่ด้านล่าง ถามต่อได้เลย`, SP.name);
     }
     function replay() {
-        state.run++;
+        stopTale(); tale.voiced = false;
+        state.run++; endSaid = false; holdVoice();
         cards.forEach((c) => { c.userData.flipped = false; });
         state.phase = 'wait'; state.revealAt = -1; placeSpread(false);
         const run = state.run;
@@ -854,6 +1035,15 @@ function createTheater(root, cfg, useGL) {
             const d = down; down = null; if (!d) return;
             const sx = e.clientX - d.x; const sy = e.clientY - d.y;
             if (state.phase === 'reveal' && Math.abs(sx) > 50 && Math.abs(sx) > Math.abs(sy)) { if (sx < 0) next(true); else prev(); return; }
+            if (state.phase === 'story' && Math.abs(sx) > 50 && Math.abs(sx) > Math.abs(sy)) { taleJump(tale.i + (sx < 0 ? 1 : -1)); return; }
+            if (state.phase === 'story') {
+                // แตะไพ่ = ไปบทที่เล่าถึงใบนั้น
+                if (d.moved > 8) return;
+                const c = hit(e.clientX, e.clientY, cards);
+                const j = c ? STORY.chapters.findIndex((ch) => ch.card === cards.indexOf(c)) : -1;
+                if (j >= 0) taleJump(j);
+                return;
+            }
             if (d.moved > 8) return;
             if (state.phase === 'pick') { const c = hit(e.clientX, e.clientY, pickable()); if (c) pickCard(c); return; }
             if (state.phase === 'done' || state.phase === 'reveal') {
@@ -878,6 +1068,8 @@ function createTheater(root, cfg, useGL) {
             if (state.phase === 'pick' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { state.fanOff = fanClamp(state.fanOff + (e.key === 'ArrowRight' ? 1 : -1)); updateFanTargets(); }
             if (state.phase === 'reveal' && (e.key === ' ' || e.key === 'ArrowRight')) { e.preventDefault(); next(true); }
             if (state.phase === 'reveal' && e.key === 'ArrowLeft') prev();
+            if (state.phase === 'story' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) taleJump(tale.i + (e.key === 'ArrowRight' ? 1 : -1));
+            if (state.phase === 'story' && e.key === ' ') { e.preventDefault(); taleToggle(); }
             if (e.key === 'Escape' && !isPick) close();
         });
     }
@@ -945,15 +1137,15 @@ function createTheater(root, cfg, useGL) {
         starMat.opacity = 0.6 + Math.sin(t * 0.7) * 0.1;
         // ป้ายตำแหน่ง (ฉายจาก 3D ลงจอ)
         if (el.labels.children.length && state.layout) {
-            const show = ['wait', 'reveal', 'done'].includes(state.phase);
+            const show = ['wait', 'reveal', 'done', 'story'].includes(state.phase);
             const list = spreadCards();
             [...el.labels.children].forEach((d, k) => {
                 const c = list[k]; if (!c) return;
                 tmp.set(c.position.x, c.position.y - CH * c.scale.x * 0.5 - 0.08, c.position.z).project(camera);
                 d.style.left = `${(((tmp.x + 1) / 2) * W).toFixed(1)}px`; d.style.top = `${(((1 - tmp.y) / 2) * H).toFixed(1)}px`;
-                const cur = state.phase === 'reveal' && k === state.revealAt;
+                const cur = (state.phase === 'reveal' || state.phase === 'story') && k === state.revealAt;
                 // มือถือ: ตอนซูมใบที่เล่า ซ่อนป้ายใบอื่น
-                const hideOther = portrait && state.phase === 'reveal' && state.revealAt >= 0 && !cur;
+                const hideOther = portrait && (state.phase === 'reveal' || state.phase === 'story') && state.revealAt >= 0 && !cur;
                 d.style.opacity = !show || hideOther ? 0 : state.layout.s < 0.55 && !cur && state.phase === 'reveal' ? 0.35 : 1;
                 d.classList.toggle('cur', cur);
                 const want = CW * c.scale.x * ppu < 74 && !cur ? d.dataset.short : d.dataset.full;
@@ -1021,7 +1213,7 @@ function createTheater(root, cfg, useGL) {
         clock.getDelta();
         cancelAnimationFrame(raf); frame();
         state.run++;
-        if (isPick) shuffle();
+        if (isPick) { shuffle(); music.start(R.music); }
         else if (cfg.status === 'reading') waitForReading();
         else if (replayed && state.phase !== 'idle') replay();
         else beginReveal();
@@ -1030,6 +1222,10 @@ function createTheater(root, cfg, useGL) {
     function close() {
         state.run++; state.opened = false;
         clearTimeout(revealTimer); clearTimeout(pollT);
+        stopTale();
+        music.stop();
+        // ปิดก่อนเปิดไพ่ครบ — ยังให้ผู้พยากรณ์บอกผลตามปกติ
+        if (!isPick && cfg.voiceEnd && !endSaid && state.phase !== 'idle' && cfg.status === 'done') { endSaid = true; voice(cfg.voiceEnd); }
         root.classList.add('ct-closing');
         document.documentElement.classList.remove('ct-open');
         setTimeout(() => { if (!state.opened) { root.hidden = true; cancelAnimationFrame(raf); } }, 600);

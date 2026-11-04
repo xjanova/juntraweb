@@ -178,7 +178,7 @@
     {{-- 🃏 (2026-11-05) โรงละครเปิดไพ่ — กำลังอ่าน: พิธีรอเต็มจอ · เพิ่งเสร็จ: เปิดไพ่ทีละใบ (ครั้งเดียวต่อคำทำนาย) แล้วปิดมาอ่านตรงนี้
          ปุ่มด้านล่างโชว์เมื่อเครื่องเปิด WebGL ได้เท่านั้น (JS ปลด hidden) --}}
     @if (\App\Support\CardTheater::availableFor($reading, $viewer))
-      <x-card-theater :config="\App\Support\CardTheater::forReading($reading)" />
+      <x-card-theater :config="\App\Support\CardTheater::forReading($reading, $sections)" />
       @unless ($reading->isInProgress())
         <div style="text-align:center;margin-top:28px">
           <button type="button" class="btn btn-ghost" data-ct-open hidden>✦ ดูพิธีเปิดไพ่อีกครั้ง</button>

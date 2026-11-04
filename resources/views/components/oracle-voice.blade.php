@@ -46,9 +46,12 @@
         window.addEventListener('oracle-say', this._say);
         this._unlock = () => { if (this.pending) { const k = this.pending; this.pending = null; this.play(k); } };
         document.addEventListener('pointerdown', this._unlock, { once: true, capture: true });
+        // โรงละครเปิดไพ่ขอพูดเองตามจังหวะพิธี (เช่น ผลฟันธงหลังเปิดไพ่ครบ) — หยุดประโยคเข้าหน้า
+        this._hold = () => { this.audio?.pause(); this.queue = []; this.pending = null; };
+        window.addEventListener('oracle-hold', this._hold);
         // ประโยคเข้าหน้า: พูดต่อกันทีละประโยค ครั้งเดียวต่อ scope
         // นับว่า "พูดแล้ว" เฉพาะตอนเปิดเสียงอยู่ — ปิดเสียงไว้แล้วค่อยเปิดทีหลังต้องยังได้ยิน
-        this.queue = (cfg.cues || []).filter((k) => this.voice[k] && !window.JuntraVoice.said(cfg.scope, k));
+        this.queue = window.__ctVoiceHold ? [] : (cfg.cues || []).filter((k) => this.voice[k] && !window.JuntraVoice.said(cfg.scope, k));
         if (this.sound) {
           this.queue.forEach((k) => window.JuntraVoice.mark(cfg.scope, k));
           this.next();
@@ -57,6 +60,7 @@
 
       destroy() {
         window.removeEventListener('oracle-say', this._say);
+        window.removeEventListener('oracle-hold', this._hold);
         document.removeEventListener('pointerdown', this._unlock, { capture: true });
         this.audio?.pause();
       },
@@ -67,7 +71,8 @@
         if (!this.sound) { this.audio?.pause(); this.queue = []; this.pending = null; return; }
         this.pending = null;
         // กดเปิดตอนไหนก็ได้ยินประโยคของหน้านี้ — ปุ่มคือการแตะของลูกค้า จึงเล่นได้แน่นอน
-        const first = (cfg.cues || []).find((k) => this.voice[k]);
+        // (ระหว่างโรงละครเปิดไพ่คุมจังหวะอยู่ ไม่พูดประโยคเข้าหน้า — โรงละครพูดเองตอนถึงจังหวะ)
+        const first = window.__ctVoiceHold ? null : (cfg.cues || []).find((k) => this.voice[k]);
         if (!this.queue.length && first) this.queue = [first];
         this.next();
       },

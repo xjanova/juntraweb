@@ -157,8 +157,62 @@ class CardTheaterTest extends TestCase
         $this->assertSame('ไพ่ใบที่ 0', $cfg['cards'][0]['name']);
         $this->assertSame('คำสำคัญ 0', $cfg['cards'][0]['meaning']);
         $this->assertSame('ความหมายกลับหัว', $cfg['cards'][1]['meaning']);
-        // กำลังอ่าน = ยังไม่มีปุ่มดูพิธีซ้ำ
+        // กำลังอ่าน = ยังไม่มีปุ่มดูพิธีซ้ำ · ยังไม่มีประโยคปิดท้าย
         $res->assertDontSee('data-ct-open', false);
+        $this->assertNull($cfg['voiceEnd']);
+        $this->assertIsArray($cfg['room']['music']);
+        // ยังอ่านไม่เสร็จ = ยังไม่มีเรื่องให้เล่า
+        $this->assertNull($cfg['story']);
+    }
+
+    public function test_after_the_last_card_the_oracle_tells_the_reading_as_one_story(): void
+    {
+        $u = $this->member();
+        $reading = $this->readingFor($u, null);
+
+        $cfg = $this->configFrom($this->actingAs($u)->get(route('tarot.show', $reading))->getContent());
+        $story = $cfg['story'];
+        $this->assertNotNull($story);
+        $this->assertNull($story['voice']);   // ไม่มีเสียงคำทำนาย = เล่าแบบตัวหนังสือ
+        // บทของไพ่ชี้ไพ่บนโต๊ะเรียงตามตำแหน่ง (0 = ใบแรก) · ทุกบทมีคำเล่า
+        $this->assertSame([0, 1, 2], array_values(array_filter(array_column($story['chapters'], 'card'), fn ($c) => $c !== null)));
+        foreach ($story['chapters'] as $ch) {
+            $this->assertNotSame('', $ch['text']);
+        }
+    }
+
+    public function test_a_voiced_reading_tells_the_story_in_time_with_the_voice(): void
+    {
+        $u = $this->member();
+        $reading = $this->readingFor($u, null);
+        $reading->update(['payload' => $reading->payload + ['voice' => [
+            'status' => 'ready', 'url' => '/media/voice/r1.mp3', 'duration' => 30,
+            'chapters' => [
+                ['anchor' => 'general', 'start' => 0, 'end' => 8, 'say' => 'เปิดเรื่อง'],
+                ['anchor' => 'card:2', 'start' => 8, 'end' => 20, 'say' => 'ใบที่สอง <b>กลับหัว</b>'],
+                ['anchor' => 'card:9', 'start' => 20, 'end' => 30, 'say' => 'ไม่มีใบนี้'],
+            ],
+        ]]]);
+
+        $story = $this->configFrom($this->actingAs($u)->get(route('tarot.show', $reading))->getContent())['story'];
+        $this->assertSame('/media/voice/r1.mp3', $story['voice']);
+        $this->assertSame([null, 1, null], array_column($story['chapters'], 'card'));
+        $this->assertEquals([8, 20], [$story['chapters'][1]['start'], $story['chapters'][1]['end']]);
+        $this->assertStringNotContainsString('<b>', $story['chapters'][1]['text']);
+    }
+
+    public function test_a_finished_reading_tells_the_theater_what_the_oracle_says_at_the_end(): void
+    {
+        $u = $this->member();
+        $reading = $this->readingFor($u, null);
+
+        $cfg = $this->configFrom($this->actingAs($u)->get(route('tarot.show', $reading))->getContent());
+        // ข้อความคำทำนายไม่มีส่วนฟันธง = ชวนถามต่อ (ตรงกับ OracleMedia::readingCues)
+        $this->assertSame('followup_ask', $cfg['voiceEnd']);
+        // เพลงของห้อง = เฉพาะไฟล์ที่มีจริง (เป็น URL เต็ม)
+        foreach ($cfg['room']['music'] as $url) {
+            $this->assertStringContainsString('/media/oracle/maemor/music/', $url);
+        }
     }
 
     public function test_a_finished_reading_has_the_replay_button_and_strangers_get_no_theater(): void

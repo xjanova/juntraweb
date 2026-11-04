@@ -42,7 +42,10 @@ final class CardTheater
         ];
     }
 
-    public static function forReading(Reading $reading): array
+    /**
+     * @param  array|null  $parsed  ผล ReadingSections::parse() ของใบนี้ (หน้าผลมีอยู่แล้ว ส่งมาจะไม่ parse ซ้ำ)
+     */
+    public static function forReading(Reading $reading, ?array $parsed = null): array
     {
         $key = TarotSpreads::keyFromType((string) $reading->type) ?? 'three';
         $rows = $reading->tarotCards->sortBy('position')->values();
@@ -64,7 +67,49 @@ final class CardTheater
                 'reversed' => (bool) $rc->reversed,
                 'meaning'  => self::shortMeaning($rc->card, (bool) $rc->reversed),
             ])->all(),
+            // ประโยคที่ผู้พยากรณ์พูดตอนเปิดไพ่ครบ (ผลฟันธง / พบของ / ชวนถามต่อ) — ยังอ่านอยู่ = ไม่มี
+            'voiceEnd'  => $reading->isInProgress() || $reading->isFailed() ? null
+                : (OracleMedia::readingCues($reading, $parsed ?? ReadingSections::parse($reading->result))[0] ?? null),
+            // เปิดไพ่ครบแล้ว ผู้พยากรณ์เล่าคำทำนายต่อเป็นเรื่องเดียวบนโต๊ะเดิม — ยังอ่านไม่เสร็จ = ไม่มี
+            'story'     => self::story($reading, $parsed),
         ];
+    }
+
+    /**
+     * บทเล่าเรื่องหลังเปิดไพ่ครบ — ชุดเดียวกับโรงละครคำทำนาย (ReadingTheater::build ไม่ผ่าน AI)
+     *
+     * มีเสียงคำทำนาย = ใช้บทของเสียง (มีเวลา start/end ให้คำบรรยายเดินตามเสียง) · ไม่มี = บทแบบตัวหนังสือ
+     * card = ลำดับไพ่บนโต๊ะ (0 = ใบแรก) ของบทที่เล่าถึงไพ่ใบนั้น · บทอื่น (พื้นดวง/กราฟ/สรุป) = null
+     *
+     * @return array{voice: ?string, chapters: list<array<string, mixed>>}|null
+     */
+    public static function story(Reading $reading, ?array $parsed = null): ?array
+    {
+        if (! ReadingTheater::available($reading)) {
+            return null;
+        }
+        $t = ReadingTheater::build($reading, $parsed);
+        $order = $reading->tarotCards->sortBy('position')->values()->pluck('position')->map(fn ($p) => (int) $p)->all();
+        $voiced = $t['voice'] !== null;
+        $chapters = [];
+        foreach ($voiced ? $t['voice']['chapters'] : $t['chapters'] as $c) {
+            $text = trim(strip_tags((string) ($c['text'] ?? '')));
+            // บทเงียบที่ไม่มีคำพูด = ข้าม (บทเสียงต้องเก็บไว้ทุกบท เวลาจะได้ต่อกัน)
+            if ($text === '' && ! $voiced) {
+                continue;
+            }
+            $idx = $c['pos'] !== null ? array_search((int) $c['pos'], $order, true) : false;
+            $chapters[] = [
+                'kind'  => (string) $c['kind'],
+                'title' => (string) $c['title'],
+                'text'  => $text,
+                'card'  => $idx === false ? null : (int) $idx,
+                'start' => $voiced ? (float) $c['start'] : null,
+                'end'   => $voiced ? (float) $c['end'] : null,
+            ];
+        }
+
+        return $chapters === [] ? null : ['voice' => $voiced ? $t['voice']['url'] : null, 'chapters' => $chapters];
     }
 
     /** เปิดโรงละครบนหน้าผลได้ไหม — เจ้าของคำทำนาย · ไม่ใช่รายการที่อ่านไม่สำเร็จ · มีไพ่ครบ */
@@ -99,6 +144,8 @@ final class CardTheater
             'accent2' => $r['accent_2'],
             'glow'    => $r['glow'],
             'star'    => $r['star'],
+            // เพลงบรรเลงของห้อง (เล่นเบา ๆ เฉพาะตอนลูกค้าเปิดเสียง)
+            'music'   => OracleMedia::music($key),
         ];
     }
 
