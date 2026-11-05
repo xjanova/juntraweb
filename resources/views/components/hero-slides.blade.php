@@ -14,7 +14,8 @@
        i: 0, n: {{ $slides->count() }}, timer: null,
        loadAll() {
          this.$root.querySelectorAll('img[data-src]').forEach(img => {
-           img.srcset = img.dataset.srcset; img.src = img.dataset.src;
+           if (img.dataset.srcset) img.srcset = img.dataset.srcset;
+           img.src = img.dataset.src;
            img.removeAttribute('data-src'); img.removeAttribute('data-srcset');
          });
        },
@@ -37,10 +38,15 @@
   @foreach ($slides as $k => $s)
     @php($small = preg_replace('/\.webp$/', '-600.webp', $s['src']))
     @php($srcset = asset($small) . ' 600w, ' . asset($s['src']) . ' 1200w')
-    <img @if ($k === 0) src="{{ asset($s['src']) }}" srcset="{{ $srcset }}" fetchpriority="high"
-         @else data-src="{{ asset($s['src']) }}" data-srcset="{{ $srcset }}" @endif
-         sizes="100vw" width="1200" height="1500" decoding="async"
-         alt="{{ $s['alt'] }}" class="hero-slide" :class="{ 'is-active': i === {{ $k }} }">
+    <div class="hero-slide" :class="{ 'is-active': i === {{ $k }} }">
+      <img @if ($k === 0) src="{{ asset($small) }}"
+           @else data-src="{{ asset($small) }}" @endif
+           width="600" height="750" decoding="async" alt="" aria-hidden="true" class="hero-slide-ambient">
+      <img @if ($k === 0) src="{{ asset($s['src']) }}" srcset="{{ $srcset }}" fetchpriority="high"
+           @else data-src="{{ asset($s['src']) }}" data-srcset="{{ $srcset }}" @endif
+           sizes="(max-width: 900px) 100vw, 60vw" width="1200" height="1500" decoding="async"
+           alt="{{ $s['alt'] }}" class="hero-slide-image">
+    </div>
   @endforeach
   @if ($slides->count() > 1)
     <div class="hero-slide-dots" role="tablist" aria-label="เลือกภาพ">
