@@ -29,6 +29,12 @@
   // ปุ่มเปลี่ยนผู้พยากรณ์ — มีให้เมื่อเปิดมากกว่าห้องเดียว
   $canSwitch  = ! $readonly && collect($rooms ?? [])->where('open', true)->count() > 1;
 
+  // 🏛️ (2026-11-05) ห้องพยากรณ์เต็มจอ — เจ้าของสั่ง: "เลือกผู้พยากรณ์แล้วต้องเข้าห้องพยากรณ์ ไม่ใช่ห้องแชท
+  //    เพราะเราเอาช่องแชทย้ายมาในห้องพยากรณ์" → ห้องสด = ฉากโต๊ะของห้อง ผู้พยากรณ์ยืนหลังโต๊ะ แชทอยู่ในฉาก
+  //    ฉาก/สีชุดเดียวกับโรงละครเปิดไพ่ (config/card_theater.php) · หน้าประวัติ (อ่านอย่างเดียว) ใช้หน้าตาเดิม
+  $scene       = $readonly ? null : \App\Support\CardTheater::room($room);
+  $tableOffers = $tableOffers ?? [];
+
   // ข้อความเริ่มต้นถูก render markdown ฝั่งเซิร์ฟเวอร์แล้วส่งเป็น HTML ที่ผ่าน
   // การ strip HTML ดิบทิ้ง (Markdown::safe) — ฝั่ง client จึงไม่ต้องมีตัวแปลง
   // markdown ของตัวเอง และข้อความเดียวกันหน้าตาเหมือนกันทั้งก่อน/หลังรีเฟรช
@@ -56,11 +62,22 @@
   })->values();
 @endphp
 
-@section('title', $isFree ? 'คุยกับ' . $P['name'] . ' · ฟรี' : 'คุยกับ' . $P['name'])
+@section('title', $scene ? ($scene['title'] ?? 'ห้อง' . $P['name']) : ($isFree ? 'คุยกับ' . $P['name'] . ' · ฟรี' : 'คุยกับ' . $P['name']))
+@if ($scene)
+  {{-- ห้องเต็มจอปิดทับแถบแจ้งเตือนของเลย์เอาต์ — ห้องแสดงข้อความเอง (ป้ายลอยบนฉาก) --}}
+  @section('page-handles-flash', '1')
+  @push('head')
+    @vite('resources/css/oracle-room.css')
+  @endpush
+@endif
 
 @section('content')
 <section class="canvas">
-  <div class="chat-shell" data-persona="{{ $room }}"
+  <div class="chat-shell {{ $scene ? 'is-room' : '' }}" data-persona="{{ $room }}"
+       @if ($scene)
+         data-plate='@json($scene['plate'])'
+         style="--or-a: {{ $scene['accent'] }}; --or-b: {{ $scene['accent2'] }}; --or-glow: {{ $scene['glow'] }}; --or-plate: url('{{ $scene['plate']['src'] }}')"
+       @endif
        x-data="chatBot({
          room: @js($room),
          persona: @js(['name' => $P['name'], 'short' => $P['short'], 'self' => $P['self'], 'busy' => $P['busy']]),
@@ -91,6 +108,80 @@
          ]))),
        })">
 
+    @if ($scene)
+      {{-- ═══ ฉากห้อง: โต๊ะเปล่าของห้อง + ผู้พยากรณ์ยืนหลังขอบโต๊ะ (ตำแหน่งคำนวณจากขอบโต๊ะจริงของภาพ) ═══ --}}
+      <div class="or-scene" aria-hidden="true">
+        <div class="or-plate"></div>
+        <div class="or-actor" :class="{ 'is-busy': thinking }"><img src="{{ $scene['sprite'] }}" alt="" decoding="async" fetchpriority="high"></div>
+        <div class="or-vignette"></div>
+      </div>
+
+      {{-- ═══ แถบบนลายทอง: กลับ/เปลี่ยนผู้พยากรณ์ · ชื่อห้อง · เสียง · เครดิต ═══ --}}
+      <header class="or-hud">
+        <a href="{{ $canSwitch ? route('chat.index', ['pick' => 1]) : route('home') }}" class="or-btn or-back"
+           aria-label="{{ $canSwitch ? 'เปลี่ยนผู้พยากรณ์' : 'กลับหน้าแรก' }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          <span>{{ $canSwitch ? 'เปลี่ยนผู้พยากรณ์' : 'หน้าแรก' }}</span>
+        </a>
+        <div class="or-title">
+          <small>{{ $P['eyebrow'] ?: 'ห้องพยากรณ์' }}</small>
+          <strong>{{ $scene['title'] }}</strong>
+          <span class="or-status"><span class="mor-online"></span><span x-text="thinking ? persona.busy : 'พร้อมรับฟังอยู่ค่ะ'">พร้อมรับฟังอยู่ค่ะ</span></span>
+        </div>
+        <div class="or-hud-end">
+          @if (\App\Support\OracleMedia::voice($room))
+            <button type="button" class="or-btn or-icon"
+                    x-data="{ on: !!(window.JuntraVoice && window.JuntraVoice.on()) }"
+                    @oracle-sound-state.window="on = $event.detail.on"
+                    @click="window.dispatchEvent(new CustomEvent('oracle-sound-toggle'))"
+                    :aria-pressed="on ? 'true' : 'false'"
+                    :aria-label="on ? 'ปิดเสียง' + persona.short : 'เปิดเสียง' + persona.short"
+                    aria-label="เปิดเสียง">
+              <svg x-show="!on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6M17 9l6 6"/></svg>
+              <svg x-show="on" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+            </button>
+          @endif
+          @if ($gate['allowed'] && $isFree && $dailyLimit > 0)
+            <span class="or-pill" :class="dailyLeft <= 3 && 'is-low'" title="คุยฟรีวันนี้ · รีเซ็ตทุกเที่ยงคืน">
+              <small>คุยฟรีวันนี้</small><b x-text="dailyLeft + '/' + dailyLimit">{{ $dailyLeft }}/{{ $dailyLimit }}</b>
+            </span>
+          @endif
+          @if ($gate['allowed'] && $balance !== null)
+            <a href="{{ route('wallet.topup') }}" class="or-pill" title="เครดิตคงเหลือ · แตะเพื่อเติมเงิน">
+              <small>เครดิต</small><b x-text="'฿' + Number(balance).toFixed(2)">฿{{ number_format($balance, 2) }}</b>
+            </a>
+          @endif
+        </div>
+      </header>
+
+      {{-- ข้อความจากระบบ (เช่น ล็อกห้องระหว่างทำนาย / เปิดไพ่ไม่ได้) — ลอยบนฉาก --}}
+      @if (session('status') || $errors->any())
+        <div class="or-toast {{ $errors->any() ? 'is-error' : '' }}" role="status" x-data="{ on: true }" x-show="on" x-init="setTimeout(() => on = false, 7000)" @click="on = false">
+          {{ session('status') ?: $errors->first() }}
+        </div>
+      @endif
+
+      {{-- ═══ แพ็กเกจของห้องวางบนโต๊ะ — กดเปิดไพ่ได้ตลอด (คำถามล่าสุดที่พิมพ์ติดไปด้วย) ═══ --}}
+      @if ($tableOffers)
+        <div class="or-table" role="group" aria-label="เปิดไพ่กับ{{ $P['short'] }}">
+          @foreach ($tableOffers as $o)
+            <button type="button" class="or-offer" :disabled="!!table.offerBusy" @click="openTable(@js($o))">
+              <span class="or-offer-icon" aria-hidden="true">{{ $o['kind'] === 'deep' ? '🌟' : '🔮' }}</span>
+              <span class="or-offer-text">
+                <strong>{{ $o['label'] }}</strong>
+                <small>
+                  @if (! empty($o['cards'])){{ $o['cards'] }} ใบ · @endif
+                  ฿{{ number_format($o['price'], $o['price'] == intval($o['price']) ? 0 : 2) }}
+                </small>
+              </span>
+              <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : 'เปิดไพ่'">เปิดไพ่</span>
+            </button>
+          @endforeach
+        </div>
+      @endif
+    @endif
+
+    @unless ($scene)
     <x-page-hero art="images/juntra/art/chat.webp" />
 
     <div style="text-align:center;margin-bottom:26px">
@@ -117,9 +208,11 @@
         @endif
       </p>
     </div>
+    @endunless
 
-    {{-- ป้ายโควตาคุยฟรี / เครดิต — ตัวเลขซิงก์กับเซิร์ฟเวอร์ทุกครั้งที่ส่ง --}}
-    @if (!$readonly && $gate['allowed'] && $isFree && $dailyLimit > 0)
+    {{-- ป้ายโควตาคุยฟรี / เครดิต — ตัวเลขซิงก์กับเซิร์ฟเวอร์ทุกครั้งที่ส่ง (ห้องพยากรณ์ย้ายขึ้นแถบบน) --}}
+    @if ($scene)
+    @elseif (!$readonly && $gate['allowed'] && $isFree && $dailyLimit > 0)
       <div class="quota-bar" :class="dailyLeft <= 3 && 'is-low'">
         <span class="quota-label">คุยฟรีวันนี้</span>
         <strong class="quota-value" x-text="dailyLeft + ' / ' + dailyLimit">{{ $dailyLeft }} / {{ $dailyLimit }}</strong>
@@ -141,7 +234,7 @@
     @endif
 
     @unless ($gate['allowed'])
-      <div class="flash" style="text-align:center;padding:28px 32px;margin-bottom:24px">
+      <div class="flash {{ $scene ? 'or-gate' : '' }}" style="text-align:center;padding:28px 32px;margin-bottom:24px">
         <div class="eyebrow" style="margin-bottom:14px">
           @if ($gate['code'] === 'guest') ต้องเข้าสู่ระบบก่อน
           @else ต่อสาย{{ $P['self'] }}ใหม่ @endif
@@ -190,7 +283,12 @@
       </aside>
 
       {{-- ฝั่งขวา: ห้องแชท --}}
-      <div class="panel chat-panel" style="position:relative">
+      <div class="panel chat-panel" style="position:relative" :class="{ 'is-open': sheet }">
+        @if ($scene)
+          {{-- มือถือ: แผงแชทเป็นแผ่นล่างใต้โต๊ะ — แตะแถบนี้เพื่อกางอ่านย้อนหลังเต็มจอ / พับกลับมาเห็นผู้พยากรณ์ --}}
+          <button type="button" class="or-grip" @click="sheet = !sheet" :aria-expanded="sheet.toString()"
+                  :aria-label="sheet ? 'พับแชทลง' : 'กางแชทเต็มจอ'"><i></i><span x-text="sheet ? 'พับลงดู' + persona.short : 'อ่านแชทย้อนหลัง'"></span></button>
+        @endif
 
         <div class="mor-mini">
           <x-oracle-stage :persona="$room" :poster="$P['image']" :alt="$P['name']" eager />
@@ -554,7 +652,7 @@
       </div>
     </div>
 
-    @if ($gate['allowed'])
+    @if ($gate['allowed'] && ! $scene)
       <div style="text-align:center;margin-top:18px;font-family:var(--display);font-size:11px;color:var(--ink-dim);letter-spacing:.22em;text-transform:uppercase">
         powered by Thaiprompt Fortune Bot · ระบบเดียวกับ FB MESSENGER / LINE OA
       </div>
@@ -563,6 +661,47 @@
 </section>
 
 @push('scripts')
+@if ($scene)
+<script>
+// 🏛️ จัดฉากห้องพยากรณ์: ภาพโต๊ะเต็มจอ (cover) ให้กลางโต๊ะตรงกับพื้นที่ว่างข้างแผงแชท แล้ววางผู้พยากรณ์ยืนหลังขอบโต๊ะ
+(() => {
+  const shell = document.querySelector('.chat-shell.is-room');
+  if (!shell) return;
+  document.documentElement.classList.add('or-open');
+  let plate;
+  try { plate = JSON.parse(shell.dataset.plate); } catch (e) { return; }
+  const scene = shell.querySelector('.or-scene');
+  const bg = shell.querySelector('.or-plate');
+  const actor = shell.querySelector('.or-actor');
+  const panel = shell.querySelector('.chat-panel');
+  const place = () => {
+    const W = shell.clientWidth; const H = shell.clientHeight;
+    const wide = W >= 900;
+    // จอกว้าง: แผงแชทชิดขวา → กลางโต๊ะเลื่อนไปกลางพื้นที่ที่เหลือ (ขยายภาพเท่าที่จำเป็นให้ยังเต็มจอ)
+    const pw = panel ? panel.getBoundingClientRect().width : 0;   // ยังไม่ล็อกอิน = ไม่มีแผงแชท → ผู้พยากรณ์อยู่กลางจอ
+    const side = wide && pw > 0 ? pw + 40 : 0;
+    const cx = (W - side) / 2;
+    const s = Math.max(W / plate.w, H / plate.h, (2 * Math.max(cx, W - cx)) / plate.w);
+    const iw = plate.w * s; const ih = plate.h * s;
+    const x = Math.min(0, Math.max(W - iw, cx - iw / 2));
+    const y = (H - ih) * plate.posY;
+    Object.assign(bg.style, { backgroundSize: `${iw}px ${ih}px`, backgroundPosition: `${x}px ${y}px` });
+    const ty = y + plate.table * ih;
+    const top = wide ? 96 : 70;
+    const hgt = Math.max(90, Math.min(H * (wide ? 0.62 : 0.5), ty - top));
+    Object.assign(actor.style, { top: `${ty - hgt}px`, height: `${hgt}px`, width: `${Math.round(Math.min(W, hgt * 0.9))}px`, left: `${x + iw / 2}px` });
+    shell.style.setProperty('--or-table', `${ty}px`);
+    shell.style.setProperty('--or-cx', `${x + iw / 2}px`);
+    scene.classList.add('is-ready');
+  };
+  const img = new Image();
+  img.onload = place; img.src = plate.src;
+  window.addEventListener('resize', place);
+  if (window.ResizeObserver && panel) new ResizeObserver(place).observe(panel);
+  place();
+})();
+</script>
+@endif
 <script>
 document.addEventListener('alpine:init', () => {
   Alpine.data('chatBot', (cfg) => ({
@@ -590,6 +729,9 @@ document.addEventListener('alpine:init', () => {
     canTopupInChat: !!cfg.canTopupInChat,
     topupUrl: cfg.topupUrl,
     payTimer: null,
+    // ห้องพยากรณ์: แพ็กเกจบนโต๊ะ (ทำตัวเหมือนข้อความที่มีการ์ด — ใช้ startOffer/payAndOpen ตัวเดิม) · แผ่นแชทมือถือกางอยู่ไหม
+    table: { offerBusy: false, question: '' },
+    sheet: false,
 
     destroy() {
       clearInterval(this.payTimer);   // ออกจากหน้าแล้วต้องเลิก poll
@@ -671,6 +813,14 @@ document.addEventListener('alpine:init', () => {
     canAfford(o) {
       // เทียบเป็นสตางค์ — float ตรง ๆ (19.99 vs 19.990000001) ทำให้คนที่เงินพอดีเห็นปุ่มเติมเงิน
       return Number(o.price) <= 0 || Math.round(Number(this.balance) * 100) >= Math.round(Number(o.price) * 100);
+    },
+    // กดแพ็กเกจบนโต๊ะ — คำถามล่าสุดที่ลูกค้าพิมพ์ติดไปหน้าเลือกไพ่ · เครดิตไม่พอ = จ่ายในแชทแล้วพาไปต่อ
+    openTable(o) {
+      const last = [...this.messages].reverse().find((x) => x.role === 'user' && x.text);
+      this.table.question = last ? String(last.text).slice(0, 300) : '';
+      if (this.canAfford(o)) { this.startOffer(this.table, o); return; }
+      if (this.canTopupInChat) { this.sheet = true; this.payAndOpen(this.table, o); return; }
+      window.location.href = this.topupUrl;
     },
     startOffer(m, o) {
       if (m.offerBusy) return;      // กดซ้ำ = ส่งฟอร์มซ้ำ (ยังไม่หักเงิน แต่พาไปหน้าเดิมสองรอบ)

@@ -68,13 +68,14 @@
 
             @if ($open)
               <a href="{{ route('chat.index', ['room' => $r['key']]) }}" class="btn btn-primary room-go">
-                คุยกับ{{ $r['short'] }}{{ ($chatFree ?? true) ? 'ฟรี' : '' }}
+                {{-- (2026-11-05) เลือกแล้วเข้าห้องพยากรณ์เต็มจอ — คุย/เปิดไพ่ในห้องเดียวกัน --}}
+                เข้าห้อง{{ $r['short'] }}{{ ($chatFree ?? true) ? ' · คุยฟรี' : '' }}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
               </a>
             @elseif ($r['open'])
               {{-- ห้องเปิดแต่ยังไม่ได้ล็อกอิน — พาไปล็อกอินแล้วกลับมาห้องนี้ --}}
               <a href="{{ route('thaiprompt.redirect', ['to' => '/chat?room=' . $r['key']]) }}" class="btn btn-primary room-go">
-                เข้าสู่ระบบเพื่อคุยกับ{{ $r['short'] }}
+                เข้าสู่ระบบเพื่อเข้าห้อง{{ $r['short'] }}
               </a>
             @else
               <span class="btn btn-ghost room-go" aria-disabled="true">เร็ว ๆ นี้</span>

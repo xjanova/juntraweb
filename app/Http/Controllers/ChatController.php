@@ -18,6 +18,7 @@ use App\Support\ChatRooms;
 use App\Support\ChatSuggestions;
 use App\Support\Markdown;
 use App\Support\Pricing;
+use App\Support\ReadingRoomLock;
 use App\Support\TarotSpreads;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
@@ -75,6 +76,15 @@ class ChatController extends Controller
 
         // 🔮 เลือกห้องก่อน: ?room=… = เข้าห้องนั้น · ?pick=1 หรือยังไม่เคยเลือก = หน้าเลือกผู้พยากรณ์
         $room = $this->chosenRoom($request);
+
+        // 🔒 (2026-11-05) เริ่มทำนายแล้วเปลี่ยนห้องไม่ได้จนจบ/หมดเวลา — รวมหน้าเลือกผู้พยากรณ์ (?pick=1)
+        //    ห้องที่ล็อกถูกปิดไปแล้วไม่บังคับ (กันวน redirect กับหน้า "ยังไม่เปิด")
+        $lock = ReadingRoomLock::active($request);
+        if ($lock !== null && $room !== $lock['room'] && ChatRooms::isOpen($lock['room'])) {
+            return redirect()->route('chat.index', ['room' => $lock['room']])
+                ->with('status', ReadingRoomLock::message($lock));
+        }
+
         if ($room === null) {
             return view('pages.chat.rooms', [
                 'rooms'   => ChatRooms::cards(),
@@ -130,6 +140,8 @@ class ChatController extends Controller
             'room'         => $conversation->persona,
             'rooms'        => ChatRooms::cards(),
             'offerCards'   => $this->offerCardsFor($conversation, $user),
+            // 🔮 (2026-11-05) แพ็กเกจของห้องวางบนโต๊ะในห้องพยากรณ์ — กดเปิดไพ่ได้ตลอด ไม่ต้องรอแม่หมอยื่นการ์ด
+            'tableOffers'  => $gate['allowed'] ? array_slice(ChatOffers::forRoom((string) $conversation->persona, 'general', $user), 0, 3) : [],
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => $cost,
