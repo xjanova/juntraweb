@@ -80,6 +80,7 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/', 'index')->name('index');
     Route::post('/begin', 'begin')->name('begin');                  // step 1 → save spread+question, redirect to pick
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
+    Route::post('/abandon', 'abandon')->name('abandon');            // "พอแล้ว" — จบพิธีก่อนจ่าย ปลดล็อกห้อง
     Route::post('/cast', 'cast')->middleware('throttle:reading')->name('cast'); // step 3 → any spread
     Route::get('/result/{reading}', 'show')->name('show');
     // หน้าผลถามทุก ~3 วิ ระหว่างแม่หมออ่านไพ่เบื้องหลัง (60/นาที = พอสำหรับหน้าเดียวเปิดค้าง)
@@ -165,6 +166,7 @@ Route::middleware('auth')->prefix('chat/topup')->name('chat.topup.')
     ->controller(ChatTopupController::class)->group(function () {
         Route::post('/', 'store')->middleware('throttle:topup')->name('store');
         Route::get('/{tx}', 'status')->name('status');
+        Route::get('/{tx}/resume', 'resume')->name('resume');
         Route::post('/{tx}/slip', 'slip')->middleware('throttle:topup')->name('slip');
     });
 

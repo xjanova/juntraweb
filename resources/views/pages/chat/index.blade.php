@@ -83,6 +83,10 @@
          persona: @js(['name' => $P['name'], 'short' => $P['short'], 'self' => $P['self'], 'busy' => $P['busy']]),
          messages: @js($initialMessages),
          suggestions: @js($suggestions),
+         aiSuggestions: @js(array_values($aiSuggestions ?? [])),
+         roomLock: @js($roomLock ?? null),
+         pendingBill: @js($pendingBill ?? null),
+         serverNow: @js(now()->getTimestamp()),
          topics: @js($topics),
          awaiting: @js((bool) $awaiting),
          dailyLimit: @js((int) $dailyLimit),
@@ -177,6 +181,45 @@
               <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : 'เปิดไพ่'">เปิดไพ่</span>
             </button>
           @endforeach
+        </div>
+      @endif
+
+      {{-- 🔒 (2026-11-05) กำลังทำนายอยู่ / 🧾 บิลเติมเงินค้าง — วางบนโต๊ะแทนแพ็กเกจ
+           เจ้าของสั่ง "ป้ายเปิดไพ่ในห้องต้องไม่ขึ้นให้เลือกถ้ายังค้างบิลอยู่ ควรแสดงเลขบิลด้วยว่าบิลไหน ได้รับเงินหรือยัง"
+           เวลาที่เหลือนับจากนาฬิกาเซิร์ฟเวอร์ (serverNow) ไม่ใช่นาฬิกาเครื่องลูกค้า --}}
+      @if (! empty($roomLock))
+        <div class="or-table" role="status" aria-live="polite">
+          <div class="or-offer is-hold">
+            <span class="or-offer-icon" aria-hidden="true">{{ $roomLock['reason'] === 'reading' ? '📜' : '🔮' }}</span>
+            <span class="or-offer-text">
+              <strong>{{ $roomLock['message'] }}กับ{{ $roomLock['name'] }}</strong>
+              <small>เหลือเวลา <b x-text="clock(hold.lockEnds)">--:--</b></small>
+            </span>
+            @if ($roomLock['resume_url'])
+              <a href="{{ $roomLock['resume_url'] }}" class="or-offer-go">{{ $roomLock['resume_label'] }}</a>
+            @endif
+            @if ($roomLock['can_end'])
+              {{-- จบพิธีก่อนจ่าย ไม่เสียเงิน · แตะสองครั้งกันพลาด --}}
+              <form method="POST" action="{{ route('tarot.abandon') }}"
+                    @submit="if (!hold.confirmEnd) { $event.preventDefault(); hold.confirmEnd = true; setTimeout(() => hold.confirmEnd = false, 4000); }">
+                @csrf
+                <button type="submit" class="or-hold-end" x-text="hold.confirmEnd ? 'แตะอีกครั้งเพื่อจบ' : 'พอแล้ว'">พอแล้ว</button>
+              </form>
+            @endif
+          </div>
+        </div>
+      @elseif (! empty($pendingBill))
+        <div class="or-table" role="status" aria-live="polite">
+          <div class="or-offer is-hold">
+            <span class="or-offer-icon" aria-hidden="true">🧾</span>
+            <span class="or-offer-text">
+              <strong>บิลเลขที่ {{ $pendingBill['reference_code'] }} · ฿{{ number_format($pendingBill['payable'], 2) }}</strong>
+              <small x-text="hold.billPaid ? 'ได้รับเงินแล้ว ✓ เปิดไพ่ต่อได้เลยค่ะ' : (hold.billSlip ? 'ได้รับสลิปแล้ว กำลังตรวจสอบ' : 'ยังไม่ได้รับเงิน · รอชำระ ' + clock(hold.billEnds))">ยังไม่ได้รับเงิน · รอชำระ</small>
+            </span>
+            <button type="button" class="or-offer-go" :disabled="hold.billBusy"
+                    @click="hold.billPaid ? location.reload() : resumeBill()"
+                    x-text="hold.billPaid ? 'เปิดไพ่ได้แล้ว' : (hold.billBusy ? 'กำลังเปิด…' : 'ดู QR จ่ายต่อ')">ดู QR จ่ายต่อ</button>
+          </div>
         </div>
       @endif
     @endif
@@ -391,6 +434,9 @@
                   <template x-if="m.pay.step === 'qr'">
                     <div>
                       <div class="pay-title">สแกนจ่ายได้เลยค่ะ</div>
+                      <div class="pay-sub pay-bill" x-show="m.pay.reference_code">
+                        เลขที่บิล <strong x-text="m.pay.reference_code"></strong> · <span>ยังไม่ได้รับเงิน</span>
+                      </div>
                       <div class="pay-sub">เปิดแอพธนาคาร → สแกน QR นี้ → โอนตามยอดด้านล่าง</div>
 
                       <div class="pay-qr">
@@ -447,6 +493,9 @@
                       <div class="tick" aria-hidden="true">✓</div>
                       <div class="pay-title" style="margin-bottom:2px">เติมเครดิตสำเร็จแล้วค่ะ</div>
                       <div class="amt" x-text="'฿' + Number(m.pay.payable).toFixed(2)"></div>
+                      <div class="pay-sub pay-bill" x-show="m.pay.reference_code">
+                        เลขที่บิล <strong x-text="m.pay.reference_code"></strong> · <span style="color:#9eddae">ได้รับเงินแล้ว ✓</span>
+                      </div>
                       {{-- จ่ายมาเพื่อเปิดแพ็กเกจนี้ → พาไปต่อเอง (ปุ่มสำรองเผื่อ redirect ไม่ไป) --}}
                       <template x-if="m.pay.then && canAfford(m.pay.then.offer)">
                         <div>
@@ -558,7 +607,18 @@
             </template>
 
             {{-- 2. แม่หมอกำลังรอคำตอบ → ยุบไว้ก่อน --}}
-            <template x-if="!blocked && awaiting && !suggestOpen">
+            {{-- 2a. ✨ ผู้พยากรณ์ถามกลับ + AI คิดตัวเลือกคำตอบมาให้ → กดตอบได้เลย --}}
+            <template x-if="!blocked && awaiting && !suggestOpen && aiSuggestions.length">
+              <div>
+                <div class="chat-suggest-label"><span>💬 ตอบ{{ $P['self'] }}ได้เลย หรือพิมพ์เองก็ได้ค่ะ</span></div>
+                <div class="chip-row">
+                  <template x-for="(q, i) in aiSuggestions" :key="'a' + i">
+                    <button type="button" class="chip chip-ai" :disabled="thinking" @click="useChip(q)" x-text="q"></button>
+                  </template>
+                </div>
+              </div>
+            </template>
+            <template x-if="!blocked && awaiting && !suggestOpen && !aiSuggestions.length">
               <div class="chat-suggest-hint">
                 <span>💬 {{ $P['self'] }}กำลังรอคำตอบอยู่ค่ะ</span>
                 <button type="button" class="chip" style="padding:5px 12px;font-size:12px" @click="suggestOpen = true">
@@ -570,6 +630,19 @@
             {{-- 3. ปกติ --}}
             <template x-if="!blocked && (!awaiting || suggestOpen)">
               <div>
+                {{-- ✨ (2026-11-05) คำถามที่ผู้พยากรณ์คิดล่วงหน้าจากบทสนทนา — เพิ่มจากปุ่มลัดเดิม --}}
+                <template x-if="!awaiting && aiSuggestions.length">
+                  <div>
+                    <div class="chat-suggest-label"><span>✨ ถามต่อจากเรื่องนี้</span></div>
+                    <div class="chip-row" style="margin-bottom:8px">
+                      <template x-for="(q, i) in aiSuggestions" :key="'q' + i">
+                        <button type="button" class="chip chip-ai" :disabled="thinking"
+                                :title="thinking ? persona.self + 'กำลังตอบอยู่ — รอสักครู่นะคะ' : q"
+                                @click="useChip(q)" x-text="q"></button>
+                      </template>
+                    </div>
+                  </div>
+                </template>
                 <div class="chat-suggest-label">
                   <span x-text="messages.some(m => m.role === 'user') ? 'ถามต่อได้เลย' : 'เริ่มจากคำถามเหล่านี้ก็ได้ค่ะ'"></span>
                 </div>
@@ -709,6 +782,20 @@ document.addEventListener('alpine:init', () => {
     room: cfg.room || 'maemor',
     persona: cfg.persona || { name: 'แม่หมอจันทรา', short: 'แม่หมอ', self: 'แม่หมอ', busy: 'กำลังเพ่งไพ่...' },
     suggestions: cfg.suggestions || [],
+    aiSuggestions: cfg.aiSuggestions || [],
+    // 🔒/🧾 ป้ายบนโต๊ะ: การทำนายที่ค้าง (เวลาหมดจากเซิร์ฟเวอร์) และบิลเติมเงินที่ค้าง
+    hold: {
+      lockEnds: cfg.roomLock ? cfg.roomLock.ends_at : null,
+      bill: cfg.pendingBill || null,
+      billEnds: cfg.pendingBill ? cfg.pendingBill.expires_at : null,
+      billPaid: false, billSlip: !!(cfg.pendingBill && cfg.pendingBill.has_slip), billBusy: false,
+      confirmEnd: false,
+    },
+    // นาฬิกาเซิร์ฟเวอร์ − นาฬิกาเครื่อง (วินาที) — นับถอยหลังตรงกับเวลาจริงแม้เครื่องลูกค้าตั้งเวลาเพี้ยน
+    skew: (cfg.serverNow || Math.floor(Date.now() / 1000)) - Math.floor(Date.now() / 1000),
+    nowSec: Math.floor(Date.now() / 1000),
+    clockTimer: null,
+    billTimer: null,
     topics: cfg.topics || [],
     awaiting: !!cfg.awaiting,
     dailyLimit: cfg.dailyLimit || 0,
@@ -734,7 +821,83 @@ document.addEventListener('alpine:init', () => {
     sheet: false,
 
     destroy() {
+      clearInterval(this.clockTimer);
+      clearInterval(this.billTimer);
       clearInterval(this.payTimer);   // ออกจากหน้าแล้วต้องเลิก poll
+    },
+
+    /** วินาทีที่เหลือถึงเวลา ts (epoch วินาทีของเซิร์ฟเวอร์) */
+    left(ts) { return ts ? Math.max(0, ts - (this.nowSec + this.skew)) : 0; },
+    /** mm:ss ที่เหลือถึงเวลา ts */
+    clock(ts) {
+      const s = this.left(ts);
+      return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    },
+    startClock() {
+      clearInterval(this.clockTimer);
+      this.clockTimer = setInterval(() => {
+        this.nowSec = Math.floor(Date.now() / 1000);
+        // ล็อกหมดเวลา / บิลหมดอายุ → โหลดใหม่ให้เซิร์ฟเวอร์ตัดสินว่าโชว์ป้ายอะไรต่อ (ครั้งเดียว)
+        if ((this.hold.lockEnds && this.left(this.hold.lockEnds) === 0)
+            || (this.hold.bill && !this.hold.billPaid && this.hold.billEnds && this.left(this.hold.billEnds) === 0)) {
+          this.hold.lockEnds = null; this.hold.billEnds = null;
+          setTimeout(() => location.reload(), 1200);
+        }
+        if (this.qaTick) this.qaTick();
+      }, 1000);
+    },
+    /** ถามเป็นระยะว่าบิลที่ค้างได้รับเงินหรือยัง (แม้ลูกค้ายังไม่ได้เปิด QR) */
+    watchBill() {
+      if (!this.hold.bill) return;
+      clearInterval(this.billTimer);
+      let n = 0;
+      this.billTimer = setInterval(async () => {
+        if (this.hold.billPaid || ++n > 120) { clearInterval(this.billTimer); return; }
+        try {
+          const r = await fetch(cfg.topupStatusUrl.replace('__ID__', this.hold.bill.id), {
+            credentials: 'same-origin', headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          });
+          if (!r.ok) return;
+          const j = await r.json();
+          if (j.paid) this.billPaidNow(j.balance);
+          else if (j.status && j.status !== 'pending') { clearInterval(this.billTimer); location.reload(); }
+        } catch (_) { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
+      }, 6000);
+    },
+    billPaidNow(balance) {
+      if (this.hold.billPaid) return;
+      const card = this.messages.find(x => x.kind === 'topup' && x.pay?.id === this.hold.bill.id && x.pay.step !== 'done');
+      this.hold.billPaid = true;
+      clearInterval(this.billTimer);
+      if (balance !== undefined && balance !== null && Number.isFinite(Number(balance))) this.balance = Number(balance);
+      if (card) this.afterPaid(card, balance);
+      else this.voice('topup_done', false);
+    },
+    /** เปิด QR ของบิลที่ค้างขึ้นมาในแชทอีกครั้ง (หลังรีเฟรช) — ไม่ออกบิลใหม่ซ้อน */
+    async resumeBill(then = null) {
+      if (!this.hold.bill || this.hold.billBusy) return;
+      const had = this.messages.find(x => x.kind === 'topup' && x.pay?.id === this.hold.bill.id && x.pay.step !== 'done');
+      if (had) { if (then) had.pay.then = then; this.sheet = true; this.scrollToBottom(true); return; }
+      this.hold.billBusy = true;
+      try {
+        const r = await fetch(this.hold.bill.resume_url, {
+          credentials: 'same-origin', headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 410) { if (j.paid) this.billPaidNow(); else location.reload(); return; }
+        if (!r.ok) { this.say(j.error || 'เปิดบิลไม่สำเร็จ ลองใหม่อีกครั้งนะคะ'); return; }
+        const m = this.push('assistant', '', 'ok', '', {
+          kind: 'topup',
+          pay: { step: 'qr', busy: false, uploading: false, error: '', notice: '', waited: 0, then, superseded: false, ...j },
+        });
+        this.sheet = true;
+        this.watchTopup(m);
+        this.scrollToBottom(true);
+      } catch (_) {
+        this.say('เครือข่ายมีปัญหาค่ะ ลองใหม่อีกครั้งนะคะ');
+      } finally {
+        this.hold.billBusy = false;
+      }
     },
 
     init() {
@@ -746,6 +909,9 @@ document.addEventListener('alpine:init', () => {
       window.addEventListener('pageshow', (e) => {
         if (e.persisted) this.messages.forEach((m) => { if (m.offerBusy) m.offerBusy = false; });
       });
+      // ⏳ นาฬิกาของป้ายบนโต๊ะ + ติดตามบิลที่ค้าง (เงินเข้าแล้วป้ายเปลี่ยนเอง ไม่ต้องรีเฟรช)
+      this.startClock();
+      this.watchBill();
       // คำถามที่ติดมาจากหน้าผลไพ่ — ยิงครั้งเดียวให้คำตอบขึ้นเลยโดยไม่ต้องพิมพ์ซ้ำ
       // (เซิร์ฟเวอร์ pull() ออกจาก session แล้ว รีเฟรชจึงไม่ยิงซ้ำ/ไม่คิดเงินซ้ำ)
       if (cfg.autosend && String(cfg.autosend).trim()) {
@@ -866,6 +1032,8 @@ document.addEventListener('alpine:init', () => {
      */
     payAndOpen(m, o) {
       if (m.offerBusy) return;
+      // 🧾 มีบิลค้างอยู่ → จ่ายบิลเดิมก่อน ไม่ออกบิลใหม่ซ้อน
+      if (this.hold.bill && !this.hold.billPaid) { this.resumeBill({ msg: m, offer: o }); return; }
       this.voice('credit_low');
       const then = { msg: m, offer: o };
       const amount = this.payAmount(o);
@@ -902,6 +1070,7 @@ document.addEventListener('alpine:init', () => {
       // มีการ์ดที่ยังจ่ายไม่เสร็จอยู่แล้วก็เลื่อนไปหาใบเดิม ไม่สร้างซ้อน
       const open = fresh ? null : this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && !x.pay?.superseded);
       if (open) { this.scrollToBottom(true); return open; }
+      if (!fresh && this.hold.bill && !this.hold.billPaid) { this.resumeBill(then); return null; }
 
       // kind/pay ต้องใส่ตอน push — ใส่ทีหลังบนอ็อบเจกต์ดิบจะไม่ผ่าน proxy ของ Alpine
       const m = this.push('assistant', '', 'ok', '', {
@@ -916,6 +1085,7 @@ document.addEventListener('alpine:init', () => {
     afterPaid(m, balance) {
       clearInterval(this.payTimer);
       m.pay.step = 'done';
+      if (this.hold.bill && m.pay.id === this.hold.bill.id) { this.hold.billPaid = true; clearInterval(this.billTimer); }
       if (balance !== undefined && balance !== null && Number.isFinite(Number(balance))) this.balance = Number(balance);
       // เติมเงินผ่านแล้วต้องพิมพ์ต่อได้ทันที ไม่ต้องรีเฟรชหน้า
       if (this.blockedReason.includes('เครดิต')) {
@@ -1142,6 +1312,7 @@ document.addEventListener('alpine:init', () => {
         this.awaiting = !!j.awaiting;
         this.suggestOpen = false;
         if (Array.isArray(j.suggestions) && j.suggestions.length) this.suggestions = j.suggestions;
+        this.aiSuggestions = Array.isArray(j.ai_suggestions) ? j.ai_suggestions.filter(q => typeof q === 'string') : [];
 
         // ลูกค้าขอให้ทำนาย → แนบการ์ดแพ็กเกจไปกับคำชวนของแม่หมอ (ยังไม่หักเงิน)
         const offers = Array.isArray(j.offers) && j.offers.length

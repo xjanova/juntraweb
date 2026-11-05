@@ -230,6 +230,23 @@ class TarotController extends Controller
     }
 
     /** 🔒 ล็อกห้องระหว่างทำนาย — redirect พร้อมเหตุผล หรือ null ถ้าไปห้องนี้ได้ */
+    /**
+     * 🔒 (2026-11-05) "พอแล้ว" — จบพิธีเลือกไพ่ก่อนจ่าย ปลดล็อกห้องทันที ไม่มีการตัดเงิน
+     *
+     * เจ้าของสั่ง "ปุ่ม พอแล้ว ด้วย หมายถึงเลิกก่อนเวลา" · ใช้ได้เฉพาะช่วงสับ/เลือกไพ่ (ยังไม่ได้จ่าย)
+     * คำทำนายที่จ่ายแล้วกำลังอ่านอยู่ยกเลิกไม่ได้ — ล็อกนั้นจบเองเมื่อคำทำนายเสร็จ
+     */
+    public function abandon(Request $request)
+    {
+        $pick = $request->session()->pull('tarot_pick');
+        $room = is_array($pick) && ! empty($pick['room'])
+            ? \App\Support\ChatRooms::normalize((string) $pick['room'])
+            : $request->session()->get('chat_room');
+
+        return redirect()->route('chat.index', array_filter(['room' => $room]))
+            ->with('status', 'จบพิธีเปิดไพ่แล้วค่ะ ไม่มีการตัดเครดิต — อยากเปิดไพ่เมื่อไรก็กลับมาได้เลยนะคะ');
+    }
+
     private function roomLockBlock(Request $request, string $room)
     {
         $message = ReadingRoomLock::blockMessage($request, $room);

@@ -222,6 +222,9 @@ class JuntraServerClient
                 'context'    => $this->chatContext($context),
                 'thaiprompt_user_id' => $thaipromptUserId !== null && $thaipromptUserId > 0 ? $thaipromptUserId : null,
                 'persona'    => $persona,
+                // ✨ (2026-11-05) ให้ผู้พยากรณ์คิดปุ่ม "ถามต่อ/ตอบ" จากบทสนทนา → data.suggestions
+                //    Thaiprompt รุ่นก่อนไม่รู้จักฟิลด์นี้ก็แค่ไม่ส่งกลับ (หน้าแชทใช้ปุ่มลัดเดิมแทน)
+                'suggest'    => 1,
             ], fn ($v) => $v !== null && $v !== '')));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {

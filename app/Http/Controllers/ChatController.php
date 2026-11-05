@@ -131,6 +131,10 @@ class ChatController extends Controller
 
         $this->loadRecentMessages($conversation);
 
+        // 🔒 กำลังทำนาย / บิลค้าง → ซ่อนทุกปุ่มที่พาไปเปิดไพ่ใบใหม่
+        $bill       = $user ? ChatTopupController::pendingBill($user) : null;
+        $hideOffers = $lock !== null || $bill !== null;
+
         // เข้าแชทต่อจากการเปิดไพ่หรือเปล่า — ใช้เลือกชุดปุ่มคำถามลัด
         // 💬 (2026-09-21) อ่านจากห้อง (chat_conversations.reading_id) ไม่ใช่ session เบราว์เซอร์อีกต่อไป
         $reading = ReadingChatContext::readingOf($conversation);
@@ -139,9 +143,14 @@ class ChatController extends Controller
             'conversation' => $conversation,
             'room'         => $conversation->persona,
             'rooms'        => ChatRooms::cards(),
-            'offerCards'   => $this->offerCardsFor($conversation, $user),
+            'offerCards'   => $hideOffers ? ['id' => null, 'offers' => []] : $this->offerCardsFor($conversation, $user),
             // 🔮 (2026-11-05) แพ็กเกจของห้องวางบนโต๊ะในห้องพยากรณ์ — กดเปิดไพ่ได้ตลอด ไม่ต้องรอแม่หมอยื่นการ์ด
-            'tableOffers'  => $gate['allowed'] ? array_slice(ChatOffers::forRoom((string) $conversation->persona, 'general', $user), 0, 3) : [],
+            //    ยกเว้นตอนกำลังทำนายอยู่ หรือมีบิลเติมเงินค้าง (โชว์บิล/การทำนายที่ค้างแทน)
+            'tableOffers'  => $gate['allowed'] && ! $hideOffers ? array_slice(ChatOffers::forRoom((string) $conversation->persona, 'general', $user), 0, 3) : [],
+            'roomLock'     => $lock !== null ? ReadingRoomLock::view($lock) : null,
+            'pendingBill'  => $bill !== null ? ChatTopupController::billView($bill) : null,
+            'aiSuggestions' => $hideOffers ? ChatSuggestions::withoutReadingStarters((array) Cache::get(self::askKey($conversation->id), []))
+                                           : (array) Cache::get(self::askKey($conversation->id), []),
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => $cost,
@@ -149,7 +158,7 @@ class ChatController extends Controller
             'dailyLimit'   => $dailyLimit,
             'dailyLeft'    => $dailyLeft ?? 0,
             'readonly'     => false, // live chat room — input is active
-            'suggestions'  => $this->suggestionsFor($conversation, $reading),
+            'suggestions'  => $this->staticChips($request, $this->suggestionsFor($conversation, $reading)),
             // คุยต่อจากผลทำนาย → เปิดเสียงแล้วแม่หมอชวนถามต่อ แทนคำทักทายทั่วไป
             'fromReading'  => $reading !== null,
             'topics'       => ChatSuggestions::topics(),
@@ -353,6 +362,36 @@ class ChatController extends Controller
         return [$room, $fresh];
     }
 
+    /** คีย์ cache ปุ่มจาก AI ชุดล่าสุดของห้อง */
+    private static function askKey(int $conversationId): string
+    {
+        return "chat:ask:{$conversationId}";
+    }
+
+    /** ปุ่มลัดตายตัว — ระหว่างทำนายอยู่ตัดปุ่มที่พาไปเริ่มดูดวงใบใหม่ออก */
+    private function staticChips(Request $request, array $chips): array
+    {
+        return ReadingRoomLock::active($request) !== null ? ChatSuggestions::withoutReadingStarters($chips) : $chips;
+    }
+
+    /**
+     * ลูกค้าขอดูดวงระหว่างที่ยังเปิดการ์ดใหม่ไม่ได้ — คืนคำตอบนุ่ม ๆ แทนการ์ด หรือ null ถ้าเปิดได้ตามปกติ
+     */
+    private function offerHold(Request $request, $user, ?string $persona): ?string
+    {
+        $self = ChatRooms::selfName($persona);
+        if (($lock = ReadingRoomLock::active($request)) !== null) {
+            return $lock['reason'] === 'reading'
+                ? "{$self}กำลังอ่านไพ่ชุดที่เปิดไว้ให้อยู่นะคะ อีกสักครู่คำทำนายจะเสร็จ แล้วถามต่อจากไพ่ชุดนั้นได้เลยค่ะ 🌙"
+                : "ตอนนี้เรากำลังอยู่ในพิธีเปิดไพ่กันอยู่นะคะ กลับไปเลือกไพ่ให้ครบก่อน แล้วค่อยถามต่อจากไพ่ได้เลยค่ะ 🌙";
+        }
+        if ($user && ($bill = ChatTopupController::pendingBill($user)) !== null) {
+            return "ยังมีบิลเติมเงินเลขที่ {$bill->reference_code} รอชำระอยู่นะคะ จ่ายบิลนี้ให้เรียบร้อยก่อน แล้ว{$self}เปิดไพ่ให้ต่อได้เลยค่ะ";
+        }
+
+        return null;
+    }
+
     /** ชุดปุ่มคำถามลัดที่เหมาะกับสถานะของบทสนทนาตอนนี้ */
     private function suggestionsFor(ChatConversation $conversation, ?Reading $reading): array
     {
@@ -476,6 +515,17 @@ class ChatController extends Controller
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
         $offers   = $kind === 'offer' ? ChatOffers::forRoom($conversation->persona, (string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
+        // 🔒 (2026-11-05) กำลังทำนายอยู่ (สับไพ่/อ่านไพ่) หรือมีบิลเติมเงินค้าง — ไม่ยื่นการ์ดเปิดไพ่ใบใหม่ซ้อน
+        //    เจ้าของสั่ง "ถ้าทำนายอยู่ปุ่มดูดวงไม่ควรโผล่มา" + "ป้ายเปิดไพ่ต้องไม่ขึ้นถ้ายังค้างบิลอยู่"
+        if ($offers !== [] && ($hold = $this->offerHold($request, $user, $conversation->persona)) !== null) {
+            $offers = [];
+            $reply  = $hold;
+        }
+        // ✨ ปุ่มที่ผู้พยากรณ์คิดมาให้จากบทสนทนา — การ์ดเปิดไพ่ขึ้นอยู่แล้วไม่ต้องมีปุ่มแย่งความสนใจ
+        $aiSuggestions = ! $degraded && $offers === [] ? (array) ($dispatch['suggestions'] ?? []) : [];
+        if ($aiSuggestions !== [] && ReadingRoomLock::active($request) !== null) {
+            $aiSuggestions = ChatSuggestions::withoutReadingStarters($aiSuggestions);
+        }
         if ($degraded) {
             // ไม่ได้คำตอบจริง ไม่คิดเงิน — ลูกค้าส่งใหม่ด้วยคีย์เดิมได้ทันที
             $this->releaseChargeLock();
@@ -510,6 +560,10 @@ class ChatController extends Controller
         // would be charged for a message they never see. Refund on failure.
         try {
             if (! $degraded) {
+                // จำปุ่มชุดล่าสุดไว้ให้หน้าที่รีเฟรช (ชุดว่าง = ลบของเก่า ไม่ให้ปุ่มของคำตอบก่อนค้างอยู่)
+                $aiSuggestions !== []
+                    ? Cache::put(self::askKey($conversation->id), $aiSuggestions, now()->addHours(6))
+                    : Cache::forget(self::askKey($conversation->id));
                 ChatMessage::create([
                     'chat_conversation_id' => $conversation->id,
                     'role'        => 'assistant',
@@ -557,7 +611,9 @@ class ChatController extends Controller
                 'blocked'     => ChatPolicy::exhausted($user),
                 'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
-                'suggestions' => $awaiting || $offers !== [] ? [] : ChatSuggestions::followUp(),
+                'suggestions' => $awaiting || $offers !== [] ? [] : $this->staticChips($request, ChatSuggestions::followUp()),
+                // ✨ (2026-11-05) ปุ่มจาก AI — แม่หมอถามกลับอยู่ = ตัวเลือกคำตอบ · ไม่ได้ถาม = คำถามที่น่าถามต่อ
+                'ai_suggestions' => $aiSuggestions,
                 // 🌙 (2026-09-15) ลูกค้าขอให้ทำนาย → การ์ดแพ็กเกจเปิดไพ่ (หักเครดิตตอนเปิดไพ่จริง)
                 'kind'        => $kind,
                 'offers'      => $offers,
@@ -745,7 +801,13 @@ class ChatController extends Controller
             return $this->degradedFallback($message, $context);
         }
 
-        return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
+        return [
+            'reply'       => $out['reply'],
+            'degraded'    => false,
+            'kind'        => $out['kind'],
+            'offer_topic' => $out['offer_topic'],
+            'suggestions' => $out['suggestions'] ?? [],
+        ];
     }
 
     /**

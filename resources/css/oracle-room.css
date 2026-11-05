@@ -80,6 +80,17 @@ html.or-open body > nav, html.or-open body > footer { display: none; }
 .or-offer:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.12); }
 .or-offer:disabled { opacity: .6; cursor: progress; }
 .or-offer-icon { font-size: 24px; }
+/* 🔒/🧾 ป้ายการทำนายที่ค้าง / บิลค้าง — ไม่ใช่ปุ่ม ไม่ลอยขึ้นตอนชี้ */
+.or-offer.is-hold { cursor: default; flex-wrap: wrap; }
+.or-offer.is-hold:hover { transform: none; filter: none; }
+.or-offer.is-hold b { color: var(--or-gold-hi); font-variant-numeric: tabular-nums; }
+.or-offer.is-hold form { margin: 0; }
+.or-hold-end { padding: 8px 14px; border-radius: 10px; font-weight: 700; font-size: 13px; color: var(--or-gold-hi); background: transparent;
+  border: 1px solid color-mix(in srgb, var(--or-gold-hi) 55%, transparent); cursor: pointer; white-space: nowrap; }
+.or-hold-end:hover { background: color-mix(in srgb, var(--or-gold-hi) 14%, transparent); }
+/* ✨ ปุ่มที่ผู้พยากรณ์คิดให้ — ขอบทองบาง ๆ แยกจากปุ่มลัดเดิม */
+.chip.chip-ai { border-color: color-mix(in srgb, var(--or-gold-hi, #f5d89a) 60%, transparent); }
+.pay-bill { text-align: center; margin: 4px 0 8px; }
 .or-offer-text strong { display: block; font-family: var(--thai, sans-serif); font-size: 15px; color: var(--or-gold-hi); }
 .or-offer-text small { font-size: 12px; color: var(--ink-dim, #c8b8de); }
 .or-offer-go { padding: 8px 18px; border-radius: 10px; font-weight: 700; font-size: 14px; color: #3a1d05; white-space: nowrap;

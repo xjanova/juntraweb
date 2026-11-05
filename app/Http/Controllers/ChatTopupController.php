@@ -78,9 +78,61 @@ class ChatTopupController extends Controller
             return response()->json(['error' => $e->getMessage(), 'reason_code' => 'pending_cap'], 422);
         }
 
-        $tx->update(['meta' => array_merge((array) $tx->meta, ['base_amount' => $base, 'source' => 'chat'])]);
+        // จำบัญชีที่ออก QR ไว้กับบิล — รีเฟรชหน้าแล้วออก QR ใบเดิมได้โดยไม่ต้องถาม Thaiprompt ใหม่ (resume)
+        $tx->update(['meta' => array_merge((array) $tx->meta, [
+            'base_amount'    => $base,
+            'source'         => 'chat',
+            'promptpay_id'   => $account['promptpay_id'],
+            'promptpay_name' => $account['name'],
+        ])]);
 
         return response()->json($this->payload($tx, $account));
+    }
+
+    /**
+     * 🧾 (2026-11-05) เปิด QR ของบิลที่ค้างอยู่อีกครั้ง — หน้าแชทเรียกหลังรีเฟรช บิลจะได้ไม่หายจากจอ
+     * (เดิมรีเฟรชแล้วบิลหาย ลูกค้ากดเปิดไพ่ใหม่ได้ทั้งที่โอนเงินบิลเก่าไปแล้ว)
+     */
+    public function resume(Request $request, WalletTransaction $tx): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user && $tx->user_id === $user->id, 403);
+        if ($tx->status !== 'pending' || ($tx->expires_at && $tx->expires_at->isPast())) {
+            return response()->json(['error' => 'บิลนี้ไม่ได้รอชำระแล้วค่ะ', 'status' => $tx->status, 'paid' => $tx->status === 'success'], 410);
+        }
+        $meta = (array) $tx->meta;
+        $account = ! empty($meta['promptpay_id'])
+            ? ['promptpay_id' => (string) $meta['promptpay_id'], 'name' => (string) ($meta['promptpay_name'] ?? ''), 'source' => 'bill']
+            : PayoutAccount::resolve($user);
+        if (! $account) {
+            return response()->json(['error' => 'ระบบเติมเงินยังไม่พร้อมชั่วคราว กรุณาติดต่อแอดมินค่ะ', 'reason_code' => 'promptpay_unset'], 503);
+        }
+
+        return response()->json($this->payload($tx, $account));
+    }
+
+    /** บิลเติมเงินที่ยังรอชำระ (ยังไม่หมดอายุ) ล่าสุดของลูกค้า หรือ null */
+    public static function pendingBill($user): ?WalletTransaction
+    {
+        return WalletTransaction::where('user_id', $user->id)
+            ->where('type', 'topup')
+            ->where('status', 'pending')
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+            ->latest('id')
+            ->first();
+    }
+
+    /** ข้อมูลบิลค้างสำหรับป้ายบนโต๊ะในห้องพยากรณ์ */
+    public static function billView(WalletTransaction $tx): array
+    {
+        return [
+            'id'             => $tx->id,
+            'reference_code' => $tx->reference_code,
+            'payable'        => (float) $tx->amount,
+            'expires_at'     => $tx->expires_at?->getTimestamp(),
+            'has_slip'       => ! empty($tx->slip_path),
+            'resume_url'     => route('chat.topup.resume', ['tx' => $tx->id]),
+        ];
     }
 
     /** เช็คว่าเงินเข้าหรือยัง — หน้าแชท poll ทุกไม่กี่วินาที */
@@ -91,6 +143,7 @@ class ChatTopupController extends Controller
 
         return response()->json([
             'id'      => $tx->id,
+            'reference_code' => $tx->reference_code,
             'status'  => $tx->status,
             'paid'    => $tx->status === 'success',
             'balance' => (float) $this->wallet->balance($user),
