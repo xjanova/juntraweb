@@ -149,7 +149,7 @@
                   :class="qa.started && !qa.over && left(qa.ends_at) <= qa.warn * 60 && 'is-low'"
                   title="เวลาถามต่อของไพ่ชุดนี้ · เริ่มนับเมื่อถามคำถามแรก">
               <small x-text="qa.over ? 'ถามต่อ' : (qa.started ? 'เหลือเวลา' : 'ถามต่อได้')">ถามต่อได้</small>
-              <b x-text="qa.over ? 'หมดเวลา' : (qa.started ? clock(qa.ends_at) : qa.minutes + ' นาที')">{{ $qa['minutes'] }} นาที</b>
+              <b x-text="'⏳ ' + (qa.over ? 'หมดเวลา' : (qa.started ? clock(qa.ends_at) : qa.minutes + ' นาที'))">⏳ {{ $qa['minutes'] }} นาที</b>
             </span>
             <button type="button" class="or-btn or-enough" x-show="!qa.over" x-cloak :disabled="qaBusy"
                     @click="endQa()" x-text="qaConfirm ? 'แตะอีกครั้งเพื่อจบ' : 'พอแล้ว'"
@@ -863,6 +863,11 @@ document.addEventListener('alpine:init', () => {
     /** mm:ss ที่เหลือถึงเวลา ts */
     clock(ts) {
       const s = this.left(ts);
+      // บิลเติมเงินอยู่ได้หลายชั่วโมง — "2878:47" อ่านไม่ออก เกินชั่วโมงแสดงเป็น ชม./นาที
+      if (s >= 3600) {
+        const h = Math.floor(s / 3600);
+        return h + ' ชม. ' + Math.floor((s % 3600) / 60) + ' นาที';
+      }
       return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
     },
     /** ทุกวินาที: เวลาถามต่อหมด → ปิดห้อง · เหลือ 1 นาที → เตือนครั้งเดียว · แล้วดูว่าลูกค้าเงียบไปนานไหม */
@@ -1089,7 +1094,10 @@ document.addEventListener('alpine:init', () => {
       const m = Object.assign({ id: ++this.seq, role, html, text, time: this.now(), state }, extra || {});
       this.messages.push(m);
       this.scrollToBottom(role === 'user');
-      return m;
+      // 🐞 (2026-11-05) ต้องคืนตัวที่ผ่าน proxy ของ Alpine — คืน m ดิบแล้วผู้เรียกแก้ค่าต่อ
+      //    (pay.step = 'qr', state = 'failed') หน้าจอไม่อัปเดต: กดเปิดไพ่ตอนเครดิตไม่พอ
+      //    ได้บิลแต่ QR ไม่ขึ้น · ส่งข้อความล้มก็ไม่เห็นปุ่มลองใหม่
+      return this.messages[this.messages.length - 1];
     },
 
     /* ---------- การ์ดแพ็กเกจเปิดไพ่ ---------- */

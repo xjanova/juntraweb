@@ -146,6 +146,8 @@ class ChatController extends Controller
         $reading = ReadingChatContext::readingOf($conversation);
         // ⏳ นาฬิกาถามต่อของห้องที่คุยต่อจากไพ่ (null = ห้องคุยทั่วไป)
         $qa = ReadingQaClock::state($conversation, $reading);
+        // ระหว่างเวลาถามต่อของไพ่ชุดนี้ = ยังอยู่ในการทำนาย → ไม่ยื่นไพ่ชุดใหม่ (กด "พอแล้ว" ก่อนได้)
+        $hideOffers = $hideOffers || ($qa !== null && ! $qa['over']);
 
         return view('pages.chat.index', [
             'qa'           => $qa,
@@ -396,9 +398,15 @@ class ChatController extends Controller
     /**
      * ลูกค้าขอดูดวงระหว่างที่ยังเปิดการ์ดใหม่ไม่ได้ — คืนคำตอบนุ่ม ๆ แทนการ์ด หรือ null ถ้าเปิดได้ตามปกติ
      */
-    private function offerHold(Request $request, $user, ?string $persona): ?string
+    private function offerHold(Request $request, $user, ?string $persona, ?array $qa = null): ?string
     {
         $self = ChatRooms::selfName($persona);
+        if ($qa !== null && ! $qa['over']) {
+            $mins = max(1, (int) ceil($qa['left'] / 60));
+
+            return "ตอนนี้เรากำลังคุยต่อจากไพ่ชุดที่เปิดไว้นะคะ ยังถามต่อได้อีกราว {$mins} นาที "
+                . "ถ้าอยากเปิดไพ่ชุดใหม่ กดปุ่ม \"พอแล้ว\" ด้านบนก่อน แล้ว{$self}เปิดให้ได้เลยค่ะ 🌙";
+        }
         if (($lock = ReadingRoomLock::active($request)) !== null) {
             return $lock['reason'] === 'reading'
                 ? "{$self}กำลังอ่านไพ่ชุดที่เปิดไว้ให้อยู่นะคะ อีกสักครู่คำทำนายจะเสร็จ แล้วถามต่อจากไพ่ชุดนั้นได้เลยค่ะ 🌙"
@@ -535,6 +543,7 @@ class ChatController extends Controller
                 : redirect()->route('chat.index', ['room' => $room])->with('status', $msg);
         }
         // คำถามแรก = เริ่มนับ (นับจากตอนลูกค้าถาม ไม่ใช่ตอนเปิดห้อง)
+        $qaJustStarted = $qa !== null && ! $qa['started'];
         if ($qa !== null) {
             ReadingQaClock::startIfNeeded($conversation);
         }
@@ -552,18 +561,23 @@ class ChatController extends Controller
         $offers   = $kind === 'offer' ? ChatOffers::forRoom($conversation->persona, (string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
         // 🔒 (2026-11-05) กำลังทำนายอยู่ (สับไพ่/อ่านไพ่) หรือมีบิลเติมเงินค้าง — ไม่ยื่นการ์ดเปิดไพ่ใบใหม่ซ้อน
         //    เจ้าของสั่ง "ถ้าทำนายอยู่ปุ่มดูดวงไม่ควรโผล่มา" + "ป้ายเปิดไพ่ต้องไม่ขึ้นถ้ายังค้างบิลอยู่"
-        if ($offers !== [] && ($hold = $this->offerHold($request, $user, $conversation->persona)) !== null) {
+        if ($offers !== [] && ($hold = $this->offerHold($request, $user, $conversation->persona, $qa)) !== null) {
             $offers = [];
             $reply  = $hold;
         }
         // ✨ ปุ่มที่ผู้พยากรณ์คิดมาให้จากบทสนทนา — การ์ดเปิดไพ่ขึ้นอยู่แล้วไม่ต้องมีปุ่มแย่งความสนใจ
         $aiSuggestions = ! $degraded && $offers === [] ? (array) ($dispatch['suggestions'] ?? []) : [];
-        if ($aiSuggestions !== [] && ReadingRoomLock::active($request) !== null) {
+        if ($aiSuggestions !== [] && (ReadingRoomLock::active($request) !== null || $qa !== null)) {
             $aiSuggestions = ChatSuggestions::withoutReadingStarters($aiSuggestions);
         }
         if ($degraded) {
             // ไม่ได้คำตอบจริง ไม่คิดเงิน — ลูกค้าส่งใหม่ด้วยคีย์เดิมได้ทันที
             $this->releaseChargeLock();
+            // ⏳ คำถามแรกไม่ได้คำตอบ = ยังไม่เริ่มนับ (ลูกค้าไม่เสียเวลาถามต่อไปกับตอนที่ระบบล่ม)
+            if ($qaJustStarted) {
+                ChatConversation::whereKey($conversation->id)->update(['qa_started_at' => null]);
+                $conversation->refresh();
+            }
             // 🔮 (2026-11-03) และไม่กินโควตาคุยฟรี: dailyUsed() นับข้อความของลูกค้า ถ้าเก็บไว้ ส่งใหม่หนึ่งครั้ง
             //    = เสียโควตาสองข้อความแลกคำตอบเดียว · คำขอโทษก็ไม่เก็บ (ลูกค้าเห็นบนจอแล้ว ส่งใหม่ได้คำตอบจริงแทน)
             $userMessage->delete();

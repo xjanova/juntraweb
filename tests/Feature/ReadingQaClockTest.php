@@ -26,6 +26,9 @@ class ReadingQaClockTest extends TestCase
 
     private const TP = 'https://tp.test';
 
+    /** จำลองระบบผู้พยากรณ์ล่ม (ส่งข้อความแล้วไม่ได้คำตอบจริง) */
+    private bool $down = false;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -44,7 +47,9 @@ class ReadingQaClockTest extends TestCase
             return match (true) {
                 str_ends_with($url, '/oauth/token') => Http::response(['access_token' => 'srv-token', 'expires_in' => 3600]),
                 str_ends_with($url, '/server/chat/start') => Http::response(['data' => ['session_id' => 'sess-1']], 201),
-                str_ends_with($url, '/server/chat/send') => Http::response(['data' => ['session_id' => 'sess-1', 'reply' => 'ไพ่บอกว่าไปต่อได้จ้ะ', 'kind' => 'reply']]),
+                str_ends_with($url, '/server/chat/send') => $this->down
+                    ? Http::response([], 503)
+                    : Http::response(['data' => ['session_id' => 'sess-1', 'reply' => 'ไพ่บอกว่าไปต่อได้จ้ะ', 'kind' => 'reply']]),
                 default => Http::response([], 503),
             };
         });
@@ -150,6 +155,39 @@ class ReadingQaClockTest extends TestCase
         $this->actingAs($user)->postJson('/chat/send', ['message' => 'คุยเรื่องอื่นค่ะ', 'room' => $room->persona])->assertOk()
             ->assertJsonPath('qa', null);
         $this->assertNotNull(ChatConversation::find($room->id));
+    }
+
+    public function test_no_new_spread_is_offered_while_the_follow_up_window_is_open(): void
+    {
+        $user = $this->member();
+        $room = $this->enter($user, $this->reading($user));
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อแรกค่ะ', 'room' => $room->persona])->assertOk();
+
+        // ระหว่างถามต่อ = ยังอยู่ในการทำนาย → ไม่มีป้ายเปิดไพ่ชุดใหม่บนโต๊ะ
+        $this->actingAs($user)->get('/chat?room=' . $room->persona)->assertOk()
+            ->assertViewHas('tableOffers', [])
+            ->assertViewHas('offerCards', fn ($c) => $c['offers'] === []);
+
+        // กด "พอแล้ว" → จบการทำนาย ป้ายกลับมา
+        $this->actingAs($user)->postJson(route('chat.qa.end'), ['room' => $room->persona])->assertOk();
+        $this->actingAs($user)->get('/chat?room=' . $room->persona)->assertOk()
+            ->assertViewHas('tableOffers', fn ($o) => $o !== []);
+    }
+
+    public function test_a_first_question_that_got_no_real_answer_does_not_start_the_clock(): void
+    {
+        $user = $this->member();
+        $room = $this->enter($user, $this->reading($user));
+
+        $this->down = true;
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อแรกค่ะ', 'room' => $room->persona]);
+        $this->assertNull($room->fresh()->qa_started_at, 'ระบบล่มตอนคำถามแรก ห้ามเริ่มนับเวลาของลูกค้า');
+
+        $this->down = false;
+        $this->travel(5)->minutes();
+        $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อแรกอีกครั้งค่ะ', 'room' => $room->persona])->assertOk();
+        $this->assertTrue($res->json('qa.started'));
+        $this->assertSame(now()->addMinutes(15)->getTimestamp(), $res->json('qa.ends_at'), 'นับเต็ม 15 นาทีจากคำถามที่ได้คำตอบจริง');
     }
 
     public function test_a_plain_room_has_no_clock_and_enough_is_refused(): void
