@@ -284,6 +284,31 @@ class JuntraServerClient
         return null;
     }
 
+    /**
+     * 📈 กราฟชีวิตมหาทักษา (คะแนนรายปีอายุ 0–100 · ช่วงดาวเสวย · จุดรุ่ง/ระวัง) ให้โรงละครคำทำนาย
+     * คำนวณที่ Thaiprompt ก้อนเดียวกับรูปกราฟใน LINE (เว็บไม่มีผังดาวเต็ม) — ไม่ใช้ AI ไม่คิดเงิน
+     *
+     * มีคนรอหน้าเว็บอยู่ ⇒ รอสั้น (6 วิ) · ล้ม/ยังไม่ deploy = null แล้วโรงละครแสดงกราฟเส้นทางไพ่แทน
+     */
+    public function lifeGraph(string $birthDate, ?string $birthTime = null, ?string $birthPlace = null): ?array
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->connectTimeout(3)->timeout(6)->post($this->url('/fortune/lifegraph'), array_filter([
+            'birth_date'  => $birthDate,
+            'birth_time'  => $birthTime,
+            'birth_place' => $birthPlace,
+        ], fn ($v) => $v !== null && $v !== '')));
+
+        if ($resp?->successful() && is_array($resp->json('data.years')) && is_array($resp->json('data.periods'))) {
+            return $resp->json('data');
+        }
+        $this->logMiss('fortune:lifegraph', $resp);
+
+        return null;
+    }
+
     /* ======================= UNIQUE AMOUNTS ======================= */
 
     /**

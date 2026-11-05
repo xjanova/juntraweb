@@ -175,6 +175,11 @@
       </div>
     @endif
 
+    {{-- 🎭 (2026-11-04) โรงละครคำทำนาย — เจ้าของคำทำนายเท่านั้น (มีเสียงเล่า/ข้อความของลูกค้าคนนี้) --}}
+    @if ($isOwner && \App\Support\ReadingTheater::available($reading))
+      <x-reading-theater :reading="$reading" :parsed="$sections" :can-chat="$canConsult" />
+    @endif
+
     @if ($reading->isInProgress())
       {{-- 🔮 แม่หมอกำลังอ่านไพ่เบื้องหลัง — ไพ่ที่เปิดได้อยู่ด้านบนแล้ว ถามสถานะทุก 3 วิ เสร็จ = โหลดหน้าใหม่ --}}
       <div class="panel reading-wait" style="margin-top:44px;text-align:center" role="status" aria-live="polite"

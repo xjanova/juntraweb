@@ -4,37 +4,78 @@
 
 @section('content')
 
-{{-- สไลด์แม่หมอใน hero (2026-11-04) — ไฟล์ไหนยังไม่มีก็ข้าม ไม่มีสักไฟล์ = hero แบบเดิม (ข้อความกลางจอ) --}}
+{{-- 🤖 (2026-11-04, owner) คำโปรยชุดแรก (h1) เปิดตัวตรง ๆ ว่าเป็นหมอดู AI — คำต้องไม่เกินที่ระบบทำจริง (ดู Seo::DEFAULT_DESCRIPTION) --}}
+{{-- สไลด์แม่หมอ + น้องบุษบา เป็นพื้นหลังเต็มจอของ hero (2026-11-04 — เจ้าของสั่ง "แบล็คกราวด์สไลด์ เต็มจอ" ไม่ใช่การ์ด)
+     แต่ละภาพมีคำโปรยของตัวเอง เปลี่ยนตามภาพ (เจ้าของสั่ง "คำโปรย ให้เปลี่ยนไปเรื่อยๆ ตามภาพเช่นกัน")
+     title = [คำนำ, คำเน้นสีม่วง, บรรทัดสอง] · ภาพแรกต้องเป็นแม่หมอ (คำโปรยชุดแรกคือ h1 ของหน้า)
+     ไฟล์ไหนยังไม่มีก็ข้ามทั้งภาพและคำโปรย ไม่มีสักไฟล์ = hero แบบเดิม (ภาพพื้นหลังเดียว + คำโปรยชุดแรกกลางจอ) --}}
 @php
-  $heroSlides = collect([
-      ['src' => 'images/juntra/hero/maemor-1.webp', 'alt' => 'แม่หมอจันทราวางไพ่ยิปซีบนโต๊ะไม้แกะสลักลายไทย พร้อมอ่านดวงให้ท่าน'],
-      ['src' => 'images/juntra/hero/maemor-2.webp', 'alt' => 'แม่หมอจันทราเพ่งลูกแก้วคริสตัลที่เปล่งแสงดวงดาว'],
-      ['src' => 'images/juntra/hero/maemor-3.webp', 'alt' => 'แม่หมอจันทรายืนใต้พระจันทร์เต็มดวงบนระเบียงศาลาไทยยามค่ำคืน'],
-      ['src' => 'images/juntra/hero/maemor-4.webp', 'alt' => 'แม่หมอจันทรายื่นไพ่ทาโรต์ให้ท่านเลือกหนึ่งใบ'],
-      ['src' => 'images/juntra/hero/maemor-5.webp', 'alt' => 'แม่หมอจันทราอวยพรหน้ากงล้อจักรราศีสีทอง'],
-  ])->filter(fn ($s) => file_exists(public_path($s['src'])))->values();
+  $heroAll = collect([
+      ['src' => 'images/juntra/hero/maemor-1.webp', 'alt' => 'แม่หมอจันทราวางไพ่ยิปซีบนโต๊ะไม้แกะสลักลายไทย พร้อมอ่านดวงให้ท่าน',
+       'eyebrow' => 'หมอดู AI · อ่านจากตำราจริง คำนวณจริง',
+       'title' => ['เปิดประตู', 'โชคชะตา', 'ด้วยพลังแห่งดวงดาว'],
+       'sub' => 'แม่หมอจันทราคือหมอดู AI เลือกไพ่ด้วยมือของท่านเองจากสำรับ 78 ใบ แล้วแม่หมออ่านไพ่ × ตำแหน่ง จากความหมายในตำราจริง ไม่เดา ไม่มโน — คุยกับแม่หมอได้ฟรี จ่ายเฉพาะตอนเปิดไพ่'],
+      ['src' => 'images/juntra/hero/busaba-1.webp', 'alt' => 'น้องบุษบานั่งบนพระจันทร์เสี้ยวสีทองกลางท้องฟ้าเต็มไปด้วยดวงดาว',
+       'eyebrow' => 'น้องบุษบา · ศิษย์แม่หมอจันทรา',
+       'title' => ['อยากรู้', 'เร็ว ๆ', 'ถามบุษบาได้เลย'],
+       'sub' => 'ถามเรื่องที่ค้างใจเรื่องเดียว บุษบาเปิดไพ่ 3 ใบ ตอบตรง ๆ ไม่อ้อมค้อม ทั้งเรื่องรัก งาน และเงิน'],
+      ['src' => 'images/juntra/hero/maemor-2.webp', 'alt' => 'แม่หมอจันทราเพ่งลูกแก้วคริสตัลที่เปล่งแสงดวงดาว',
+       'eyebrow' => 'แม่หมอจันทรา · ผู้พยากรณ์หลัก',
+       'title' => ['ส่องลึก', 'ถึงแก่น', 'ทุกเรื่องที่ค้างใจ'],
+       'sub' => 'ไพ่ Celtic Cross 10 ใบ ผสานดวงวันเกิดของท่าน แม่หมออ่านทีละตำแหน่ง ละเอียดทั้งรัก งาน เงิน และสุขภาพ'],
+      ['src' => 'images/juntra/hero/busaba-2.webp', 'alt' => 'น้องบุษบาในหมวกแม่มดสีม่วง ยิ้มสดใสขณะเปิดไพ่ทาโรต์บนโต๊ะในห้องดูดวง',
+       'eyebrow' => 'ห้องบุษบา · สดใส เป็นกันเอง',
+       'title' => ['เรื่องที่', 'ค้างใจ', 'เล่าให้บุษบาฟัง'],
+       'sub' => 'คุยกับบุษบาได้ฟรี เล่าเรื่องให้ฟังก่อน พร้อมเมื่อไหร่ค่อยเปิดไพ่ — จ่ายเฉพาะตอนเปิดไพ่'],
+      ['src' => 'images/juntra/hero/maemor-3.webp', 'alt' => 'แม่หมอจันทรายืนใต้พระจันทร์เต็มดวงบนระเบียงศาลาไทยยามค่ำคืน',
+       'eyebrow' => 'ใต้แสงจันทร์เต็มดวง',
+       'title' => ['ทุกคำถาม', 'มีคำตอบ', 'รออยู่ในไพ่ของท่าน'],
+       'sub' => 'ตั้งจิตให้นิ่ง เลือกไพ่ด้วยมือของท่านเอง แล้วแม่หมอจันทราจะอ่านให้ฟังทีละใบ'],
+      ['src' => 'images/juntra/hero/maemor-4.webp', 'alt' => 'แม่หมอจันทรายื่นไพ่ทาโรต์ให้ท่านเลือกหนึ่งใบ',
+       'eyebrow' => 'ไพ่ใบนี้รอท่านอยู่',
+       'title' => ['หยิบไพ่', 'ใบที่ใช่', 'ด้วยมือของท่านเอง'],
+       'sub' => 'สำรับ 78 ใบ สับจริง เลือกจริง — ไม่มีใครเลือกแทนท่าน'],
+      ['src' => 'images/juntra/hero/busaba-3.webp', 'alt' => 'น้องบุษบาชูไพ่ทาโรต์หลายใบในมือ ยิ้มกว้างอย่างเป็นกันเอง',
+       'eyebrow' => 'ไพ่ดูไว 3 ใบ',
+       'title' => ['สามใบ', 'ชัดใจ', 'ได้คำตอบทันใจ'],
+       'sub' => 'ตอนนี้เป็นยังไง ต้องระวังอะไร และควรทำอะไรต่อ — บุษบาอ่านให้ครบในราว 3 นาที'],
+      ['src' => 'images/juntra/hero/maemor-5.webp', 'alt' => 'แม่หมอจันทราอวยพรหน้ากงล้อจักรราศีสีทอง',
+       'eyebrow' => 'พรจากจักรราศี',
+       'title' => ['ให้ทุกก้าว', 'มีดาว', 'นำทาง'],
+       'sub' => 'ให้แม่หมออวยพร และชี้ทางเสริมดวงจากไพ่ของท่าน ก่อนก้าวต่อไปในเรื่องสำคัญ'],
+  ]);
+  $heroSlides = $heroAll->filter(fn ($s) => file_exists(public_path($s['src'])))->values();
+  $heroCaptions = $heroSlides->isNotEmpty() ? $heroSlides : $heroAll->take(1);
 @endphp
 <section class="hero{{ $heroSlides->isNotEmpty() ? ' has-slides' : '' }}" id="top">
-  <div class="hero-bg">
-    <img src="{{ asset('images/juntra/hero-bg.webp') }}" alt="">
-  </div>
-  <div class="hero-orbit" aria-hidden="true">
-    <div class="ring"></div>
-    <div class="ring r2"></div>
-    <div class="ring r3"></div>
-  </div>
-  <div class="hero-layout">
-  <div class="hero-inner">
-    {{-- 🤖 (2026-11-04, owner) เปิดตัวตรง ๆ ว่าเป็นหมอดู AI — คำต้องไม่เกินที่ระบบทำจริง (ดู Seo::DEFAULT_DESCRIPTION) --}}
-    <div class="hero-eyebrow"><span class="dot"></span> หมอดู AI · อ่านจากตำราจริง คำนวณจริง</div>
-    <h1 style="padding:50px 0 14px">
-      เปิดประตู<span class="accent" style="margin:0 20px 0 0"> โชคชะตา </span><br>
-      ด้วยพลังแห่งดวงดาว
-    </h1>
-    <p class="hero-sub">
-      แม่หมอจันทราคือ<strong>หมอดู AI</strong> เลือกไพ่ด้วยมือของท่านเองจากสำรับ 78 ใบ แล้วแม่หมออ่านไพ่ × ตำแหน่ง<br>
-      จากความหมายในตำราจริง <em class="thai-italic">ไม่เดา ไม่มโน</em> — คุยกับแม่หมอได้ฟรี จ่ายเฉพาะตอนเปิดไพ่
-    </p>
+  @if ($heroSlides->isNotEmpty())
+    <x-hero-slides :slides="$heroSlides" />
+  @else
+    <div class="hero-bg">
+      <img src="{{ asset('images/juntra/hero-bg.webp') }}" alt="">
+    </div>
+    <div class="hero-orbit" aria-hidden="true">
+      <div class="ring"></div>
+      <div class="ring r2"></div>
+      <div class="ring r3"></div>
+    </div>
+  @endif
+  <div class="hero-inner" x-data="{ i: 0 }" @hero-slide.window="i = $event.detail">
+    {{-- คำโปรยทุกชุดซ้อนกันในช่องเดียว (grid) — กล่องสูงเท่าชุดที่ยาวที่สุด ปุ่มด้านล่างไม่กระโดด
+         ชุดที่ไม่ได้แสดงซ่อนด้วย visibility (โปรแกรมอ่านจอข้ามให้) · ชุดแรกแสดงตั้งแต่ก่อน Alpine ทำงาน --}}
+    <div class="hero-captions">
+      @foreach ($heroCaptions as $k => $c)
+        <div class="hero-caption{{ $k === 0 ? ' is-active' : '' }}" :class="{ 'is-active': i === {{ $k }} }">
+          <div class="hero-eyebrow"><span class="dot"></span> {{ $c['eyebrow'] }}</div>
+          @if ($k === 0)
+            <h1 class="hero-title">{{ $c['title'][0] }}<span class="accent"> {{ $c['title'][1] }} </span><br>{{ $c['title'][2] }}</h1>
+          @else
+            <p class="hero-title">{{ $c['title'][0] }}<span class="accent"> {{ $c['title'][1] }} </span><br>{{ $c['title'][2] }}</p>
+          @endif
+          <p class="hero-sub">{{ $c['sub'] }}</p>
+        </div>
+      @endforeach
+    </div>
     <div class="hero-cta">
       <a href="{{ route('tarot.index') }}" class="btn btn-primary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M5 19l3-3M16 8l3-3"/><circle cx="12" cy="12" r="3"/></svg>
@@ -42,8 +83,6 @@
       </a>
       <a href="#services" class="btn btn-ghost">ดูแพ็กเกจไพ่ทั้งหมด →</a>
     </div>
-  </div>
-  <x-hero-slides :slides="$heroSlides" />
   </div>
   <div class="scroll-cue" aria-hidden="true">
     <span>SCROLL</span>
