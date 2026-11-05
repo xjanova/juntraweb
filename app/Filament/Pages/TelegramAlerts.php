@@ -17,6 +17,7 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * แจ้งเตือนแอดมินผ่าน Telegram — ตั้งบอท เลือกแชท เลือกหมวด ทดสอบ และดูประวัติที่ส่งไป
@@ -201,6 +202,35 @@ class TelegramAlerts extends Page implements HasForms
         if (! AlertCard::available()) {
             return null;
         }
+
+        // วาดการ์ดด้วย GD ใช้ ~0.5 วิ บนเครื่อง prod (วัด 2026-11-04) และเดิมวาดใหม่ทุกครั้งที่หน้านี้ render
+        // (เปิดหน้า + ทุกคลิกใน Livewire) — เก็บไว้รายชั่วโมง เวลาในการ์ดจึงตรึงที่ต้นชั่วโมง
+        // คีย์ผูกกับเวลาแก้ไขของโค้ดวาด/ฟอนต์ แก้ดีไซน์การ์ดแล้วเห็นของใหม่ทันที · วาดไม่ได้ (null) ไม่เก็บ
+        $at = now()->startOfHour();
+        $key = 'telegram-alerts:preview:' . md5(implode('|', [
+            $at->timestamp,
+            url('/admin'),
+            @filemtime(app_path('Support/Alerts/AlertCard.php')),
+            @filemtime(resource_path('fonts/NotoSansThai-Regular.ttf')),
+            @filemtime(resource_path('fonts/NotoSansThai-Bold.ttf')),
+        ]));
+
+        $cached = Cache::get($key);
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+
+        $uri = $this->renderPreview($at);
+        if ($uri !== null) {
+            Cache::put($key, $uri, now()->addMinutes(65));
+        }
+
+        return $uri;
+    }
+
+    /** วาดการ์ดตัวอย่างจริง (ช้า) — เรียกผ่าน getPreviewProperty ที่แคชไว้เท่านั้น */
+    private function renderPreview(\Carbon\CarbonInterface $at): ?string
+    {
         $png = AlertCard::png(new Alert(
             key: 'preview',
             level: Alert::MONEY,
@@ -209,7 +239,7 @@ class TelegramAlerts extends Page implements HasForms
             facts: ['ลูกค้า' => 'คุณสมใจ', 'ช่องทาง' => 'ตรวจสลิปอัตโนมัติ', 'คงเหลือ' => '฿240.37', 'อ้างอิง' => 'TUP-8K2M4Q1Z'],
             url: url('/admin'),
             category: 'money',
-        ));
+        ), $at);
 
         return $png ? 'data:image/png;base64,' . base64_encode($png) : null;
     }

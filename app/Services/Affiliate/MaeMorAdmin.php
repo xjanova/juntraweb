@@ -28,10 +28,46 @@ class MaeMorAdmin
 
     public function commissions(array $filters = [], int $page = 1, int $perPage = 25): array
     {
-        return $this->call('GET', '/admin/commissions', array_filter($filters + [
+        return $this->call('GET', '/admin/commissions', $this->commissionQuery($filters, $page, $perPage));
+    }
+
+    /**
+     * ⚡ รายการค่าแนะนำ + ภาพรวม ในรอบเดียว (ยิงสองเส้นพร้อมกัน) — หน้า "ค่าแนะนำ" ใช้ทั้งคู่ทุกครั้งที่โหลด
+     * ผลเท่ากับเรียก commissions() กับ overview() แยกกัน แต่รอแค่เส้นที่ช้าที่สุด
+     *
+     * @return array{list: array, overview: array}
+     */
+    public function commissionsWithOverview(array $filters, array $dates, int $page = 1, int $perPage = 25): array
+    {
+        $res = $this->server->affiliateMany([
+            'list' => ['/admin/commissions', $this->commissionQuery($filters + $dates, $page, $perPage)],
+            'overview' => ['/admin/overview', array_filter($dates)],
+        ], timeout: 20);
+
+        return ['list' => $this->wrap($res['list']), 'overview' => $this->wrap($res['overview'])];
+    }
+
+    /**
+     * ⚡ สถิติ + ผังของผู้ใช้หนึ่งคน ในรอบเดียว (หน้า "ผังแม่หมอ" ใช้คู่กันเสมอ)
+     *
+     * @return array{stats: array, tree: array}
+     */
+    public function userStatsAndTree(int $thaipromptUserId, int $depth = 5): array
+    {
+        $res = $this->server->affiliateMany([
+            'stats' => ["/admin/users/{$thaipromptUserId}/stats", []],
+            'tree' => ["/admin/users/{$thaipromptUserId}/tree", ['depth' => $depth]],
+        ], timeout: 20);
+
+        return ['stats' => $this->wrap($res['stats']), 'tree' => $this->wrap($res['tree'])];
+    }
+
+    private function commissionQuery(array $filters, int $page, int $perPage): array
+    {
+        return array_filter($filters + [
             'page' => $page,
             'per_page' => $perPage,
-        ], fn ($v) => $v !== null && $v !== '' && $v !== 'all'));
+        ], fn ($v) => $v !== null && $v !== '' && $v !== 'all');
     }
 
     public function approve(User $actor, array $ids): array
@@ -116,8 +152,12 @@ class MaeMorAdmin
 
     private function call(string $method, string $path, array $payload = []): array
     {
-        $res = $this->server->affiliate($method, $path, $payload, timeout: 20);
+        return $this->wrap($this->server->affiliate($method, $path, $payload, timeout: 20));
+    }
 
+    /** แปลผลดิบจาก JuntraServerClient เป็นรูปแบบเดียวของคลาสนี้ ['ok', 'data', 'message'] */
+    private function wrap(array $res): array
+    {
         if ($res['status'] === 'ok') {
             return ['ok' => true, 'data' => $res['data'], 'message' => null];
         }

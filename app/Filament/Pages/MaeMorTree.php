@@ -81,8 +81,8 @@ class MaeMorTree extends Page
         $this->userId = $thaipromptUserId;
         $this->depth = max(1, min($this->depth, 10));
 
-        $stats = $admin->userStats($thaipromptUserId);
-        $tree = $admin->userTree($thaipromptUserId, $this->depth);
+        // สถิติ + ผัง ยิงพร้อมกัน — รอแค่เส้นที่ช้ากว่า ไม่ใช่ผลรวมของสองเส้น
+        ['stats' => $stats, 'tree' => $tree] = $admin->userStatsAndTree($thaipromptUserId, $this->depth);
 
         $this->error = $stats['ok'] && $tree['ok'] ? null : ($stats['message'] ?? $tree['message']);
         $this->stats = $stats['ok'] ? (array) $stats['data'] : [];

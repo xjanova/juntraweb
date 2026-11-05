@@ -14,6 +14,12 @@ class RevenueChartWidget extends ChartWidget
 {
     protected static ?string $heading = 'รายได้จากการเติมเงิน (30 วันล่าสุด)';
     protected static ?int $sort = 1;
+
+    /** ⚡ กราฟ 30 วันไม่เปลี่ยนระหว่างเปิดหน้า — ปิด poll ทุก 5 วิ ที่เป็นค่า default ของ Filament */
+    protected static ?string $pollingInterval = null;
+
+    /** วาดพร้อมหน้า (อ่านแถวเติมเงิน 30 วันแถวเดียว) ไม่ต้องรอคำขอแยกหลังหน้าโหลด */
+    protected static bool $isLazy = false;
     protected int|string|array $columnSpan = 'full';
 
     public static function canView(): bool

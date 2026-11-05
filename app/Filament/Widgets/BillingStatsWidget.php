@@ -17,6 +17,16 @@ use Illuminate\Support\Carbon;
 class BillingStatsWidget extends BaseWidget
 {
     protected static ?int $sort = 0;
+
+    /**
+     * ⚡ ค่า default ของ Filament คือ poll ทุก 5 วิ — แดชบอร์ดที่เปิดค้างไว้บูต Laravel เต็มรอบทุก 5 วิ
+     * (prod วัด 2026-11-04: รอบละ ~0.8–1.2 วิ จากเบราว์เซอร์) ตัวเลขชุดนี้ไม่ต้องสดระดับวินาที
+     * รายการเติมเงินใหม่แจ้งทาง Telegram อยู่แล้ว — ใช้ 60 วิ เท่ากับ ReadingBillStats
+     */
+    protected static ?string $pollingInterval = '60s';
+
+    /** เบา (count/sum ไม่กี่ตัว) — วาดพร้อมหน้า ไม่ต้องยิง /livewire/update แยกอีกรอบหลังหน้าโหลด */
+    protected static bool $isLazy = false;
     protected int|string|array $columnSpan = 'full';
 
     public static function canView(): bool

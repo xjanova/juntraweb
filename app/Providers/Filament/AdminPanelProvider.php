@@ -36,6 +36,12 @@ class AdminPanelProvider extends PanelProvider
             // หน้าล็อกอินของเราเอง = ของ Filament + Cloudflare Turnstile บังคับ
             // (ของเดิมมีแค่ rate limit 5 ครั้ง/นาที/IP ซึ่งบ็อตเน็ตเดินผ่านได้)
             ->login(AdminLogin::class)
+            // ⚡ เปลี่ยนหน้าในหลังบ้านแบบ SPA (wire:navigate): ดึงแค่ HTML ของหน้าใหม่ ไม่โหลด/รัน JS-CSS
+            // ของ Filament ใหม่ทุกคลิก — วัด prod 2026-11-04 ช่วงหลังได้ HTML จนหน้าพร้อม ~0.66 วิ ต่อหน้า
+            // ปุ่ม/ลิงก์ของ Filament ที่ชี้ไปหน้าเว็บลูกค้า (คนละ layout คนละ asset) ต้องโหลดเต็มหน้า:
+            // ตอนนี้มีที่เดียวคือปุ่มเปิด /mlm ในหน้า "ดูผัง MLM" — ลิงก์อื่นไปหน้าเว็บลูกค้าเปิดแท็บใหม่อยู่แล้ว
+            ->spa()
+            ->spaUrlExceptions(fn (): array => [url('/mlm') . '*'])
             ->brandName($brand)
             ->colors([
                 'primary' => Color::Amber,
