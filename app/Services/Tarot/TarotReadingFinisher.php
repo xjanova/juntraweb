@@ -109,6 +109,12 @@ class TarotReadingFinisher
                 ]);
             }
         }
+        // ✨ ซื้อพรีเมียมเสียงไว้ด้วย — ไม่มีคำทำนายให้เล่า ก็คืน +฿100 ด้วย
+        try {
+            \App\Support\VoicePremium::refund($reading, $reason);
+        } catch (\Throwable $e) {
+            Log::critical('Voice premium refund FAILED — manual intervention needed', ['reading' => $reading->id, 'err' => $e->getMessage()]);
+        }
 
         return true;
     }

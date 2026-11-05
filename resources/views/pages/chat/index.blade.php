@@ -144,6 +144,9 @@
         </div>
         <div class="or-hud-end">
           {{-- ⏳ (2026-11-05) เวลาถามต่อของไพ่ชุดนี้ — นับจากคำถามแรก ตามนาฬิกาเซิร์ฟเวอร์ · "พอแล้ว" = จบก่อนเวลา --}}
+          @if (! empty($qa) && ! empty($qa['premium']))
+            <span class="or-pill or-premium" x-show="qa.premium && !qa.over" x-cloak title="พรีเมียม — ทุกคำตอบพูดออกเสียง">🎙️ <b>พรีเมียม</b></span>
+          @endif
           @if (! empty($qa))
             <span class="or-pill or-qa" role="timer" aria-live="off"
                   :class="qa.started && !qa.over && left(qa.ends_at) <= qa.warn * 60 && 'is-low'"
@@ -559,6 +562,11 @@
                     <rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
                   </svg>
                 </button>
+
+                {{-- ✨ พรีเมียมเสียง — ฟัง/ฟังซ้ำคำตอบนี้ (เปิดเสียงไว้ = เล่นเองทันที) --}}
+                <button type="button" class="chip chip-ai" style="padding:4px 12px;font-size:12px"
+                        x-show="m.voiceUrl" x-cloak @click="playReplyVoice(m.voiceUrl)"
+                        :aria-label="'ฟังเสียง' + persona.short">🔊 ฟังเสียง</button>
 
                 {{-- ส่งไม่สำเร็จ → ลองใหม่ด้วย idempotency key เดิม จึงไม่ถูกคิดเงินซ้ำ --}}
                 <button type="button" class="chip" style="padding:4px 12px;font-size:12px"
@@ -1191,6 +1199,25 @@ document.addEventListener('alpine:init', () => {
     voice(key, once = true) {
       window.dispatchEvent(new CustomEvent('oracle-say', { detail: { key, once } }));
     },
+    /** ✨ เล่นเสียงคำตอบ (พรีเมียม) ทีละเสียง — เพลงห้องหรี่ลงระหว่างพูด */
+    playReplyVoice(url) {
+      try {
+        if (this.replyAudio) this.replyAudio.pause();
+        const a = new Audio(url);
+        this.replyAudio = a;
+        const done = () => {
+          if (this.replyAudio !== a) return;
+          this.replyAudio = null;
+          window.dispatchEvent(new CustomEvent('oracle-voice', { detail: { on: false } }));
+        };
+        a.addEventListener('ended', done);
+        a.addEventListener('error', done);
+        a.addEventListener('pause', done);
+        window.dispatchEvent(new CustomEvent('oracle-voice', { detail: { on: true } }));
+        const p = a.play();
+        if (p && p.catch) p.catch(done);
+      } catch (_) { /* เบราว์เซอร์เล่นไม่ได้ — ข้อความยังอยู่ครบ */ }
+    },
     say(text) {                 // ข้อความจาก "ระบบ" ไม่ใช่คำพูดของแม่หมอ
       return this.push('assistant', this.escape(text).replace(/\n/g, '<br>'), 'system');
     },
@@ -1460,7 +1487,12 @@ document.addEventListener('alpine:init', () => {
         const offers = Array.isArray(j.offers) && j.offers.length
           ? { offers: j.offers, question: j.question || text }
           : null;
-        this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '', offers);
+        const said = this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '', offers);
+        // ✨ พรีเมียมเสียง — แนบเสียงกับฟองคำตอบ · ลำโพงเปิดอยู่ = พูดทันที
+        if (j.voice_url) {
+          said.voiceUrl = j.voice_url;
+          if (window.JuntraVoice && window.JuntraVoice.on()) this.playReplyVoice(j.voice_url);
+        }
 
         // เสียงประโยคประจำตามจังหวะของบทสนทนา (คำตอบจริงเป็นตัวอักษรเสมอ — เสียงแค่ชวน/ย้ำ)
         if (offers) this.voice('offer_cards', false);

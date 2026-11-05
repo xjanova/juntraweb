@@ -158,3 +158,7 @@ html.or-open body > nav, html.or-open body > footer { display: none; }
   .or-actor img { animation: none; }
   .is-room .chat-panel { transition: none; }
 }
+
+/* ✨ (2026-11-05) ป้ายพรีเมียมเสียงใน HUD */
+.or-premium { color: #2a1606; background: linear-gradient(90deg, #ffe6a8, #f5c46a); border-color: rgba(255, 214, 128, .8); }
+.or-premium b { font-weight: 700; }

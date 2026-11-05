@@ -7,6 +7,9 @@ use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\Reading;
+use App\Services\Thaiprompt\JuntraServerClient;
+use App\Support\ReadingTheater;
+use App\Support\VoicePremium;
 use App\Services\AiOracle;
 use App\Services\Chat\ChatOffers;
 use App\Services\Chat\ChatReadingIntent;
@@ -268,6 +271,40 @@ class ChatController extends Controller
         $token  = $tokens[$room] ?? ($room === ChatRooms::DEFAULT ? $request->session()->get('chat_token') : null);
 
         return is_string($token) && $token !== '' ? $token : null;
+    }
+
+    /**
+     * ✨ (2026-11-05) พรีเมียมเสียง: คำตอบในห้องถามต่อ → ไฟล์เสียงของห้อง (null = ตอบเป็นตัวอักษรอย่างเดียว)
+     *
+     * ตัดอีโมจิ/มาร์กดาวน์ก่อนพูด · ยาวเกินตัดที่ช่องว่างสุดท้าย · เกินเพดานต่อคำทำนาย = ไม่พูด
+     * รอเสียงไม่เกิน ~12 วิ — ช้ากว่านั้นลูกค้าได้ข้อความไปก่อน (ไม่ค้างหน้า)
+     */
+    private function speakReply(Reading $reading, ChatConversation $conversation, string $reply): ?string
+    {
+        $qa = ReadingQaClock::state($conversation, $reading);
+        if ($qa === null || $qa['over'] || ! VoicePremium::active($reading)) {
+            return null;
+        }
+        $text = ReadingTheater::plain($reply);
+        $text = (string) preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]/u', '', $text);
+        $text = trim((string) preg_replace('/[ \t]+/u', ' ', $text));
+        $max = (int) config('reading_voice.reply_max_chars', 600);
+        if (mb_strlen($text) > $max) {
+            $cut = mb_substr($text, 0, $max);
+            $space = max((int) mb_strrpos($cut, ' '), (int) mb_strrpos($cut, "\n"));
+            $text = trim($space > $max / 2 ? mb_substr($cut, 0, $space) : $cut);
+        }
+        if ($text === '' || ! VoicePremium::canSpeak($reading, mb_strlen($text))) {
+            return null;
+        }
+
+        $r = app(JuntraServerClient::class)->voiceSpeak((string) $conversation->persona, $text, 'chat', (string) $reading->user_id, 12);
+        if ($r['status'] !== 'completed') {
+            return null;
+        }
+        VoicePremium::addChatChars($reading, mb_strlen($text));
+
+        return $r['url'];
     }
 
     private function forgetRoomToken(Request $request, string $room): void
@@ -645,9 +682,13 @@ class ChatController extends Controller
             // จะโชว์ปุ่มคำถามลัดชุดไหน และต้องยุบแถบปุ่มไหมเมื่อแม่หมอถามกลับ
             // (ก่อนหน้านี้ฝั่ง client เดาเอง ตัวเลขโควตาจึงเคลื่อนจากของจริง)
             $awaiting = ChatSuggestions::isAwaitingAnswer($reply);
+            // ✨ พรีเมียมเสียง — ระหว่างเวลาถามต่อ ทุกคำตอบพูดออกเสียงของห้อง
+            $voiceUrl = ! $degraded && $kind !== 'offer' && $reading !== null
+                ? $this->speakReply($reading, $conversation, (string) $reply) : null;
 
             return response()->json([
                 'reply'       => $reply,
+                'voice_url'   => $voiceUrl,
                 'reply_html'  => Markdown::safe($reply),
                 'balance'     => $this->wallet->balance($user),
                 'cost'        => $kind === 'offer' ? 0.0 : $cost,

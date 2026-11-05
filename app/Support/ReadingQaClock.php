@@ -25,8 +25,12 @@ final class ReadingQaClock
     {
         $key = TarotSpreads::keyFromType((string) $reading->type);
         $map = (array) config('reading_qa.minutes', []);
+        $minutes = max(1, (int) ($map[$key] ?? $map['default'] ?? 7));
 
-        return max(1, (int) ($map[$key] ?? $map['default'] ?? 7));
+        // ✨ พรีเมียมเสียง = ถามต่อได้ยาวขึ้น (20 นาที) — คืนเงินพรีเมียมแล้วกลับไปเวลาปกติ
+        return VoicePremium::active($reading)
+            ? max($minutes, (int) config('reading_voice.qa_minutes', 20))
+            : $minutes;
     }
 
     /**
@@ -53,6 +57,8 @@ final class ReadingQaClock
             'over'    => $ended || ($endsAt !== null && $left <= 0),
             'left'    => $ended ? 0 : $left,
             'warn'    => (int) config('reading_qa.warn_minutes', 3),
+            // ✨ พรีเมียมเสียง — หน้าแชทโชว์ป้าย และคำตอบพูดออกเสียง
+            'premium' => VoicePremium::active($reading),
         ];
     }
 

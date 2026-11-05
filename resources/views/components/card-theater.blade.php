@@ -68,6 +68,26 @@
       @else
         <p>ครั้งนี้ไม่มีค่าใช้จ่าย</p>
       @endif
+      @if (! empty($config['premium']))
+        @php($pm = $config['premium'])
+        {{-- ✨ (2026-11-05) พรีเมียมเสียงผู้พยากรณ์ — เจ้าของสั่ง "ทำปุ่มพรีเมี่ยมเด่นๆ สวยๆ ข้างๆกันให้เลือก บอกด้วยว่าดียังไง" --}}
+        <div class="ct-premium" data-ct-premium data-enough="{{ $pm['enough'] ? '1' : '0' }}">
+          <div class="ct-premium-badge">✨ พรีเมียม</div>
+          <h4 class="ct-gold-text">ฟังเสียง{{ $room['self'] }}เล่าคำทำนายทั้งชุด</h4>
+          <ul>
+            <li>🎙️ {{ $room['self'] }}เล่าไพ่ทีละใบด้วยเสียงจริงของห้อง เหมือนนั่งอยู่ตรงหน้า</li>
+            <li>⏳ ถามต่อได้นาน <b>{{ $pm['minutes'] }} นาที</b> และทุกคำตอบพูดออกเสียงให้ฟัง</li>
+            <li>🎧 เก็บไว้ฟังซ้ำได้ตลอดในประวัติคำทำนาย</li>
+            <li>🛡️ ระบบเสียงขัดข้องจนไม่ได้ฟัง คืน {{ $pm['priceText'] }} อัตโนมัติ</li>
+          </ul>
+          <p class="ct-premium-price">ค่าไพ่ {{ $config['costText'] }} + เสียง {{ $pm['priceText'] }} = <b>{{ $pm['totalText'] }}</b>
+            @unless ($pm['enough']) <span class="warn">· ยอดไม่พอ</span>@endunless
+          </p>
+          <button type="button" class="ct-premium-go" data-ct-premium-go>
+            {{ $pm['enough'] ? '✨ เปิดไพ่แบบพรีเมียม · ' . $pm['totalText'] : 'เติมเงินเพื่อเปิดแบบพรีเมียม' }}
+          </button>
+        </div>
+      @endif
       @if ($askBirth)
         <label for="ct-birth">วันเกิดของคุณ (ไม่บังคับ — ใส่แล้ว{{ $room['self'] }}ดูดวงดาวประกอบไพ่ให้)
           <input type="date" id="ct-birth" value="{{ old('birth_date', $birthDate ?? '') }}" max="{{ now()->subDay()->format('Y-m-d') }}" min="1900-01-02">
@@ -82,6 +102,7 @@
       <input type="hidden" name="spread" value="{{ $config['spread']['key'] }}">
       <input type="hidden" name="question" value="{{ $question }}">
       @if ($askBirth)<input type="hidden" name="birth_date" value="">@endif
+      <input type="hidden" name="premium" value="0">
     </form>
   @endif
 

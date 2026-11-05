@@ -287,6 +287,112 @@ class JuntraServerClient
         return null;
     }
 
+    /* ============================ VOICE (พรีเมียมเสียงผู้พยากรณ์) ============================ */
+
+    /**
+     * 🔈 ระบบเสียงของ Thaiprompt พร้อมไหม + โควต้าวันนี้เหลือเท่าไร — ใช้ตัดสินว่าจะขายพรีเมียมหรือไม่
+     *
+     * @return array{tts: array{available: bool, chars_left: int}}|null  ติดต่อไม่ได้ = null (ไม่ขาย)
+     */
+    public function voiceHealth(): ?array
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->connectTimeout(2)->timeout(5)->get($this->url('/voice/health')));
+        if ($resp?->successful() && is_array($resp->json('data'))) {
+            return (array) $resp->json('data');
+        }
+        $this->logMiss('voiceHealth', $resp);
+
+        return null;
+    }
+
+    /**
+     * 🎬 บทเล่าคำทำนาย (ผ่านตัวตรวจความตรงแล้ว) — สัญญา voice-mode-plan ข้อ 23.1
+     * AI ฝั่งนั้นล่มก็ยังได้บทจากประโยคของคำทำนายเอง · ติดต่อไม่ได้ = null
+     *
+     * @return list<array{anchor:string,kind:?string,tone:?string,energy:mixed,say:string}>|null
+     */
+    public function voiceNarration(array $payload): ?array
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->timeout(50)->post($this->url('/voice/narration'), $payload));
+        $chapters = $resp?->successful() ? $resp->json('data.chapters') : null;
+        if (is_array($chapters)) {
+            return array_values(array_filter($chapters, fn ($c) => is_array($c) && trim((string) ($c['say'] ?? '')) !== ''));
+        }
+        $this->logMiss('voiceNarration', $resp);
+
+        return null;
+    }
+
+    /**
+     * 🗣️ ขอเสียงพูดของห้อง (ElevenLabs) — ข้อความเดิมได้ไฟล์เดิม (ฝั่งนั้นแคชไว้ ไม่เสียโควต้าซ้ำ)
+     *
+     * @param  'chat'|'narration'|'greeting'  $purpose
+     * @return array{status:'completed'|'pending'|'failed',url:?string,clip_id:?int}
+     */
+    public function voiceSpeak(string $persona, string $text, string $purpose, string $userRef, int $wait = 12): array
+    {
+        $resp = $this->send(fn (PendingRequest $http) => $http->timeout($wait + 15)->post($this->url('/voice/speak'), [
+            'persona'  => $persona,
+            'text'     => mb_substr($text, 0, 6000),
+            'purpose'  => $purpose,
+            'user_ref' => $userRef,
+            'wait'     => max(0, min(20, $wait)),
+        ]));
+
+        return $this->clipResult($resp, 'voiceSpeak');
+    }
+
+    /** คลิปที่ยังสร้างไม่เสร็จ (202) — ถามซ้ำได้ รอสูงสุด $wait วิ */
+    public function voiceClip(int $clipId, int $wait = 12): array
+    {
+        $resp = $this->send(fn (PendingRequest $http) => $http->timeout($wait + 15)
+            ->get($this->url('/voice/clips/' . $clipId), ['wait' => max(0, min(20, $wait))]));
+
+        return $this->clipResult($resp, 'voiceClip');
+    }
+
+    /**
+     * URL ไฟล์เสียงจาก Thaiprompt → URL เต็ม · ยอมรับเฉพาะโฮสต์ของ Thaiprompt เอง
+     * (ข้อมูลตอบกลับถูกปลอม/เพี้ยนก็ไม่พาเว็บไปดาวน์โหลดจากที่อื่น)
+     */
+    public function voiceFileUrl(?string $url): ?string
+    {
+        if (! is_string($url) || $url === '') {
+            return null;
+        }
+        if (str_starts_with($url, '/') && ! str_starts_with($url, '//')) {
+            return $this->base() . $url;
+        }
+        $host = parse_url($url, PHP_URL_HOST);
+        $scheme = parse_url($url, PHP_URL_SCHEME);
+
+        return in_array($scheme, ['https', 'http'], true) && $host !== null && $host === parse_url($this->base(), PHP_URL_HOST)
+            ? $url : null;
+    }
+
+    private function clipResult(?Response $resp, string $what): array
+    {
+        $data = $resp?->json('data');
+        if ($resp !== null && is_array($data)) {
+            $url = $this->voiceFileUrl($data['url'] ?? null);
+            if ($resp->status() === 200 && ($data['status'] ?? null) === 'completed' && $url !== null) {
+                return ['status' => 'completed', 'url' => $url, 'clip_id' => (int) ($data['clip_id'] ?? 0) ?: null];
+            }
+            if ($resp->status() === 202 && ! empty($data['clip_id'])) {
+                return ['status' => 'pending', 'url' => null, 'clip_id' => (int) $data['clip_id']];
+            }
+        }
+        $this->logMiss($what, $resp);
+
+        return ['status' => 'failed', 'url' => null, 'clip_id' => null];
+    }
+
     /**
      * 📈 กราฟชีวิตมหาทักษา (คะแนนรายปีอายุ 0–100 · ช่วงดาวเสวย · จุดรุ่ง/ระวัง) ให้โรงละครคำทำนาย
      * คำนวณที่ Thaiprompt ก้อนเดียวกับรูปกราฟใน LINE (เว็บไม่มีผังดาวเต็ม) — ไม่ใช้ AI ไม่คิดเงิน

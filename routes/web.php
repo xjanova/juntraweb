@@ -87,6 +87,12 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/result/{reading}/status', 'status')->middleware('throttle:60,1')->name('status');
 });
 
+// ✨ (2026-11-05) เสียงเล่าคำทำนายพรีเมียม — หน้าผลขอสร้างทีละบท · ไฟล์รวมให้โรงละครคำทำนายเล่น
+Route::prefix('tarot')->name('tarot.voice.')->middleware('auth')->controller(\App\Http\Controllers\ReadingVoiceController::class)->group(function () {
+    Route::post('/result/{reading}/voice/next', 'next')->middleware('throttle:30,1')->name('next');
+    Route::get('/result/{reading}/voice.mp3', 'file')->name('file');
+});
+
 // 🎁 ดูดวงฟรี 1 ใบ — ปลายทางของปุ่ม "ดูดวงฟรี" จากบอท FB/LINE (magic link ?to=/tarot/free)
 // GET เรนเดอร์หน้ารอเท่านั้น (ห้ามให้ GET ยิง AI — รีเฟรช/prefetch จะยิงซ้ำ)
 // POST เป็นตัวเปิดไพ่จริง + throttle เดียวกับรายการที่ตัดเงิน

@@ -207,3 +207,24 @@ html.ct-open .oracle-voice-fab .oracle-voice-label { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .ct-cta.pulse, .ct-actor img, .ct-actor.nod { animation: none; }
 }
+
+/* ✨ (2026-11-05) พรีเมียมเสียงผู้พยากรณ์ในแผ่นยืนยันจ่าย — การ์ดทองเด่นกว่าปุ่มปกติ แต่ไม่บังปุ่มเปิดไพ่ */
+.ct-sheet { max-height: calc(100dvh - 190px - env(safe-area-inset-bottom, 0px)); overflow-y: auto; overscroll-behavior: contain; }
+.ct-premium { position: relative; margin-top: 14px; padding: 16px 16px 14px; border-radius: 18px;
+  background: linear-gradient(150deg, rgba(255, 214, 128, .2), rgba(160, 90, 220, .2) 55%, rgba(40, 18, 70, .5));
+  border: 1px solid rgba(255, 214, 128, .55); box-shadow: 0 0 0 1px rgba(255, 214, 128, .12) inset, 0 10px 30px -12px rgba(255, 196, 92, .55); }
+.ct-premium-badge { position: absolute; top: -11px; left: 16px; padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  color: #2a1606; background: linear-gradient(90deg, #ffe6a8, #f5c46a); box-shadow: 0 4px 14px -4px rgba(245, 196, 106, .8); }
+.ct-premium h4 { margin: 4px 0 8px; font-family: var(--ct-display); font-size: 17px; }
+.ct-premium ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+.ct-premium li { font-size: 13px; line-height: 1.5; color: var(--ct-ink-dim); }
+.ct-premium li b { color: var(--ct-gold-hi); }
+.ct-sheet .ct-premium-price { margin-top: 10px; font-size: 13px; }
+.ct-premium-price .warn { color: #ff9aa6; }
+.ct-premium-go { display: block; width: 100%; margin-top: 10px; min-height: 46px; padding: 10px 14px; border: 0; border-radius: 14px; cursor: pointer;
+  font: inherit; font-weight: 700; font-size: 15px; color: #2a1606; background: linear-gradient(90deg, #ffe6a8, #f5c46a 55%, #ffd98a);
+  box-shadow: 0 8px 24px -10px rgba(245, 196, 106, .9); animation: ct-premium-glow 2.6s ease-in-out infinite; }
+.ct-premium-go:disabled { opacity: .6; cursor: default; animation: none; }
+.ct-premium-go:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@keyframes ct-premium-glow { 0%, 100% { box-shadow: 0 8px 24px -10px rgba(245, 196, 106, .9); } 50% { box-shadow: 0 8px 30px -6px rgba(255, 220, 140, 1); } }
+@media (prefers-reduced-motion: reduce) { .ct-premium-go { animation: none; } }

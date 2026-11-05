@@ -14,6 +14,8 @@ if (host) {
     if (Array.isArray(urls) && urls.length) {
         music.start(urls);
         window.addEventListener('oracle-say', () => music.duck());
+        // ✨ พรีเมียม — ผู้พยากรณ์พูดคำตอบยาว ๆ: หรี่ค้างไว้ตลอดที่พูด แล้วคืนระดับเดิม
+        window.addEventListener('oracle-voice', (e) => music.lower(!!(e.detail && e.detail.on)));
         // ออกจากหน้า (รวม bfcache) — เฟดเพลงออก กลับมาหน้าเดิมแล้วเริ่มใหม่
         window.addEventListener('pagehide', () => music.stop());
         window.addEventListener('pageshow', (e) => { if (e.persisted) music.start(urls); });
