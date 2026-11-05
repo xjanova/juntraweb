@@ -530,16 +530,21 @@ function createTheater(root, cfg, useGL) {
     function layoutFan(snap) {
         const rect = stageRect();
         const s = portrait ? Math.min(1.05, (rect.x1 - rect.x0) / 5.2) : Math.min(1.55, visH / 6.6);
-        const Rr = portrait ? visW * 1.05 : visW * 0.6;
         const apex = rect.y0 + (rect.y1 - rect.y0) * 0.2 + CH * s * 0.5;
-        fan = { R: Rr, s, d: (CW * s * (portrait ? 0.5 : 0.42)) / Rr, baseY: apex };
+        // floor = เส้นที่ไพ่ต้องอยู่เหนือ (กลางไพ่ไม่ต่ำกว่านี้) — ใต้นี้คือแถบปุ่ม/คำใบ้ด้านล่าง
+        const floor = rect.y0 + CH * s * 0.3;
+        // จอเตี้ย = โค้งพัดให้แบนลง (รัศมีใหญ่ขึ้น) ให้พัดกางได้ ~75% ของความกว้างก่อนแตะ floor · เพดาน 2.2 เท่ายังเห็นเป็นพัดโค้ง
+        const base = portrait ? visW * 1.05 : visW * 0.6;
+        const drop = Math.max(0.05, apex - floor); const reach = rect.x1 * 0.75;
+        const Rr = Math.min(base * 2.2, Math.max(base, (reach * reach + drop * drop) / (2 * drop)));
+        fan = { R: Rr, s, d: (CW * s * (portrait ? 0.5 : 0.42)) / Rr, baseY: apex, floor };
         if (snap) updateFanTargets();
     }
     const restCount = () => cards.filter((c) => !c.userData.picked).length;
-    // เลื่อนพัดได้แต่ไม่ให้ขอบสำรับหลุดเข้ามากลางจอ
+    // หมุนพัดได้จนไพ่ใบแรก/ใบสุดท้ายขึ้นมาถึงยอดพัด — เจ้าของสั่ง "ต้องหมุนไพ่ขึ้นมาให้คลิ๊กได้จนสุดทุกใบ เพราะเมนูล่างมันบัง"
+    // (เดิมล็อกไม่ให้ขอบสำรับเข้ากลางจอ → ไพ่ปลายพัดค้างอยู่ใต้แถบล่าง กดไม่ได้)
     function fanClamp(v) {
-        const n = restCount(); const half = (Math.asin(Math.min(0.98, visW / 2 / fan.R)) / fan.d) * 0.8;
-        return clamp(v, Math.min(half, (n - 1) / 2), Math.max(n - 1 - half, (n - 1) / 2));
+        return clamp(v, 0, Math.max(0, restCount() - 1));
     }
     function updateFanTargets() {
         const rest = cards.filter((c) => !c.userData.picked);
@@ -548,7 +553,10 @@ function createTheater(root, cfg, useGL) {
         rest.forEach((c, j) => {
             const u = c.userData; const a = (j - state.fanOff) * fan.d;
             const lift = u.hover ? 0.28 : 0;
-            u.tgt = pose(Math.sin(a) * fan.R, fan.baseY - fan.R + Math.cos(a) * fan.R + lift, j * 0.003 + (u.hover ? 0.5 : 0), -a, Math.PI, fan.s, Math.abs(a) < maxA ? 1 : 0);
+            const y = fan.baseY - fan.R + Math.cos(a) * fan.R;
+            // ไพ่ที่โค้งลงไปใต้แถบล่าง = จางหาย (กดไม่ได้) จนกว่าจะหมุนขึ้นมา
+            const show = Math.abs(a) < maxA && y >= fan.floor;
+            u.tgt = pose(Math.sin(a) * fan.R, y + lift, j * 0.003 + (u.hover ? 0.5 : 0), -a, Math.PI, fan.s, show ? 1 : 0);
             u.glowT = u.hover ? 0.9 : 0;
         });
     }
