@@ -87,6 +87,11 @@
          roomLock: @js($roomLock ?? null),
          pendingBill: @js($pendingBill ?? null),
          serverNow: @js(now()->getTimestamp()),
+         qa: @js($qa ?? null),
+         qaEndUrl: @js(route('chat.qa.end')),
+         qaOverText: @js(\App\Support\ReadingQaClock::overMessage($room)),
+         freshUrl: @js(route('chat.index', ['room' => $room, 'fresh' => 1])),
+         idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
          topics: @js($topics),
          awaiting: @js((bool) $awaiting),
          dailyLimit: @js((int) $dailyLimit),
@@ -114,6 +119,11 @@
 
     @if ($scene)
       {{-- ═══ ฉากห้อง: โต๊ะเปล่าของห้อง + ผู้พยากรณ์ยืนหลังขอบโต๊ะ (ตำแหน่งคำนวณจากขอบโต๊ะจริงของภาพ) ═══ --}}
+      {{-- 🎵 (2026-11-05) เพลงบรรเลงของห้องเล่นวนไม่หยุด (ปุ่มลำโพงปิด = เงียบ) --}}
+      @if (\App\Support\OracleMedia::music($room))
+        <div hidden data-room-music='@json(\App\Support\OracleMedia::music($room))'></div>
+        @vite('resources/js/oracle-room/music.js')
+      @endif
       <div class="or-scene" aria-hidden="true">
         <div class="or-plate"></div>
         <div class="or-actor" :class="{ 'is-busy': thinking }"><img src="{{ $scene['sprite'] }}" alt="" decoding="async" fetchpriority="high"></div>
@@ -133,6 +143,18 @@
           <span class="or-status"><span class="mor-online"></span><span x-text="thinking ? persona.busy : 'พร้อมรับฟังอยู่ค่ะ'">พร้อมรับฟังอยู่ค่ะ</span></span>
         </div>
         <div class="or-hud-end">
+          {{-- ⏳ (2026-11-05) เวลาถามต่อของไพ่ชุดนี้ — นับจากคำถามแรก ตามนาฬิกาเซิร์ฟเวอร์ · "พอแล้ว" = จบก่อนเวลา --}}
+          @if (! empty($qa))
+            <span class="or-pill or-qa" role="timer" aria-live="off"
+                  :class="qa.started && !qa.over && left(qa.ends_at) <= qa.warn * 60 && 'is-low'"
+                  title="เวลาถามต่อของไพ่ชุดนี้ · เริ่มนับเมื่อถามคำถามแรก">
+              <small x-text="qa.over ? 'ถามต่อ' : (qa.started ? 'เหลือเวลา' : 'ถามต่อได้')">ถามต่อได้</small>
+              <b x-text="qa.over ? 'หมดเวลา' : (qa.started ? clock(qa.ends_at) : qa.minutes + ' นาที')">{{ $qa['minutes'] }} นาที</b>
+            </span>
+            <button type="button" class="or-btn or-enough" x-show="!qa.over" x-cloak :disabled="qaBusy"
+                    @click="endQa()" x-text="qaConfirm ? 'แตะอีกครั้งเพื่อจบ' : 'พอแล้ว'"
+                    aria-label="พอแล้ว — จบการถามต่อก่อนหมดเวลา">พอแล้ว</button>
+          @endif
           @if (\App\Support\OracleMedia::voice($room))
             <button type="button" class="or-btn or-icon"
                     x-data="{ on: !!(window.JuntraVoice && window.JuntraVoice.on()) }"
@@ -590,6 +612,7 @@
                   <span x-text="blockedReason || 'วันนี้คุยครบแล้ว — ลองทางนี้ต่อได้เลยค่ะ'"></span>
                 </div>
                 <div class="chip-row">
+                  <a :href="cfg.freshUrl" class="chip chip-strong" x-show="qa && qa.over"><span class="chip-icon">💬</span> คุยเรื่องอื่นต่อ</a>
                   <a href="{{ route('tarot.index') }}" class="chip chip-strong"><span class="chip-icon">🔮</span> เปิดไพ่ยิปซี</a>
                   <a href="{{ route('tarot.free') }}" class="chip"><span class="chip-icon">✨</span> ดูดวงฟรี 1 ใบ</a>
                   @serviceopen('deep')<a href="{{ route('deep.index') }}" class="chip chip-strong"><span class="chip-icon">🌟</span> ดูดวงเชิงลึก</a>@endserviceopen
@@ -796,6 +819,15 @@ document.addEventListener('alpine:init', () => {
     nowSec: Math.floor(Date.now() / 1000),
     clockTimer: null,
     billTimer: null,
+    // ⏳ นาฬิกาถามต่อ (null = ห้องคุยทั่วไป) · ยืนยัน "พอแล้ว" ด้วยการแตะสองครั้ง
+    qa: cfg.qa || null,
+    qaBusy: false,
+    qaConfirm: false,
+    qaWarned: false,
+    // 💤 ลูกค้าเงียบนาน → ผู้พยากรณ์ทักตาม (ข้อความในหน้าเว็บ ไม่ถาม AI ไม่คิดเงิน)
+    lastActive: Date.now(),
+    nudges: 0,
+    cfg,
     topics: cfg.topics || [],
     awaiting: !!cfg.awaiting,
     dailyLimit: cfg.dailyLimit || 0,
@@ -832,6 +864,94 @@ document.addEventListener('alpine:init', () => {
     clock(ts) {
       const s = this.left(ts);
       return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    },
+    /** ทุกวินาที: เวลาถามต่อหมด → ปิดห้อง · เหลือ 1 นาที → เตือนครั้งเดียว · แล้วดูว่าลูกค้าเงียบไปนานไหม */
+    qaTick() {
+      const q = this.qa;
+      if (q && q.started && !q.over && q.ends_at) {
+        const l = this.left(q.ends_at);
+        if (l <= 60 && l > 0 && !this.qaWarned && !this.thinking) {
+          this.qaWarned = true;
+          this.push('assistant', this.escape('อีกราว 1 นาทีจะหมดเวลาถามต่อของไพ่ชุดนี้แล้วนะคะ มีอะไรค้างใจ ถามมาได้เลยค่ะ ⏳'), 'ok');
+          this.scrollToBottom();
+        }
+        if (l === 0) this.qaOver(true);
+      }
+      this.idleTick();
+    },
+    qaOver(announce = false) {
+      if (!this.qa) return;
+      const was = this.qa.over;
+      this.qa.over = true;
+      this.blocked = true;
+      this.blockedReason = 'หมดเวลาถามต่อของไพ่ชุดนี้แล้วค่ะ — ไปต่อทางไหนดี เลือกได้เลยนะคะ';
+      if (announce && !was) {
+        this.push('assistant', this.escape(cfg.qaOverText), 'ok');
+        this.voice('thanks_bye', false);
+        this.scrollToBottom(true);
+      }
+    },
+    setQa(q, serverNow) {
+      if (serverNow) this.skew = serverNow - Math.floor(Date.now() / 1000);
+      if (!q) return;
+      this.qa = q;
+      if (q.over) this.qaOver(false);
+    },
+    /** "พอแล้ว" — แตะครั้งแรกถามยืนยัน แตะซ้ำภายใน 4 วิ = จบ */
+    async endQa() {
+      if (!this.qa || this.qa.over || this.qaBusy) return;
+      if (!this.qaConfirm) {
+        this.qaConfirm = true;
+        setTimeout(() => { this.qaConfirm = false; }, 4000);
+        return;
+      }
+      this.qaConfirm = false;
+      this.qaBusy = true;
+      try {
+        const r = await fetch(cfg.qaEndUrl, {
+          method: 'POST', credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ room: this.room }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { this.say(j.error || 'ยังจบไม่ได้ ลองใหม่อีกครั้งนะคะ'); return; }
+        if (j.reply) this.push('assistant', j.reply_html || this.escape(j.reply), 'ok', j.reply);
+        this.voice('thanks_bye', false);
+        this.setQa(j.qa, j.server_now);
+        this.scrollToBottom(true);
+      } catch (_) {
+        this.say('เครือข่ายมีปัญหาค่ะ ลองใหม่อีกครั้งนะคะ');
+      } finally {
+        this.qaBusy = false;
+      }
+    },
+    /** ลูกค้าเงียบนาน → ทักตาม 1 ครั้ง (ห้องคุยทั่วไป) / 2 ครั้ง (ระหว่างเวลาถามต่อ ครั้งที่สองชวนกด "พอแล้ว") */
+    idleTick() {
+      if (!cfg.idleNudge || this.thinking || this.blocked || document.hidden || this.draft.trim()) return;
+      const last = this.messages[this.messages.length - 1];
+      if (!last || last.role !== 'assistant' || last.kind === 'topup') return;
+      const inQa = !!(this.qa && this.qa.started && !this.qa.over);
+      const max = inQa ? 2 : 1;
+      const need = cfg.idleNudge + (this.nudges > 0 ? 120 : 0);
+      if (this.nudges >= max || (Date.now() - this.lastActive) / 1000 < need) return;
+      this.nudges++;
+      this.lastActive = Date.now();
+      const self = this.persona.self;
+      let text;
+      if (inQa && this.nudges === 1) {
+        const mins = Math.max(1, Math.ceil(this.left(this.qa.ends_at) / 60));
+        text = 'ยังอยู่กับ' + self + 'ไหมคะ 🌙 ยังถามต่อได้อีกราว ' + mins + ' นาทีนะคะ กดคำถามด้านล่างหรือพิมพ์มาได้เลยค่ะ';
+      } else if (inQa) {
+        text = 'ถ้าได้คำตอบครบแล้ว กดปุ่ม "พอแล้ว" ด้านบนได้เลยนะคะ ' + self + 'ขอให้ทุกอย่างคลี่คลายค่ะ 🙏';
+      } else {
+        text = 'ยังอยู่ไหมคะ 🌙 อยากให้' + self + 'ช่วยดูเรื่องไหนต่อ เลือกจากปุ่มด้านล่าง หรือพิมพ์เล่ามาได้เลยค่ะ';
+      }
+      this.push('assistant', this.escape(text), 'ok', text, { kind: 'nudge' });
+      if (this.nudges === 1) this.voice('followup_ask', false);
+      this.scrollToBottom();
     },
     startClock() {
       clearInterval(this.clockTimer);
@@ -910,6 +1030,8 @@ document.addEventListener('alpine:init', () => {
         if (e.persisted) this.messages.forEach((m) => { if (m.offerBusy) m.offerBusy = false; });
       });
       // ⏳ นาฬิกาของป้ายบนโต๊ะ + ติดตามบิลที่ค้าง (เงินเข้าแล้วป้ายเปลี่ยนเอง ไม่ต้องรีเฟรช)
+      if (this.qa && this.qa.over) this.qaOver(false);
+      this.$watch('draft', () => { this.lastActive = Date.now(); });
       this.startClock();
       this.watchBill();
       // คำถามที่ติดมาจากหน้าผลไพ่ — ยิงครั้งเดียวให้คำตอบขึ้นเลยโดยไม่ต้องพิมพ์ซ้ำ
@@ -1239,6 +1361,8 @@ document.addEventListener('alpine:init', () => {
         this.$nextTick(() => this.autoGrow());
       }
       this.thinking = true;
+      this.lastActive = Date.now();
+      this.nudges = 0;
       this.scrollToBottom(true);
 
       try {
@@ -1264,6 +1388,14 @@ document.addEventListener('alpine:init', () => {
 
         let j = {};
         try { j = await r.json(); } catch (_) { /* ไม่ใช่ JSON */ }
+
+        if (r.status === 403 && j.reason_code === 'qa_over') {   // ⏳ หมดเวลาถามต่อ — ไม่ได้ส่ง ไม่คิดเงิน
+          mine.state = 'ok';
+          this.say(j.error || cfg.qaOverText);
+          this.setQa(j.qa);
+          this.qaOver(false);
+          return;
+        }
 
         if (r.status === 402) {                      // เครดิตไม่พอ
           this.blocked = true;
@@ -1313,6 +1445,8 @@ document.addEventListener('alpine:init', () => {
         this.suggestOpen = false;
         if (Array.isArray(j.suggestions) && j.suggestions.length) this.suggestions = j.suggestions;
         this.aiSuggestions = Array.isArray(j.ai_suggestions) ? j.ai_suggestions.filter(q => typeof q === 'string') : [];
+        this.setQa(j.qa, j.server_now);
+        this.lastActive = Date.now();
 
         // ลูกค้าขอให้ทำนาย → แนบการ์ดแพ็กเกจไปกับคำชวนของแม่หมอ (ยังไม่หักเงิน)
         const offers = Array.isArray(j.offers) && j.offers.length

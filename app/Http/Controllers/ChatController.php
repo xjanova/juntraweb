@@ -18,6 +18,7 @@ use App\Support\ChatRooms;
 use App\Support\ChatSuggestions;
 use App\Support\Markdown;
 use App\Support\Pricing;
+use App\Support\ReadingQaClock;
 use App\Support\ReadingRoomLock;
 use App\Support\TarotSpreads;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -105,6 +106,11 @@ class ChatController extends Controller
         }
         $request->session()->put('chat_room', $room);
 
+        // ⏳ "คุยเรื่องอื่นต่อ" หลังหมดเวลาถามต่อของไพ่ — ทิ้งห้องของไพ่ไว้ในประวัติ กลับห้องคุยทั่วไปของผู้พยากรณ์คนนี้
+        if ($request->boolean('fresh')) {
+            $this->forgetRoomToken($request, $room);
+        }
+
         // Even when the gate denies access, render the shell — the user
         // sees the bot UI with an inline CTA + greeting placeholder. Less
         // jarring than a dead "please log in" page.
@@ -138,8 +144,11 @@ class ChatController extends Controller
         // เข้าแชทต่อจากการเปิดไพ่หรือเปล่า — ใช้เลือกชุดปุ่มคำถามลัด
         // 💬 (2026-09-21) อ่านจากห้อง (chat_conversations.reading_id) ไม่ใช่ session เบราว์เซอร์อีกต่อไป
         $reading = ReadingChatContext::readingOf($conversation);
+        // ⏳ นาฬิกาถามต่อของห้องที่คุยต่อจากไพ่ (null = ห้องคุยทั่วไป)
+        $qa = ReadingQaClock::state($conversation, $reading);
 
         return view('pages.chat.index', [
+            'qa'           => $qa,
             'conversation' => $conversation,
             'room'         => $conversation->persona,
             'rooms'        => ChatRooms::cards(),
@@ -257,6 +266,16 @@ class ChatController extends Controller
         $token  = $tokens[$room] ?? ($room === ChatRooms::DEFAULT ? $request->session()->get('chat_token') : null);
 
         return is_string($token) && $token !== '' ? $token : null;
+    }
+
+    private function forgetRoomToken(Request $request, string $room): void
+    {
+        $tokens = (array) $request->session()->get('chat_tokens', []);
+        unset($tokens[$room]);
+        $request->session()->put('chat_tokens', $tokens);
+        if ($room === ChatRooms::DEFAULT) {
+            $request->session()->forget('chat_token');
+        }
     }
 
     private function rememberRoomToken(Request $request, string $room, string $token): void
@@ -504,6 +523,22 @@ class ChatController extends Controller
     {
         $conversation = $this->conversationFor($request, $user, $room);
 
+        // ⏳ ห้องที่คุยต่อจากไพ่: หมดเวลาถามต่อ/กด "พอแล้ว" แล้ว = ไม่ส่ง ไม่ถาม AI ไม่คิดเงิน
+        $reading = ReadingChatContext::readingOf($conversation);
+        $qa = ReadingQaClock::state($conversation, $reading);
+        if ($qa !== null && $qa['over']) {
+            $this->releaseChargeLock();
+            $msg = ReadingQaClock::overMessage($conversation->persona);
+
+            return $request->wantsJson()
+                ? response()->json(['error' => $msg, 'reason_code' => 'qa_over', 'qa' => $qa], 403)
+                : redirect()->route('chat.index', ['room' => $room])->with('status', $msg);
+        }
+        // คำถามแรก = เริ่มนับ (นับจากตอนลูกค้าถาม ไม่ใช่ตอนเปิดห้อง)
+        if ($qa !== null) {
+            ReadingQaClock::startIfNeeded($conversation);
+        }
+
         $userMessage = ChatMessage::create([
             'chat_conversation_id' => $conversation->id,
             'role'    => 'user',
@@ -611,6 +646,9 @@ class ChatController extends Controller
                 'blocked'     => ChatPolicy::exhausted($user),
                 'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
+                // ⏳ นาฬิกาถามต่อ (null = ห้องคุยทั่วไป) — หน้าเว็บนับถอยหลังตามเวลาของเซิร์ฟเวอร์
+                'qa'          => ReadingQaClock::state($conversation, $reading),
+                'server_now'  => now()->getTimestamp(),
                 'suggestions' => $awaiting || $offers !== [] ? [] : $this->staticChips($request, ChatSuggestions::followUp()),
                 // ✨ (2026-11-05) ปุ่มจาก AI — แม่หมอถามกลับอยู่ = ตัวเลือกคำตอบ · ไม่ได้ถาม = คำถามที่น่าถามต่อ
                 'ai_suggestions' => $aiSuggestions,
@@ -622,6 +660,36 @@ class ChatController extends Controller
         }
 
         return redirect()->route('chat.index')->with('status', ChatRooms::short($conversation->persona) . 'ตอบกลับแล้ว');
+    }
+
+    /**
+     * ⏳ "พอแล้ว" — จบเวลาถามต่อของไพ่ชุดนี้ก่อนกำหนด (เจ้าของสั่ง "ปุ่ม พอแล้ว ด้วย หมายถึงเลิกก่อนเวลา")
+     *
+     * คำลาประกอบในเครื่อง ไม่ถาม AI ไม่คิดเงิน · กดซ้ำ = ได้สถานะเดิม ไม่มีคำลาซ้ำ
+     */
+    public function endQa(Request $request)
+    {
+        $data = $request->validate(['room' => 'nullable|string|max:16']);
+        $user = $request->user();
+        $room = ChatRooms::normalize($data['room'] ?? null);
+        $conversation = $this->conversationFor($request, $user, $room);
+        $reading = ReadingChatContext::readingOf($conversation);
+        if ($reading === null || $conversation->user_id !== $user->id) {
+            return response()->json(['error' => 'ห้องนี้ไม่ได้จับเวลาถามต่อค่ะ', 'reason_code' => 'no_clock'], 422);
+        }
+
+        $reply = null;
+        if (ReadingQaClock::end($conversation)) {
+            $reply = ReadingQaClock::farewell($conversation->persona);
+            ChatMessage::create(['chat_conversation_id' => $conversation->id, 'role' => 'assistant', 'content' => $reply]);
+        }
+
+        return response()->json([
+            'reply'      => $reply,
+            'reply_html' => $reply !== null ? Markdown::safe($reply) : null,
+            'qa'         => ReadingQaClock::state($conversation, $reading),
+            'server_now' => now()->getTimestamp(),
+        ]);
     }
 
     /**
@@ -763,7 +831,11 @@ class ChatController extends Controller
         //    และมีอายุ 24 ชม.) · บริบท = ไพ่ทุกใบ + คำพยากรณ์ฉบับเต็ม ส่งไปทุกรอบ ห้องฝั่ง Thaiprompt หมดอายุ
         //    หรือ cache ถูกล้างเมื่อไร แม่หมอก็ยังเห็นคำพยากรณ์ครบ
         $reading  = ReadingChatContext::readingOf($conversation);
-        $context  = $reading ? ReadingChatContext::for($reading) : null;
+        // ⏳ บรรทัดเวลาที่เหลือขึ้นก่อนบริบทไพ่ — ผู้พยากรณ์รู้ว่าเหลือกี่นาที (เจ้าของถาม "ทำไมบอทไม่รู้ว่าเหลือเวลาเท่าไหร่")
+        $timeLine = $reading ? ReadingQaClock::contextLine(ReadingQaClock::state($conversation, $reading)) : null;
+        $context  = $reading
+            ? trim(($timeLine !== null ? $timeLine . "\n\n" : '') . ReadingChatContext::for($reading, $timeLine !== null ? mb_strlen($timeLine) + 2 : 0))
+            : null;
         $grounded = $reading !== null;
 
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย

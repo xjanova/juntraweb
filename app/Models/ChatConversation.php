@@ -10,9 +10,12 @@ class ChatConversation extends Model
 {
     // 💬 (2026-09-21) reading_id = ห้องนี้คุยต่อจากคำพยากรณ์ไหน (null = ห้องคุยทั่วไป)
     // 🔮 (2026-11-03) persona = ห้องของผู้พยากรณ์คนไหน (App\Support\ChatRooms) — ห้องเก่าทั้งหมด = maemor
-    protected $fillable = ['user_id', 'session_token', 'title', 'reading_id', 'persona'];
+    // ⏳ (2026-11-05) qa_started_at / qa_ended_at = นาฬิกาถามต่อของห้องที่คุยต่อจากไพ่ (App\Support\ReadingQaClock)
+    protected $fillable = ['user_id', 'session_token', 'title', 'reading_id', 'persona', 'qa_started_at', 'qa_ended_at'];
 
     protected $attributes = ['persona' => 'maemor'];
+
+    protected $casts = ['qa_started_at' => 'datetime', 'qa_ended_at' => 'datetime'];
 
     public function user(): BelongsTo
     {

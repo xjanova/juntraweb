@@ -112,6 +112,7 @@ let at = 0;
 let fadeT = 0;
 let level = 1;       // ระดับฐานของเพลง (หรี่ค้างไว้ระหว่างผู้พยากรณ์เล่าเรื่องด้วยเสียง)
 let watchT = 0;
+let fails = 0;       // เพลงที่เล่นไม่ได้ติดกัน — ครบทั้งรายการแล้วพักไว้ ไม่วนลองไม่จบ
 function fade(el, to, ms, done) {
     clearInterval(fadeT);
     const from = el.volume; const t0 = performance.now();
@@ -127,6 +128,14 @@ function playAt(k) {
     const el = new Audio(list[at]);
     el.volume = 0;
     el.addEventListener('ended', () => { if (track === el) playAt(at + 1); });
+    // 🎵 (2026-11-05) เจ้าของสั่ง "เพลงควรเล่นวนไปเรื่อยๆ" — ไฟล์โหลดไม่ได้/ถอดรหัสไม่ได้ เดิมค้างเงียบตลอดไป
+    //    (ไม่มี 'ended') → ข้ามไปเพลงถัดไป · เสียครบทุกเพลงแล้วพัก (รอบตรวจถัดไปลองใหม่ตั้งแต่ต้น)
+    el.addEventListener('playing', () => { fails = 0; });
+    el.addEventListener('error', () => {
+        if (track !== el) return;
+        track = null;
+        if (++fails < list.length) setTimeout(() => { if (!track) playAt(at + 1); }, 800);
+    });
     track = el;
     const p = el.play();
     if (p && p.catch) p.catch(() => { if (track === el) track = null; }); // ยังไม่ได้แตะหน้า — รอบตรวจถัดไปค่อยลองใหม่
@@ -142,9 +151,15 @@ export const music = {
         list = Array.isArray(urls) ? urls.filter(Boolean) : [];
         clearInterval(watchT);
         if (!list.length) return;
+        fails = 0;
         const tick = () => {
             if (soundOn() && !track) playAt(at);
             else if (!soundOn() && track) stopTrack(400);
+            // เครื่องหยุดเสียงเอง (สายเข้า / สลับแอพบนมือถือ) — กลับมาแล้วเล่นต่อจากเดิม
+            else if (soundOn() && track && track.paused && !track.ended && !document.hidden) {
+                const p = track.play();
+                if (p && p.catch) p.catch(() => {});
+            }
         };
         tick();
         watchT = setInterval(tick, 1000);

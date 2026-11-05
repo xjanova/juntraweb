@@ -141,6 +141,8 @@ Route::get('/chat/live', \App\Http\Controllers\ChatLiveStatsController::class)
 Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::post('/send', 'send')->middleware('throttle:chat-send')->name('send');
+    // ⏳ "พอแล้ว" — จบเวลาถามต่อของไพ่ก่อนกำหนด
+    Route::post('/qa/end', 'endQa')->middleware(['auth', 'throttle:chat-send'])->name('qa.end');
     // Enter the live chat pre-grounded on a tarot reading — แม่หมอ is primed
     // with the exact cards drawn so follow-up questions read those cards.
     Route::post('/from-reading/{reading}', 'fromReading')

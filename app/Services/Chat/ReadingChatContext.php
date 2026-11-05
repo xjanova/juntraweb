@@ -64,7 +64,11 @@ final class ReadingChatContext
     }
 
     /** บริบทเต็มสำหรับฟิลด์ `context` ของ Thaiprompt (และทางสำรอง AiOracle ในเครื่อง) */
-    public static function for(Reading $reading): string
+    /**
+     * @param  int  $reserve  ⏳ (2026-11-05) จำนวนตัวอักษรที่ผู้เรียกจะต่อไว้หน้าบริบท (บรรทัดเวลาถามต่อ)
+     *                        — กันเพดานรวมเกินแล้วโดนตัดท้ายคำพยากรณ์ทิ้งเงียบ ๆ
+     */
+    public static function for(Reading $reading, int $reserve = 0): string
     {
         $reading->loadMissing('tarotCards.card');
         $key = TarotSpreads::keyFromType((string) $reading->type);
@@ -111,12 +115,13 @@ final class ReadingChatContext
         }
 
         // เกินเพดาน → ตัดท้ายคำพยากรณ์ (ไพ่ต้องครบทุกใบเสมอ) — คำพยากรณ์จริงบน prod ยังห่างเพดานมาก
-        $budget = self::MAX_CHARS - mb_strlen($head);
+        $max = max(1000, self::MAX_CHARS - max(0, $reserve));
+        $budget = $max - mb_strlen($head);
         if (mb_strlen($result) > $budget) {
             $result = mb_substr($result, 0, max(0, $budget - mb_strlen(self::TRIMMED))).self::TRIMMED;
         }
 
-        return mb_substr($head.$result, 0, self::MAX_CHARS);
+        return mb_substr($head.$result, 0, $max);
     }
 
     /**

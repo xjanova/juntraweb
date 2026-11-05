@@ -88,6 +88,9 @@ html.or-open body > nav, html.or-open body > footer { display: none; }
 .or-hold-end { padding: 8px 14px; border-radius: 10px; font-weight: 700; font-size: 13px; color: var(--or-gold-hi); background: transparent;
   border: 1px solid color-mix(in srgb, var(--or-gold-hi) 55%, transparent); cursor: pointer; white-space: nowrap; }
 .or-hold-end:hover { background: color-mix(in srgb, var(--or-gold-hi) 14%, transparent); }
+/* ⏳ เวลาถามต่อ + ปุ่ม "พอแล้ว" บนแถบบน */
+.or-qa b { font-variant-numeric: tabular-nums; }
+.or-enough { font-size: 13px; padding: 7px 12px; white-space: nowrap; }
 /* ✨ ปุ่มที่ผู้พยากรณ์คิดให้ — ขอบทองบาง ๆ แยกจากปุ่มลัดเดิม */
 .chip.chip-ai { border-color: color-mix(in srgb, var(--or-gold-hi, #f5d89a) 60%, transparent); }
 .pay-bill { text-align: center; margin: 4px 0 8px; }
