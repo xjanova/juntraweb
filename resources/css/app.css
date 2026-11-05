@@ -1291,6 +1291,44 @@
 .oracle-voice-fab:focus-visible { outline: 2px solid var(--gold, #f4cf6a); outline-offset: 2px; }
 @media (max-width: 480px) { .oracle-voice-label { display: none; } .oracle-voice-fab { padding: 0; width: 48px; justify-content: center; } }
 
+/* 🔊 ป๊อปอัปกลางจอ "แตะเพื่อเปิดเสียง" (partials.sound-ask) — เด้งเฉพาะเครื่องที่เบราว์เซอร์บล็อกเสียง */
+.sound-ask {
+  position: fixed; inset: 0; z-index: 2147483600; /* เหนือโรงละครเปิดไพ่ (.ct = 2147483000) */
+  display: grid; place-items: center; padding: 16px;
+  background: rgba(6, 2, 14, .62);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: soundAskIn .35s ease-out both;
+}
+.sound-ask[hidden] { display: none; }
+.sound-ask-card {
+  width: min(360px, 100%); padding: 26px 22px 18px; border-radius: 22px; text-align: center;
+  border: 1px solid rgba(244, 207, 106, .55);
+  background: linear-gradient(180deg, rgba(46, 22, 72, .97), rgba(16, 6, 30, .97));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 24px 60px -14px rgba(0, 0, 0, .8), 0 0 40px -8px rgba(244, 207, 106, .35);
+  color: #f6ecff;
+}
+.sound-ask-icon {
+  width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 50%;
+  display: grid; place-items: center; color: #2a1206;
+  background: radial-gradient(circle at 35% 30%, #fff4c8, #f4cf6a 55%, #b8862c);
+  box-shadow: 0 0 0 6px rgba(244, 207, 106, .14), 0 0 28px rgba(244, 207, 106, .5);
+  animation: soundAskPulse 1.8s ease-in-out infinite;
+}
+.sound-ask-icon svg { width: 30px; height: 30px; }
+.sound-ask-title { margin: 0 0 6px; font-size: 20px; font-weight: 700; color: var(--gold, #f4cf6a); }
+.sound-ask-text { margin: 0 0 18px; font-size: 14.5px; line-height: 1.65; color: rgba(246, 236, 255, .82); }
+.sound-ask-on, .sound-ask-off { display: block; width: 100%; font: inherit; cursor: pointer; border-radius: 999px; }
+.sound-ask-on {
+  min-height: 52px; font-size: 17px; font-weight: 700; color: #2a1206; border: 0;
+  background: linear-gradient(180deg, #ffe9a8, #f4cf6a 50%, #c8962f);
+  box-shadow: 0 8px 22px -8px rgba(244, 207, 106, .7);
+}
+.sound-ask-off { min-height: 44px; margin-top: 8px; font-size: 14px; color: rgba(246, 236, 255, .66); background: none; border: 0; }
+.sound-ask-on:focus-visible, .sound-ask-off:focus-visible { outline: 2px solid #fff4c8; outline-offset: 3px; }
+@keyframes soundAskIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes soundAskPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+@media (prefers-reduced-motion: reduce) { .sound-ask, .sound-ask-icon { animation: none; } }
+
 /* ปุ่มลำโพงในแถบหัวห้องบนมือถือ */
 .oracle-mini-sound {
   flex: none; display: grid; place-items: center;

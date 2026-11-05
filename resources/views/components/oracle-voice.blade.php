@@ -8,8 +8,9 @@
 
 {{-- 🔊 (2026-11-04) เสียงผู้พยากรณ์บนหน้าที่ไม่มีเวที (เลือกไพ่ / ผลทำนาย)
      - ไม่มีไฟล์เสียงของห้องนี้เลย = ไม่แสดงอะไร
-     - เริ่มปิดเสมอ · เปิดแล้วจำไว้ทั้งแท็บ (sessionStorage — ค่าเดียวกับปุ่มลำโพงในห้องแชท)
+     - เปิดเป็นค่าเริ่มต้น · ลูกค้ากดปิดเองแล้วจำไว้ในเครื่อง (ค่าเดียวกับปุ่มลำโพงในห้องแชท — partials.juntra-voice)
      - เบราว์เซอร์ไม่ให้เล่นเสียงก่อนลูกค้าแตะหน้า → เก็บประโยคล่าสุดไว้ เล่นตอนแตะครั้งแรก
+       และ partials.sound-ask เด้งกลางจอชวนแตะเปิดเสียง
      - หน้าอื่นสั่งพูดได้ด้วย window.dispatchEvent(new CustomEvent('oracle-say', {detail: {key, once}})) --}}
 @php
     $voice = \App\Support\OracleMedia::voice($persona);
@@ -17,6 +18,7 @@
 
 @if ($voice)
   @include('partials.juntra-voice')
+  @include('partials.sound-ask')
 
   <button type="button" class="oracle-voice-fab"
           x-data="oracleVoice(@js(['voice' => $voice, 'cues' => array_values($cues), 'scope' => $scope]))"
@@ -49,6 +51,11 @@
         // โรงละครเปิดไพ่ขอพูดเองตามจังหวะพิธี (เช่น ผลฟันธงหลังเปิดไพ่ครบ) — หยุดประโยคเข้าหน้า
         this._hold = () => { this.audio?.pause(); this.queue = []; this.pending = null; };
         window.addEventListener('oracle-hold', this._hold);
+        // ป๊อปอัปกลางจอ: "แตะเพื่อเปิดเสียง" = เล่นประโยคที่ค้าง · "ไม่ต้องมีเสียง" = ปิด
+        this._unlockAsk = () => this._unlock();
+        window.addEventListener('oracle-sound-unlock', this._unlockAsk);
+        this._off = () => { if (this.sound) this.toggle(); };
+        window.addEventListener('oracle-sound-off', this._off);
         // ประโยคเข้าหน้า: พูดต่อกันทีละประโยค ครั้งเดียวต่อ scope
         // นับว่า "พูดแล้ว" เฉพาะตอนเปิดเสียงอยู่ — ปิดเสียงไว้แล้วค่อยเปิดทีหลังต้องยังได้ยิน
         this.queue = window.__ctVoiceHold ? [] : (cfg.cues || []).filter((k) => this.voice[k] && !window.JuntraVoice.said(cfg.scope, k));
@@ -61,6 +68,8 @@
       destroy() {
         window.removeEventListener('oracle-say', this._say);
         window.removeEventListener('oracle-hold', this._hold);
+        window.removeEventListener('oracle-sound-unlock', this._unlockAsk);
+        window.removeEventListener('oracle-sound-off', this._off);
         document.removeEventListener('pointerdown', this._unlock, { capture: true });
         this.audio?.pause();
       },
