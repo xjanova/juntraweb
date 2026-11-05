@@ -12,7 +12,8 @@
 {{-- 🎬 (2026-11-03) เวทีของผู้พยากรณ์ — ภาพนิ่งเป็นฐานเสมอ คลิป idle เงียบ ๆ วางทับเมื่อพร้อม
      - คลิปทุกตัวเริ่ม/จบที่ภาพนิ่ง → สลับคลิปตอนจบได้โดยไม่กระตุก (ไม่ใช้ loop attr)
      - เล่นเฉพาะตอนเห็นบนจอ · ไม่โหลดคลิปเลยถ้าตั้งลดการเคลื่อนไหว / ประหยัดเน็ต / ไฟล์ไม่มี
-     - เสียงเริ่มปิดเสมอ ลูกค้าต้องกดลำโพงก่อน · เปิดแล้วจำทั้งแท็บ (partials.juntra-voice) ไฟล์ไหนไม่มี = เงียบ
+     - เสียงเปิดเป็นค่าเริ่มต้น (เบราว์เซอร์บล็อก = partials.sound-ask เด้งกลางจอให้แตะ) · กดปิดเองแล้วจำไว้ในเครื่อง
+       (partials.juntra-voice) ไฟล์ไหนไม่มี = เงียบ
      - ปุ่มอื่น (เช่นแถบหัวห้องบนมือถือ) สั่งเปิด/ปิดได้ด้วยอีเวนต์ oracle-sound-toggle --}}
 @php
     $loops = \App\Support\OracleMedia::loops($persona);
@@ -45,6 +46,9 @@
 </div>
 
 @include('partials.juntra-voice')
+@if ($voice)
+  @include('partials.sound-ask')
+@endif
 
 @once
 @push('scripts')
@@ -54,7 +58,7 @@ document.addEventListener('alpine:init', () => {
     loops: cfg.loops || [],
     voice: cfg.voice || {},
     live: false,       // มีคลิปเล่นอยู่บนจอแล้ว (ซ่อนภาพนิ่ง)
-    sound: false,      // เปิดเสียงไว้หรือไม่ (จำทั้งแท็บ) — เริ่มปิดเสมอ
+    sound: false,      // เปิดเสียงไว้หรือไม่ — ค่าจริงอ่านจาก JuntraVoice ใน initVoice (เปิดเป็นค่าเริ่มต้น)
     pending: null,     // ประโยคที่เบราว์เซอร์ยังไม่ให้เล่น — รอแตะหน้าครั้งแรก
     idx: -1,
     front: null,       // video ที่โชว์อยู่
@@ -99,6 +103,10 @@ document.addEventListener('alpine:init', () => {
       window.addEventListener('oracle-sound-toggle', this._toggle);
       this._unlock = () => { if (this.pending) { const k = this.pending; this.pending = null; this.play(k); } };
       document.addEventListener('pointerdown', this._unlock, { capture: true });
+      // ป๊อปอัปกลางจอ: "แตะเพื่อเปิดเสียง" = เล่นประโยคที่ค้าง · "ไม่ต้องมีเสียง" = ปิด
+      window.addEventListener('oracle-sound-unlock', this._unlock);
+      this._off = () => { if (this.sound) this.toggleSound(); };
+      window.addEventListener('oracle-sound-off', this._off);
       this.announce();
       // เปิดเสียงค้างไว้จากหน้าก่อน → ทักครั้งเดียวต่อห้องต่อแท็บ (ยังไม่แตะหน้า = รอแตะครั้งแรก)
       if (this.sound) this.say(cfg.greet || 'room_greet', true);
@@ -110,6 +118,8 @@ document.addEventListener('alpine:init', () => {
       window.removeEventListener('oracle-say', this._say);
       window.removeEventListener('oracle-sound-toggle', this._toggle);
       document.removeEventListener('pointerdown', this._unlock, { capture: true });
+      window.removeEventListener('oracle-sound-unlock', this._unlock);
+      window.removeEventListener('oracle-sound-off', this._off);
       this.audio?.pause();
     },
 

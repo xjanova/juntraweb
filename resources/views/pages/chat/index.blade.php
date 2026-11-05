@@ -83,6 +83,15 @@
          persona: @js(['name' => $P['name'], 'short' => $P['short'], 'self' => $P['self'], 'busy' => $P['busy']]),
          messages: @js($initialMessages),
          suggestions: @js($suggestions),
+         aiSuggestions: @js(array_values($aiSuggestions ?? [])),
+         roomLock: @js($roomLock ?? null),
+         pendingBill: @js($pendingBill ?? null),
+         serverNow: @js(now()->getTimestamp()),
+         qa: @js($qa ?? null),
+         qaEndUrl: @js(route('chat.qa.end')),
+         qaOverText: @js(\App\Support\ReadingQaClock::overMessage($room)),
+         freshUrl: @js(route('chat.index', ['room' => $room, 'fresh' => 1])),
+         idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
          topics: @js($topics),
          awaiting: @js((bool) $awaiting),
          dailyLimit: @js((int) $dailyLimit),
@@ -110,6 +119,11 @@
 
     @if ($scene)
       {{-- ═══ ฉากห้อง: โต๊ะเปล่าของห้อง + ผู้พยากรณ์ยืนหลังขอบโต๊ะ (ตำแหน่งคำนวณจากขอบโต๊ะจริงของภาพ) ═══ --}}
+      {{-- 🎵 (2026-11-05) เพลงบรรเลงของห้องเล่นวนไม่หยุด (ปุ่มลำโพงปิด = เงียบ) --}}
+      @if (\App\Support\OracleMedia::music($room))
+        <div hidden data-room-music='@json(\App\Support\OracleMedia::music($room))'></div>
+        @vite('resources/js/oracle-room/music.js')
+      @endif
       <div class="or-scene" aria-hidden="true">
         <div class="or-plate"></div>
         <div class="or-actor" :class="{ 'is-busy': thinking }"><img src="{{ $scene['sprite'] }}" alt="" decoding="async" fetchpriority="high"></div>
@@ -129,6 +143,21 @@
           <span class="or-status"><span class="mor-online"></span><span x-text="thinking ? persona.busy : 'พร้อมรับฟังอยู่ค่ะ'">พร้อมรับฟังอยู่ค่ะ</span></span>
         </div>
         <div class="or-hud-end">
+          {{-- ⏳ (2026-11-05) เวลาถามต่อของไพ่ชุดนี้ — นับจากคำถามแรก ตามนาฬิกาเซิร์ฟเวอร์ · "พอแล้ว" = จบก่อนเวลา --}}
+          @if (! empty($qa) && ! empty($qa['premium']))
+            <span class="or-pill or-premium" x-show="qa.premium && !qa.over" x-cloak title="พรีเมียม — ทุกคำตอบพูดออกเสียง">🎙️ <b>พรีเมียม</b></span>
+          @endif
+          @if (! empty($qa))
+            <span class="or-pill or-qa" role="timer" aria-live="off"
+                  :class="qa.started && !qa.over && left(qa.ends_at) <= qa.warn * 60 && 'is-low'"
+                  title="เวลาถามต่อของไพ่ชุดนี้ · เริ่มนับเมื่อถามคำถามแรก">
+              <small x-text="qa.over ? 'ถามต่อ' : (qa.started ? 'เหลือเวลา' : 'ถามต่อได้')">ถามต่อได้</small>
+              <b x-text="'⏳ ' + (qa.over ? 'หมดเวลา' : (qa.started ? clock(qa.ends_at) : qa.minutes + ' นาที'))">⏳ {{ $qa['minutes'] }} นาที</b>
+            </span>
+            <button type="button" class="or-btn or-enough" x-show="!qa.over" x-cloak :disabled="qaBusy"
+                    @click="endQa()" x-text="qaConfirm ? 'แตะอีกครั้งเพื่อจบ' : 'พอแล้ว'"
+                    aria-label="พอแล้ว — จบการถามต่อก่อนหมดเวลา">พอแล้ว</button>
+          @endif
           @if (\App\Support\OracleMedia::voice($room))
             <button type="button" class="or-btn or-icon"
                     x-data="{ on: !!(window.JuntraVoice && window.JuntraVoice.on()) }"
@@ -177,6 +206,45 @@
               <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : 'เปิดไพ่'">เปิดไพ่</span>
             </button>
           @endforeach
+        </div>
+      @endif
+
+      {{-- 🔒 (2026-11-05) กำลังทำนายอยู่ / 🧾 บิลเติมเงินค้าง — วางบนโต๊ะแทนแพ็กเกจ
+           เจ้าของสั่ง "ป้ายเปิดไพ่ในห้องต้องไม่ขึ้นให้เลือกถ้ายังค้างบิลอยู่ ควรแสดงเลขบิลด้วยว่าบิลไหน ได้รับเงินหรือยัง"
+           เวลาที่เหลือนับจากนาฬิกาเซิร์ฟเวอร์ (serverNow) ไม่ใช่นาฬิกาเครื่องลูกค้า --}}
+      @if (! empty($roomLock))
+        <div class="or-table" role="status" aria-live="polite">
+          <div class="or-offer is-hold">
+            <span class="or-offer-icon" aria-hidden="true">{{ $roomLock['reason'] === 'reading' ? '📜' : '🔮' }}</span>
+            <span class="or-offer-text">
+              <strong>{{ $roomLock['message'] }}กับ{{ $roomLock['name'] }}</strong>
+              <small>เหลือเวลา <b x-text="clock(hold.lockEnds)">--:--</b></small>
+            </span>
+            @if ($roomLock['resume_url'])
+              <a href="{{ $roomLock['resume_url'] }}" class="or-offer-go">{{ $roomLock['resume_label'] }}</a>
+            @endif
+            @if ($roomLock['can_end'])
+              {{-- จบพิธีก่อนจ่าย ไม่เสียเงิน · แตะสองครั้งกันพลาด --}}
+              <form method="POST" action="{{ route('tarot.abandon') }}"
+                    @submit="if (!hold.confirmEnd) { $event.preventDefault(); hold.confirmEnd = true; setTimeout(() => hold.confirmEnd = false, 4000); }">
+                @csrf
+                <button type="submit" class="or-hold-end" x-text="hold.confirmEnd ? 'แตะอีกครั้งเพื่อจบ' : 'พอแล้ว'">พอแล้ว</button>
+              </form>
+            @endif
+          </div>
+        </div>
+      @elseif (! empty($pendingBill))
+        <div class="or-table" role="status" aria-live="polite">
+          <div class="or-offer is-hold">
+            <span class="or-offer-icon" aria-hidden="true">🧾</span>
+            <span class="or-offer-text">
+              <strong>บิลเลขที่ {{ $pendingBill['reference_code'] }} · ฿{{ number_format($pendingBill['payable'], 2) }}</strong>
+              <small x-text="hold.billPaid ? 'ได้รับเงินแล้ว ✓ เปิดไพ่ต่อได้เลยค่ะ' : (hold.billSlip ? 'ได้รับสลิปแล้ว กำลังตรวจสอบ' : 'ยังไม่ได้รับเงิน · รอชำระ ' + clock(hold.billEnds))">ยังไม่ได้รับเงิน · รอชำระ</small>
+            </span>
+            <button type="button" class="or-offer-go" :disabled="hold.billBusy"
+                    @click="hold.billPaid ? location.reload() : resumeBill()"
+                    x-text="hold.billPaid ? 'เปิดไพ่ได้แล้ว' : (hold.billBusy ? 'กำลังเปิด…' : 'ดู QR จ่ายต่อ')">ดู QR จ่ายต่อ</button>
+          </div>
         </div>
       @endif
     @endif
@@ -391,6 +459,9 @@
                   <template x-if="m.pay.step === 'qr'">
                     <div>
                       <div class="pay-title">สแกนจ่ายได้เลยค่ะ</div>
+                      <div class="pay-sub pay-bill" x-show="m.pay.reference_code">
+                        เลขที่บิล <strong x-text="m.pay.reference_code"></strong> · <span>ยังไม่ได้รับเงิน</span>
+                      </div>
                       <div class="pay-sub">เปิดแอพธนาคาร → สแกน QR นี้ → โอนตามยอดด้านล่าง</div>
 
                       <div class="pay-qr">
@@ -447,6 +518,9 @@
                       <div class="tick" aria-hidden="true">✓</div>
                       <div class="pay-title" style="margin-bottom:2px">เติมเครดิตสำเร็จแล้วค่ะ</div>
                       <div class="amt" x-text="'฿' + Number(m.pay.payable).toFixed(2)"></div>
+                      <div class="pay-sub pay-bill" x-show="m.pay.reference_code">
+                        เลขที่บิล <strong x-text="m.pay.reference_code"></strong> · <span style="color:#9eddae">ได้รับเงินแล้ว ✓</span>
+                      </div>
                       {{-- จ่ายมาเพื่อเปิดแพ็กเกจนี้ → พาไปต่อเอง (ปุ่มสำรองเผื่อ redirect ไม่ไป) --}}
                       <template x-if="m.pay.then && canAfford(m.pay.then.offer)">
                         <div>
@@ -488,6 +562,11 @@
                     <rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
                   </svg>
                 </button>
+
+                {{-- ✨ พรีเมียมเสียง — ฟัง/ฟังซ้ำคำตอบนี้ (เปิดเสียงไว้ = เล่นเองทันที) --}}
+                <button type="button" class="chip chip-ai" style="padding:4px 12px;font-size:12px"
+                        x-show="m.voiceUrl" x-cloak @click="playReplyVoice(m.voiceUrl)"
+                        :aria-label="'ฟังเสียง' + persona.short">🔊 ฟังเสียง</button>
 
                 {{-- ส่งไม่สำเร็จ → ลองใหม่ด้วย idempotency key เดิม จึงไม่ถูกคิดเงินซ้ำ --}}
                 <button type="button" class="chip" style="padding:4px 12px;font-size:12px"
@@ -541,6 +620,7 @@
                   <span x-text="blockedReason || 'วันนี้คุยครบแล้ว — ลองทางนี้ต่อได้เลยค่ะ'"></span>
                 </div>
                 <div class="chip-row">
+                  <a :href="cfg.freshUrl" class="chip chip-strong" x-show="qa && qa.over"><span class="chip-icon">💬</span> คุยเรื่องอื่นต่อ</a>
                   <a href="{{ route('tarot.index') }}" class="chip chip-strong"><span class="chip-icon">🔮</span> เปิดไพ่ยิปซี</a>
                   <a href="{{ route('tarot.free') }}" class="chip"><span class="chip-icon">✨</span> ดูดวงฟรี 1 ใบ</a>
                   @serviceopen('deep')<a href="{{ route('deep.index') }}" class="chip chip-strong"><span class="chip-icon">🌟</span> ดูดวงเชิงลึก</a>@endserviceopen
@@ -558,7 +638,18 @@
             </template>
 
             {{-- 2. แม่หมอกำลังรอคำตอบ → ยุบไว้ก่อน --}}
-            <template x-if="!blocked && awaiting && !suggestOpen">
+            {{-- 2a. ✨ ผู้พยากรณ์ถามกลับ + AI คิดตัวเลือกคำตอบมาให้ → กดตอบได้เลย --}}
+            <template x-if="!blocked && awaiting && !suggestOpen && aiSuggestions.length">
+              <div>
+                <div class="chat-suggest-label"><span>💬 ตอบ{{ $P['self'] }}ได้เลย หรือพิมพ์เองก็ได้ค่ะ</span></div>
+                <div class="chip-row">
+                  <template x-for="(q, i) in aiSuggestions" :key="'a' + i">
+                    <button type="button" class="chip chip-ai" :disabled="thinking" @click="useChip(q)" x-text="q"></button>
+                  </template>
+                </div>
+              </div>
+            </template>
+            <template x-if="!blocked && awaiting && !suggestOpen && !aiSuggestions.length">
               <div class="chat-suggest-hint">
                 <span>💬 {{ $P['self'] }}กำลังรอคำตอบอยู่ค่ะ</span>
                 <button type="button" class="chip" style="padding:5px 12px;font-size:12px" @click="suggestOpen = true">
@@ -570,6 +661,19 @@
             {{-- 3. ปกติ --}}
             <template x-if="!blocked && (!awaiting || suggestOpen)">
               <div>
+                {{-- ✨ (2026-11-05) คำถามที่ผู้พยากรณ์คิดล่วงหน้าจากบทสนทนา — เพิ่มจากปุ่มลัดเดิม --}}
+                <template x-if="!awaiting && aiSuggestions.length">
+                  <div>
+                    <div class="chat-suggest-label"><span>✨ ถามต่อจากเรื่องนี้</span></div>
+                    <div class="chip-row" style="margin-bottom:8px">
+                      <template x-for="(q, i) in aiSuggestions" :key="'q' + i">
+                        <button type="button" class="chip chip-ai" :disabled="thinking"
+                                :title="thinking ? persona.self + 'กำลังตอบอยู่ — รอสักครู่นะคะ' : q"
+                                @click="useChip(q)" x-text="q"></button>
+                      </template>
+                    </div>
+                  </div>
+                </template>
                 <div class="chat-suggest-label">
                   <span x-text="messages.some(m => m.role === 'user') ? 'ถามต่อได้เลย' : 'เริ่มจากคำถามเหล่านี้ก็ได้ค่ะ'"></span>
                 </div>
@@ -709,6 +813,29 @@ document.addEventListener('alpine:init', () => {
     room: cfg.room || 'maemor',
     persona: cfg.persona || { name: 'แม่หมอจันทรา', short: 'แม่หมอ', self: 'แม่หมอ', busy: 'กำลังเพ่งไพ่...' },
     suggestions: cfg.suggestions || [],
+    aiSuggestions: cfg.aiSuggestions || [],
+    // 🔒/🧾 ป้ายบนโต๊ะ: การทำนายที่ค้าง (เวลาหมดจากเซิร์ฟเวอร์) และบิลเติมเงินที่ค้าง
+    hold: {
+      lockEnds: cfg.roomLock ? cfg.roomLock.ends_at : null,
+      bill: cfg.pendingBill || null,
+      billEnds: cfg.pendingBill ? cfg.pendingBill.expires_at : null,
+      billPaid: false, billSlip: !!(cfg.pendingBill && cfg.pendingBill.has_slip), billBusy: false,
+      confirmEnd: false,
+    },
+    // นาฬิกาเซิร์ฟเวอร์ − นาฬิกาเครื่อง (วินาที) — นับถอยหลังตรงกับเวลาจริงแม้เครื่องลูกค้าตั้งเวลาเพี้ยน
+    skew: (cfg.serverNow || Math.floor(Date.now() / 1000)) - Math.floor(Date.now() / 1000),
+    nowSec: Math.floor(Date.now() / 1000),
+    clockTimer: null,
+    billTimer: null,
+    // ⏳ นาฬิกาถามต่อ (null = ห้องคุยทั่วไป) · ยืนยัน "พอแล้ว" ด้วยการแตะสองครั้ง
+    qa: cfg.qa || null,
+    qaBusy: false,
+    qaConfirm: false,
+    qaWarned: false,
+    // 💤 ลูกค้าเงียบนาน → ผู้พยากรณ์ทักตาม (ข้อความในหน้าเว็บ ไม่ถาม AI ไม่คิดเงิน)
+    lastActive: Date.now(),
+    nudges: 0,
+    cfg,
     topics: cfg.topics || [],
     awaiting: !!cfg.awaiting,
     dailyLimit: cfg.dailyLimit || 0,
@@ -734,7 +861,176 @@ document.addEventListener('alpine:init', () => {
     sheet: false,
 
     destroy() {
+      clearInterval(this.clockTimer);
+      clearInterval(this.billTimer);
       clearInterval(this.payTimer);   // ออกจากหน้าแล้วต้องเลิก poll
+    },
+
+    /** วินาทีที่เหลือถึงเวลา ts (epoch วินาทีของเซิร์ฟเวอร์) */
+    left(ts) { return ts ? Math.max(0, ts - (this.nowSec + this.skew)) : 0; },
+    /** mm:ss ที่เหลือถึงเวลา ts */
+    clock(ts) {
+      const s = this.left(ts);
+      // บิลเติมเงินอยู่ได้หลายชั่วโมง — "2878:47" อ่านไม่ออก เกินชั่วโมงแสดงเป็น ชม./นาที
+      if (s >= 3600) {
+        const h = Math.floor(s / 3600);
+        return h + ' ชม. ' + Math.floor((s % 3600) / 60) + ' นาที';
+      }
+      return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    },
+    /** ทุกวินาที: เวลาถามต่อหมด → ปิดห้อง · เหลือ 1 นาที → เตือนครั้งเดียว · แล้วดูว่าลูกค้าเงียบไปนานไหม */
+    qaTick() {
+      const q = this.qa;
+      if (q && q.started && !q.over && q.ends_at) {
+        const l = this.left(q.ends_at);
+        if (l <= 60 && l > 0 && !this.qaWarned && !this.thinking) {
+          this.qaWarned = true;
+          this.push('assistant', this.escape('อีกราว 1 นาทีจะหมดเวลาถามต่อของไพ่ชุดนี้แล้วนะคะ มีอะไรค้างใจ ถามมาได้เลยค่ะ ⏳'), 'ok');
+          this.scrollToBottom();
+        }
+        if (l === 0) this.qaOver(true);
+      }
+      this.idleTick();
+    },
+    qaOver(announce = false) {
+      if (!this.qa) return;
+      const was = this.qa.over;
+      this.qa.over = true;
+      this.blocked = true;
+      this.blockedReason = 'หมดเวลาถามต่อของไพ่ชุดนี้แล้วค่ะ — ไปต่อทางไหนดี เลือกได้เลยนะคะ';
+      if (announce && !was) {
+        this.push('assistant', this.escape(cfg.qaOverText), 'ok');
+        this.voice('thanks_bye', false);
+        this.scrollToBottom(true);
+      }
+    },
+    setQa(q, serverNow) {
+      if (serverNow) this.skew = serverNow - Math.floor(Date.now() / 1000);
+      if (!q) return;
+      this.qa = q;
+      if (q.over) this.qaOver(false);
+    },
+    /** "พอแล้ว" — แตะครั้งแรกถามยืนยัน แตะซ้ำภายใน 4 วิ = จบ */
+    async endQa() {
+      if (!this.qa || this.qa.over || this.qaBusy) return;
+      if (!this.qaConfirm) {
+        this.qaConfirm = true;
+        setTimeout(() => { this.qaConfirm = false; }, 4000);
+        return;
+      }
+      this.qaConfirm = false;
+      this.qaBusy = true;
+      try {
+        const r = await fetch(cfg.qaEndUrl, {
+          method: 'POST', credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ room: this.room }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { this.say(j.error || 'ยังจบไม่ได้ ลองใหม่อีกครั้งนะคะ'); return; }
+        if (j.reply) this.push('assistant', j.reply_html || this.escape(j.reply), 'ok', j.reply);
+        this.voice('thanks_bye', false);
+        this.setQa(j.qa, j.server_now);
+        this.scrollToBottom(true);
+      } catch (_) {
+        this.say('เครือข่ายมีปัญหาค่ะ ลองใหม่อีกครั้งนะคะ');
+      } finally {
+        this.qaBusy = false;
+      }
+    },
+    /** ลูกค้าเงียบนาน → ทักตาม 1 ครั้ง (ห้องคุยทั่วไป) / 2 ครั้ง (ระหว่างเวลาถามต่อ ครั้งที่สองชวนกด "พอแล้ว") */
+    idleTick() {
+      if (!cfg.idleNudge || this.thinking || this.blocked || document.hidden || this.draft.trim()) return;
+      const last = this.messages[this.messages.length - 1];
+      if (!last || last.role !== 'assistant' || last.kind === 'topup') return;
+      const inQa = !!(this.qa && this.qa.started && !this.qa.over);
+      const max = inQa ? 2 : 1;
+      const need = cfg.idleNudge + (this.nudges > 0 ? 120 : 0);
+      if (this.nudges >= max || (Date.now() - this.lastActive) / 1000 < need) return;
+      this.nudges++;
+      this.lastActive = Date.now();
+      const self = this.persona.self;
+      let text;
+      if (inQa && this.nudges === 1) {
+        const mins = Math.max(1, Math.ceil(this.left(this.qa.ends_at) / 60));
+        text = 'ยังอยู่กับ' + self + 'ไหมคะ 🌙 ยังถามต่อได้อีกราว ' + mins + ' นาทีนะคะ กดคำถามด้านล่างหรือพิมพ์มาได้เลยค่ะ';
+      } else if (inQa) {
+        text = 'ถ้าได้คำตอบครบแล้ว กดปุ่ม "พอแล้ว" ด้านบนได้เลยนะคะ ' + self + 'ขอให้ทุกอย่างคลี่คลายค่ะ 🙏';
+      } else {
+        text = 'ยังอยู่ไหมคะ 🌙 อยากให้' + self + 'ช่วยดูเรื่องไหนต่อ เลือกจากปุ่มด้านล่าง หรือพิมพ์เล่ามาได้เลยค่ะ';
+      }
+      this.push('assistant', this.escape(text), 'ok', text, { kind: 'nudge' });
+      if (this.nudges === 1) this.voice('followup_ask', false);
+      this.scrollToBottom();
+    },
+    startClock() {
+      clearInterval(this.clockTimer);
+      this.clockTimer = setInterval(() => {
+        this.nowSec = Math.floor(Date.now() / 1000);
+        // ล็อกหมดเวลา / บิลหมดอายุ → โหลดใหม่ให้เซิร์ฟเวอร์ตัดสินว่าโชว์ป้ายอะไรต่อ (ครั้งเดียว)
+        if ((this.hold.lockEnds && this.left(this.hold.lockEnds) === 0)
+            || (this.hold.bill && !this.hold.billPaid && this.hold.billEnds && this.left(this.hold.billEnds) === 0)) {
+          this.hold.lockEnds = null; this.hold.billEnds = null;
+          setTimeout(() => location.reload(), 1200);
+        }
+        if (this.qaTick) this.qaTick();
+      }, 1000);
+    },
+    /** ถามเป็นระยะว่าบิลที่ค้างได้รับเงินหรือยัง (แม้ลูกค้ายังไม่ได้เปิด QR) */
+    watchBill() {
+      if (!this.hold.bill) return;
+      clearInterval(this.billTimer);
+      let n = 0;
+      this.billTimer = setInterval(async () => {
+        if (this.hold.billPaid || ++n > 120) { clearInterval(this.billTimer); return; }
+        try {
+          const r = await fetch(cfg.topupStatusUrl.replace('__ID__', this.hold.bill.id), {
+            credentials: 'same-origin', headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          });
+          if (!r.ok) return;
+          const j = await r.json();
+          if (j.paid) this.billPaidNow(j.balance);
+          else if (j.status && j.status !== 'pending') { clearInterval(this.billTimer); location.reload(); }
+        } catch (_) { /* เน็ตสะดุด — รอบหน้าลองใหม่ */ }
+      }, 6000);
+    },
+    billPaidNow(balance) {
+      if (this.hold.billPaid) return;
+      const card = this.messages.find(x => x.kind === 'topup' && x.pay?.id === this.hold.bill.id && x.pay.step !== 'done');
+      this.hold.billPaid = true;
+      clearInterval(this.billTimer);
+      if (balance !== undefined && balance !== null && Number.isFinite(Number(balance))) this.balance = Number(balance);
+      if (card) this.afterPaid(card, balance);
+      else this.voice('topup_done', false);
+    },
+    /** เปิด QR ของบิลที่ค้างขึ้นมาในแชทอีกครั้ง (หลังรีเฟรช) — ไม่ออกบิลใหม่ซ้อน */
+    async resumeBill(then = null) {
+      if (!this.hold.bill || this.hold.billBusy) return;
+      const had = this.messages.find(x => x.kind === 'topup' && x.pay?.id === this.hold.bill.id && x.pay.step !== 'done');
+      if (had) { if (then) had.pay.then = then; this.sheet = true; this.scrollToBottom(true); return; }
+      this.hold.billBusy = true;
+      try {
+        const r = await fetch(this.hold.bill.resume_url, {
+          credentials: 'same-origin', headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 410) { if (j.paid) this.billPaidNow(); else location.reload(); return; }
+        if (!r.ok) { this.say(j.error || 'เปิดบิลไม่สำเร็จ ลองใหม่อีกครั้งนะคะ'); return; }
+        const m = this.push('assistant', '', 'ok', '', {
+          kind: 'topup',
+          pay: { step: 'qr', busy: false, uploading: false, error: '', notice: '', waited: 0, then, superseded: false, ...j },
+        });
+        this.sheet = true;
+        this.watchTopup(m);
+        this.scrollToBottom(true);
+      } catch (_) {
+        this.say('เครือข่ายมีปัญหาค่ะ ลองใหม่อีกครั้งนะคะ');
+      } finally {
+        this.hold.billBusy = false;
+      }
     },
 
     init() {
@@ -746,6 +1042,11 @@ document.addEventListener('alpine:init', () => {
       window.addEventListener('pageshow', (e) => {
         if (e.persisted) this.messages.forEach((m) => { if (m.offerBusy) m.offerBusy = false; });
       });
+      // ⏳ นาฬิกาของป้ายบนโต๊ะ + ติดตามบิลที่ค้าง (เงินเข้าแล้วป้ายเปลี่ยนเอง ไม่ต้องรีเฟรช)
+      if (this.qa && this.qa.over) this.qaOver(false);
+      this.$watch('draft', () => { this.lastActive = Date.now(); });
+      this.startClock();
+      this.watchBill();
       // คำถามที่ติดมาจากหน้าผลไพ่ — ยิงครั้งเดียวให้คำตอบขึ้นเลยโดยไม่ต้องพิมพ์ซ้ำ
       // (เซิร์ฟเวอร์ pull() ออกจาก session แล้ว รีเฟรชจึงไม่ยิงซ้ำ/ไม่คิดเงินซ้ำ)
       if (cfg.autosend && String(cfg.autosend).trim()) {
@@ -801,7 +1102,10 @@ document.addEventListener('alpine:init', () => {
       const m = Object.assign({ id: ++this.seq, role, html, text, time: this.now(), state }, extra || {});
       this.messages.push(m);
       this.scrollToBottom(role === 'user');
-      return m;
+      // 🐞 (2026-11-05) ต้องคืนตัวที่ผ่าน proxy ของ Alpine — คืน m ดิบแล้วผู้เรียกแก้ค่าต่อ
+      //    (pay.step = 'qr', state = 'failed') หน้าจอไม่อัปเดต: กดเปิดไพ่ตอนเครดิตไม่พอ
+      //    ได้บิลแต่ QR ไม่ขึ้น · ส่งข้อความล้มก็ไม่เห็นปุ่มลองใหม่
+      return this.messages[this.messages.length - 1];
     },
 
     /* ---------- การ์ดแพ็กเกจเปิดไพ่ ---------- */
@@ -866,6 +1170,8 @@ document.addEventListener('alpine:init', () => {
      */
     payAndOpen(m, o) {
       if (m.offerBusy) return;
+      // 🧾 มีบิลค้างอยู่ → จ่ายบิลเดิมก่อน ไม่ออกบิลใหม่ซ้อน
+      if (this.hold.bill && !this.hold.billPaid) { this.resumeBill({ msg: m, offer: o }); return; }
       this.voice('credit_low');
       const then = { msg: m, offer: o };
       const amount = this.payAmount(o);
@@ -893,6 +1199,25 @@ document.addEventListener('alpine:init', () => {
     voice(key, once = true) {
       window.dispatchEvent(new CustomEvent('oracle-say', { detail: { key, once } }));
     },
+    /** ✨ เล่นเสียงคำตอบ (พรีเมียม) ทีละเสียง — เพลงห้องหรี่ลงระหว่างพูด */
+    playReplyVoice(url) {
+      try {
+        if (this.replyAudio) this.replyAudio.pause();
+        const a = new Audio(url);
+        this.replyAudio = a;
+        const done = () => {
+          if (this.replyAudio !== a) return;
+          this.replyAudio = null;
+          window.dispatchEvent(new CustomEvent('oracle-voice', { detail: { on: false } }));
+        };
+        a.addEventListener('ended', done);
+        a.addEventListener('error', done);
+        a.addEventListener('pause', done);
+        window.dispatchEvent(new CustomEvent('oracle-voice', { detail: { on: true } }));
+        const p = a.play();
+        if (p && p.catch) p.catch(done);
+      } catch (_) { /* เบราว์เซอร์เล่นไม่ได้ — ข้อความยังอยู่ครบ */ }
+    },
     say(text) {                 // ข้อความจาก "ระบบ" ไม่ใช่คำพูดของแม่หมอ
       return this.push('assistant', this.escape(text).replace(/\n/g, '<br>'), 'system');
     },
@@ -902,6 +1227,7 @@ document.addEventListener('alpine:init', () => {
       // มีการ์ดที่ยังจ่ายไม่เสร็จอยู่แล้วก็เลื่อนไปหาใบเดิม ไม่สร้างซ้อน
       const open = fresh ? null : this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && !x.pay?.superseded);
       if (open) { this.scrollToBottom(true); return open; }
+      if (!fresh && this.hold.bill && !this.hold.billPaid) { this.resumeBill(then); return null; }
 
       // kind/pay ต้องใส่ตอน push — ใส่ทีหลังบนอ็อบเจกต์ดิบจะไม่ผ่าน proxy ของ Alpine
       const m = this.push('assistant', '', 'ok', '', {
@@ -916,6 +1242,7 @@ document.addEventListener('alpine:init', () => {
     afterPaid(m, balance) {
       clearInterval(this.payTimer);
       m.pay.step = 'done';
+      if (this.hold.bill && m.pay.id === this.hold.bill.id) { this.hold.billPaid = true; clearInterval(this.billTimer); }
       if (balance !== undefined && balance !== null && Number.isFinite(Number(balance))) this.balance = Number(balance);
       // เติมเงินผ่านแล้วต้องพิมพ์ต่อได้ทันที ไม่ต้องรีเฟรชหน้า
       if (this.blockedReason.includes('เครดิต')) {
@@ -1069,6 +1396,8 @@ document.addEventListener('alpine:init', () => {
         this.$nextTick(() => this.autoGrow());
       }
       this.thinking = true;
+      this.lastActive = Date.now();
+      this.nudges = 0;
       this.scrollToBottom(true);
 
       try {
@@ -1094,6 +1423,14 @@ document.addEventListener('alpine:init', () => {
 
         let j = {};
         try { j = await r.json(); } catch (_) { /* ไม่ใช่ JSON */ }
+
+        if (r.status === 403 && j.reason_code === 'qa_over') {   // ⏳ หมดเวลาถามต่อ — ไม่ได้ส่ง ไม่คิดเงิน
+          mine.state = 'ok';
+          this.say(j.error || cfg.qaOverText);
+          this.setQa(j.qa);
+          this.qaOver(false);
+          return;
+        }
 
         if (r.status === 402) {                      // เครดิตไม่พอ
           this.blocked = true;
@@ -1142,12 +1479,20 @@ document.addEventListener('alpine:init', () => {
         this.awaiting = !!j.awaiting;
         this.suggestOpen = false;
         if (Array.isArray(j.suggestions) && j.suggestions.length) this.suggestions = j.suggestions;
+        this.aiSuggestions = Array.isArray(j.ai_suggestions) ? j.ai_suggestions.filter(q => typeof q === 'string') : [];
+        this.setQa(j.qa, j.server_now);
+        this.lastActive = Date.now();
 
         // ลูกค้าขอให้ทำนาย → แนบการ์ดแพ็กเกจไปกับคำชวนของแม่หมอ (ยังไม่หักเงิน)
         const offers = Array.isArray(j.offers) && j.offers.length
           ? { offers: j.offers, question: j.question || text }
           : null;
-        this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '', offers);
+        const said = this.push('assistant', j.reply_html || this.escape(j.reply || '').replace(/\n/g, '<br>'), 'ok', j.reply || '', offers);
+        // ✨ พรีเมียมเสียง — แนบเสียงกับฟองคำตอบ · ลำโพงเปิดอยู่ = พูดทันที
+        if (j.voice_url) {
+          said.voiceUrl = j.voice_url;
+          if (window.JuntraVoice && window.JuntraVoice.on()) this.playReplyVoice(j.voice_url);
+        }
 
         // เสียงประโยคประจำตามจังหวะของบทสนทนา (คำตอบจริงเป็นตัวอักษรเสมอ — เสียงแค่ชวน/ย้ำ)
         if (offers) this.voice('offer_cards', false);

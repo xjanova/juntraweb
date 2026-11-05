@@ -1,12 +1,15 @@
 {{-- 🔊 ค่ากลางของเสียงผู้พยากรณ์ — ใช้ร่วมกันโดย <x-oracle-stage> (ห้องแชท) และ <x-oracle-voice> (หน้าเลือกไพ่/ผล)
-     เปิดเสียงที่ไหนก็จำไว้ทั้งแท็บ เดินจากแชท → เลือกไพ่ → ผล แม่หมอพูดต่อเนื่องโดยไม่ต้องกดใหม่ทุกหน้า
-     sessionStorage อาจใช้ไม่ได้ (โหมดส่วนตัว / ปิดคุกกี้) → ถือว่าปิดเสียง ไม่พัง --}}
+     (2026-11-05) เจ้าของสั่ง "ถ้าเครื่องไหนเปิดได้เลย ก็เปิดให้เลย":
+       - เสียงเปิดเป็นค่าเริ่มต้น · เครื่องที่เบราว์เซอร์ยอมให้เล่นเอง = ดังทันที
+       - เบราว์เซอร์บล็อก = partials.sound-ask เด้งกลางจอให้แตะเปิดครั้งเดียว
+       - ลูกค้ากดปิดเอง = จำไว้ในเครื่อง (localStorage 'juntra:voice-off') ไม่เปิดให้เองอีก ไม่เด้งกวน
+     storage ใช้ไม่ได้ (โหมดส่วนตัวบางแบบ) → ถือว่าเปิด ไม่พัง --}}
 @once
 @push('scripts')
 <script>
 window.JuntraVoice = window.JuntraVoice || {
-  on() { try { return sessionStorage.getItem('juntra:voice') === '1'; } catch (_) { return false; } },
-  set(v) { try { v ? sessionStorage.setItem('juntra:voice', '1') : sessionStorage.removeItem('juntra:voice'); } catch (_) {} },
+  on() { try { return localStorage.getItem('juntra:voice-off') !== '1'; } catch (_) { return true; } },
+  set(v) { try { v ? localStorage.removeItem('juntra:voice-off') : localStorage.setItem('juntra:voice-off', '1'); } catch (_) {} },
   // "พูดครั้งเดียว" ต่อ scope (เช่น ใบผลทำนายใบเดียวกัน) — ไม่มี scope = ครั้งเดียวต่อการโหลดหน้า
   _mem: {},
   _k(scope, key) { return 'juntra:said:' + scope + ':' + key; },

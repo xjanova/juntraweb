@@ -80,10 +80,17 @@ Route::prefix('tarot')->name('tarot.')->controller(TarotController::class)->grou
     Route::get('/', 'index')->name('index');
     Route::post('/begin', 'begin')->name('begin');                  // step 1 → save spread+question, redirect to pick
     Route::get('/pick', 'pick')->name('pick');                      // step 2 → fan of 78 cards
+    Route::post('/abandon', 'abandon')->name('abandon');            // "พอแล้ว" — จบพิธีก่อนจ่าย ปลดล็อกห้อง
     Route::post('/cast', 'cast')->middleware('throttle:reading')->name('cast'); // step 3 → any spread
     Route::get('/result/{reading}', 'show')->name('show');
     // หน้าผลถามทุก ~3 วิ ระหว่างแม่หมออ่านไพ่เบื้องหลัง (60/นาที = พอสำหรับหน้าเดียวเปิดค้าง)
     Route::get('/result/{reading}/status', 'status')->middleware('throttle:60,1')->name('status');
+});
+
+// ✨ (2026-11-05) เสียงเล่าคำทำนายพรีเมียม — หน้าผลขอสร้างทีละบท · ไฟล์รวมให้โรงละครคำทำนายเล่น
+Route::prefix('tarot')->name('tarot.voice.')->middleware('auth')->controller(\App\Http\Controllers\ReadingVoiceController::class)->group(function () {
+    Route::post('/result/{reading}/voice/next', 'next')->middleware('throttle:30,1')->name('next');
+    Route::get('/result/{reading}/voice.mp3', 'file')->name('file');
 });
 
 // 🎁 ดูดวงฟรี 1 ใบ — ปลายทางของปุ่ม "ดูดวงฟรี" จากบอท FB/LINE (magic link ?to=/tarot/free)
@@ -140,6 +147,8 @@ Route::get('/chat/live', \App\Http\Controllers\ChatLiveStatsController::class)
 Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::post('/send', 'send')->middleware('throttle:chat-send')->name('send');
+    // ⏳ "พอแล้ว" — จบเวลาถามต่อของไพ่ก่อนกำหนด
+    Route::post('/qa/end', 'endQa')->middleware(['auth', 'throttle:chat-send'])->name('qa.end');
     // Enter the live chat pre-grounded on a tarot reading — แม่หมอ is primed
     // with the exact cards drawn so follow-up questions read those cards.
     Route::post('/from-reading/{reading}', 'fromReading')
@@ -165,6 +174,7 @@ Route::middleware('auth')->prefix('chat/topup')->name('chat.topup.')
     ->controller(ChatTopupController::class)->group(function () {
         Route::post('/', 'store')->middleware('throttle:topup')->name('store');
         Route::get('/{tx}', 'status')->name('status');
+        Route::get('/{tx}/resume', 'resume')->name('resume');
         Route::post('/{tx}/slip', 'slip')->middleware('throttle:topup')->name('slip');
     });
 

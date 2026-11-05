@@ -228,7 +228,10 @@ class ReadingChatContextTest extends TestCase
         $send = $this->sent('/server/chat/send')->sole();
         $this->assertSame('เดือนมีนาที่ไพ่บอกให้ระวัง หมายถึงอะไรคะ', $send['text']);
         $this->assertSame(1, (int) $send['grounded']);
-        $this->assertSame($start['context'], $send['context']);
+        // ⏳ (2026-11-05) ทุกข้อความมีบรรทัดเวลาถามต่อนำหน้า ตามด้วยบริบทไพ่ชุดเดิมครบ
+        $this->assertStringStartsWith('⏱️ เวลาถามต่อของไพ่ชุดนี้', $send['context']);
+        $this->assertStringEndsWith($start['context'], $send['context']);
+        $this->assertLessThanOrEqual(\App\Services\Thaiprompt\JuntraServerClient::CHAT_CONTEXT_MAX, mb_strlen($send['context']));
         $this->assertSame($start['user_ref'], $send['user_ref']);
     }
 

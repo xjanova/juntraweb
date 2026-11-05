@@ -645,11 +645,28 @@ function createTheater(root, cfg, useGL) {
         say(enough ? ['ตรวจดูแล้วกด ', { em: 'เปิดไพ่' }, ` • ${R.self}จะวางไพ่และเริ่มอ่านทันที`] : 'ยอดเงินไม่พอ เติมเงินแล้วกลับมาเปิดไพ่ชุดนี้ต่อได้เลย', '', 'hint');
         if (!enough) voice('credit_low');
     }
+    // ✨ (2026-11-05) ปุ่มพรีเมียมในแผ่นยืนยัน — ยอดพอ = เปิดไพ่พร้อมเสียง · ไม่พอ = ไปเติมเงิน
+    //    ปุ่ม "เปิดไพ่" ปกติต้องส่ง premium=0 เสมอ (กดพรีเมียมแล้วถอยกลับมากดปกติ ห้ามติดค่าเดิมไป)
+    {
+        const box = el.sheet && el.sheet.querySelector('[data-ct-premium]');
+        const go = box && box.querySelector('[data-ct-premium-go]');
+        if (go) {
+            go.addEventListener('click', () => {
+                if (state.submitting || state.phase !== 'confirm') return;
+                if (box.dataset.enough !== '1') { window.location.href = cfg.topupUrl; return; }
+                const f = el.form.querySelector('input[name="premium"]'); if (f) f.value = '1';
+                go.disabled = true;
+                cast();
+            });
+        }
+    }
     function closeSheet() { el.sheet.classList.remove('on'); }
 
     // ───────── วางไพ่ → ส่งฟอร์มเดิม (tarot.cast) ─────────
-    async function cast() {
+    async function cast(e) {
         if (state.submitting) return;
+        // กดปุ่ม "เปิดไพ่" ปกติ (มาจากคลิก) = ไม่เอาพรีเมียม
+        if (e && e.type === 'click') { const f = el.form && el.form.querySelector('input[name="premium"]'); if (f) f.value = '0'; }
         state.submitting = true;
         const btn = action('cast'); if (btn) btn.disabled = true;
         const ids = useGL ? state.picked.map((c) => c.userData.id) : fallbackPicked.slice();

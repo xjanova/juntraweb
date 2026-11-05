@@ -7,6 +7,9 @@ use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\Reading;
+use App\Services\Thaiprompt\JuntraServerClient;
+use App\Support\ReadingTheater;
+use App\Support\VoicePremium;
 use App\Services\AiOracle;
 use App\Services\Chat\ChatOffers;
 use App\Services\Chat\ChatReadingIntent;
@@ -18,6 +21,7 @@ use App\Support\ChatRooms;
 use App\Support\ChatSuggestions;
 use App\Support\Markdown;
 use App\Support\Pricing;
+use App\Support\ReadingQaClock;
 use App\Support\ReadingRoomLock;
 use App\Support\TarotSpreads;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -105,6 +109,11 @@ class ChatController extends Controller
         }
         $request->session()->put('chat_room', $room);
 
+        // ⏳ "คุยเรื่องอื่นต่อ" หลังหมดเวลาถามต่อของไพ่ — ทิ้งห้องของไพ่ไว้ในประวัติ กลับห้องคุยทั่วไปของผู้พยากรณ์คนนี้
+        if ($request->boolean('fresh')) {
+            $this->forgetRoomToken($request, $room);
+        }
+
         // Even when the gate denies access, render the shell — the user
         // sees the bot UI with an inline CTA + greeting placeholder. Less
         // jarring than a dead "please log in" page.
@@ -131,17 +140,31 @@ class ChatController extends Controller
 
         $this->loadRecentMessages($conversation);
 
+        // 🔒 กำลังทำนาย / บิลค้าง → ซ่อนทุกปุ่มที่พาไปเปิดไพ่ใบใหม่
+        $bill       = $user ? ChatTopupController::pendingBill($user) : null;
+        $hideOffers = $lock !== null || $bill !== null;
+
         // เข้าแชทต่อจากการเปิดไพ่หรือเปล่า — ใช้เลือกชุดปุ่มคำถามลัด
         // 💬 (2026-09-21) อ่านจากห้อง (chat_conversations.reading_id) ไม่ใช่ session เบราว์เซอร์อีกต่อไป
         $reading = ReadingChatContext::readingOf($conversation);
+        // ⏳ นาฬิกาถามต่อของห้องที่คุยต่อจากไพ่ (null = ห้องคุยทั่วไป)
+        $qa = ReadingQaClock::state($conversation, $reading);
+        // ระหว่างเวลาถามต่อของไพ่ชุดนี้ = ยังอยู่ในการทำนาย → ไม่ยื่นไพ่ชุดใหม่ (กด "พอแล้ว" ก่อนได้)
+        $hideOffers = $hideOffers || ($qa !== null && ! $qa['over']);
 
         return view('pages.chat.index', [
+            'qa'           => $qa,
             'conversation' => $conversation,
             'room'         => $conversation->persona,
             'rooms'        => ChatRooms::cards(),
-            'offerCards'   => $this->offerCardsFor($conversation, $user),
+            'offerCards'   => $hideOffers ? ['id' => null, 'offers' => []] : $this->offerCardsFor($conversation, $user),
             // 🔮 (2026-11-05) แพ็กเกจของห้องวางบนโต๊ะในห้องพยากรณ์ — กดเปิดไพ่ได้ตลอด ไม่ต้องรอแม่หมอยื่นการ์ด
-            'tableOffers'  => $gate['allowed'] ? array_slice(ChatOffers::forRoom((string) $conversation->persona, 'general', $user), 0, 3) : [],
+            //    ยกเว้นตอนกำลังทำนายอยู่ หรือมีบิลเติมเงินค้าง (โชว์บิล/การทำนายที่ค้างแทน)
+            'tableOffers'  => $gate['allowed'] && ! $hideOffers ? array_slice(ChatOffers::forRoom((string) $conversation->persona, 'general', $user), 0, 3) : [],
+            'roomLock'     => $lock !== null ? ReadingRoomLock::view($lock) : null,
+            'pendingBill'  => $bill !== null ? ChatTopupController::billView($bill) : null,
+            'aiSuggestions' => $hideOffers ? ChatSuggestions::withoutReadingStarters((array) Cache::get(self::askKey($conversation->id), []))
+                                           : (array) Cache::get(self::askKey($conversation->id), []),
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => $cost,
@@ -149,7 +172,7 @@ class ChatController extends Controller
             'dailyLimit'   => $dailyLimit,
             'dailyLeft'    => $dailyLeft ?? 0,
             'readonly'     => false, // live chat room — input is active
-            'suggestions'  => $this->suggestionsFor($conversation, $reading),
+            'suggestions'  => $this->staticChips($request, $this->suggestionsFor($conversation, $reading)),
             // คุยต่อจากผลทำนาย → เปิดเสียงแล้วแม่หมอชวนถามต่อ แทนคำทักทายทั่วไป
             'fromReading'  => $reading !== null,
             'topics'       => ChatSuggestions::topics(),
@@ -248,6 +271,50 @@ class ChatController extends Controller
         $token  = $tokens[$room] ?? ($room === ChatRooms::DEFAULT ? $request->session()->get('chat_token') : null);
 
         return is_string($token) && $token !== '' ? $token : null;
+    }
+
+    /**
+     * ✨ (2026-11-05) พรีเมียมเสียง: คำตอบในห้องถามต่อ → ไฟล์เสียงของห้อง (null = ตอบเป็นตัวอักษรอย่างเดียว)
+     *
+     * ตัดอีโมจิ/มาร์กดาวน์ก่อนพูด · ยาวเกินตัดที่ช่องว่างสุดท้าย · เกินเพดานต่อคำทำนาย = ไม่พูด
+     * รอเสียงไม่เกิน ~12 วิ — ช้ากว่านั้นลูกค้าได้ข้อความไปก่อน (ไม่ค้างหน้า)
+     */
+    private function speakReply(Reading $reading, ChatConversation $conversation, string $reply): ?string
+    {
+        $qa = ReadingQaClock::state($conversation, $reading);
+        if ($qa === null || $qa['over'] || ! VoicePremium::active($reading)) {
+            return null;
+        }
+        $text = ReadingTheater::plain($reply);
+        $text = (string) preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]/u', '', $text);
+        $text = trim((string) preg_replace('/[ \t]+/u', ' ', $text));
+        $max = (int) config('reading_voice.reply_max_chars', 600);
+        if (mb_strlen($text) > $max) {
+            $cut = mb_substr($text, 0, $max);
+            $space = max((int) mb_strrpos($cut, ' '), (int) mb_strrpos($cut, "\n"));
+            $text = trim($space > $max / 2 ? mb_substr($cut, 0, $space) : $cut);
+        }
+        if ($text === '' || ! VoicePremium::canSpeak($reading, mb_strlen($text))) {
+            return null;
+        }
+
+        $r = app(JuntraServerClient::class)->voiceSpeak((string) $conversation->persona, $text, 'chat', (string) $reading->user_id, 12);
+        if ($r['status'] !== 'completed') {
+            return null;
+        }
+        VoicePremium::addChatChars($reading, mb_strlen($text));
+
+        return $r['url'];
+    }
+
+    private function forgetRoomToken(Request $request, string $room): void
+    {
+        $tokens = (array) $request->session()->get('chat_tokens', []);
+        unset($tokens[$room]);
+        $request->session()->put('chat_tokens', $tokens);
+        if ($room === ChatRooms::DEFAULT) {
+            $request->session()->forget('chat_token');
+        }
     }
 
     private function rememberRoomToken(Request $request, string $room, string $token): void
@@ -351,6 +418,42 @@ class ChatController extends Controller
         $request->session()->put('chat_room', $room->persona);
 
         return [$room, $fresh];
+    }
+
+    /** คีย์ cache ปุ่มจาก AI ชุดล่าสุดของห้อง */
+    private static function askKey(int $conversationId): string
+    {
+        return "chat:ask:{$conversationId}";
+    }
+
+    /** ปุ่มลัดตายตัว — ระหว่างทำนายอยู่ตัดปุ่มที่พาไปเริ่มดูดวงใบใหม่ออก */
+    private function staticChips(Request $request, array $chips): array
+    {
+        return ReadingRoomLock::active($request) !== null ? ChatSuggestions::withoutReadingStarters($chips) : $chips;
+    }
+
+    /**
+     * ลูกค้าขอดูดวงระหว่างที่ยังเปิดการ์ดใหม่ไม่ได้ — คืนคำตอบนุ่ม ๆ แทนการ์ด หรือ null ถ้าเปิดได้ตามปกติ
+     */
+    private function offerHold(Request $request, $user, ?string $persona, ?array $qa = null): ?string
+    {
+        $self = ChatRooms::selfName($persona);
+        if ($qa !== null && ! $qa['over']) {
+            $mins = max(1, (int) ceil($qa['left'] / 60));
+
+            return "ตอนนี้เรากำลังคุยต่อจากไพ่ชุดที่เปิดไว้นะคะ ยังถามต่อได้อีกราว {$mins} นาที "
+                . "ถ้าอยากเปิดไพ่ชุดใหม่ กดปุ่ม \"พอแล้ว\" ด้านบนก่อน แล้ว{$self}เปิดให้ได้เลยค่ะ 🌙";
+        }
+        if (($lock = ReadingRoomLock::active($request)) !== null) {
+            return $lock['reason'] === 'reading'
+                ? "{$self}กำลังอ่านไพ่ชุดที่เปิดไว้ให้อยู่นะคะ อีกสักครู่คำทำนายจะเสร็จ แล้วถามต่อจากไพ่ชุดนั้นได้เลยค่ะ 🌙"
+                : "ตอนนี้เรากำลังอยู่ในพิธีเปิดไพ่กันอยู่นะคะ กลับไปเลือกไพ่ให้ครบก่อน แล้วค่อยถามต่อจากไพ่ได้เลยค่ะ 🌙";
+        }
+        if ($user && ($bill = ChatTopupController::pendingBill($user)) !== null) {
+            return "ยังมีบิลเติมเงินเลขที่ {$bill->reference_code} รอชำระอยู่นะคะ จ่ายบิลนี้ให้เรียบร้อยก่อน แล้ว{$self}เปิดไพ่ให้ต่อได้เลยค่ะ";
+        }
+
+        return null;
     }
 
     /** ชุดปุ่มคำถามลัดที่เหมาะกับสถานะของบทสนทนาตอนนี้ */
@@ -465,6 +568,23 @@ class ChatController extends Controller
     {
         $conversation = $this->conversationFor($request, $user, $room);
 
+        // ⏳ ห้องที่คุยต่อจากไพ่: หมดเวลาถามต่อ/กด "พอแล้ว" แล้ว = ไม่ส่ง ไม่ถาม AI ไม่คิดเงิน
+        $reading = ReadingChatContext::readingOf($conversation);
+        $qa = ReadingQaClock::state($conversation, $reading);
+        if ($qa !== null && $qa['over']) {
+            $this->releaseChargeLock();
+            $msg = ReadingQaClock::overMessage($conversation->persona);
+
+            return $request->wantsJson()
+                ? response()->json(['error' => $msg, 'reason_code' => 'qa_over', 'qa' => $qa], 403)
+                : redirect()->route('chat.index', ['room' => $room])->with('status', $msg);
+        }
+        // คำถามแรก = เริ่มนับ (นับจากตอนลูกค้าถาม ไม่ใช่ตอนเปิดห้อง)
+        $qaJustStarted = $qa !== null && ! $qa['started'];
+        if ($qa !== null) {
+            ReadingQaClock::startIfNeeded($conversation);
+        }
+
         $userMessage = ChatMessage::create([
             'chat_conversation_id' => $conversation->id,
             'role'    => 'user',
@@ -476,9 +596,25 @@ class ChatController extends Controller
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
         $offers   = $kind === 'offer' ? ChatOffers::forRoom($conversation->persona, (string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
+        // 🔒 (2026-11-05) กำลังทำนายอยู่ (สับไพ่/อ่านไพ่) หรือมีบิลเติมเงินค้าง — ไม่ยื่นการ์ดเปิดไพ่ใบใหม่ซ้อน
+        //    เจ้าของสั่ง "ถ้าทำนายอยู่ปุ่มดูดวงไม่ควรโผล่มา" + "ป้ายเปิดไพ่ต้องไม่ขึ้นถ้ายังค้างบิลอยู่"
+        if ($offers !== [] && ($hold = $this->offerHold($request, $user, $conversation->persona, $qa)) !== null) {
+            $offers = [];
+            $reply  = $hold;
+        }
+        // ✨ ปุ่มที่ผู้พยากรณ์คิดมาให้จากบทสนทนา — การ์ดเปิดไพ่ขึ้นอยู่แล้วไม่ต้องมีปุ่มแย่งความสนใจ
+        $aiSuggestions = ! $degraded && $offers === [] ? (array) ($dispatch['suggestions'] ?? []) : [];
+        if ($aiSuggestions !== [] && (ReadingRoomLock::active($request) !== null || $qa !== null)) {
+            $aiSuggestions = ChatSuggestions::withoutReadingStarters($aiSuggestions);
+        }
         if ($degraded) {
             // ไม่ได้คำตอบจริง ไม่คิดเงิน — ลูกค้าส่งใหม่ด้วยคีย์เดิมได้ทันที
             $this->releaseChargeLock();
+            // ⏳ คำถามแรกไม่ได้คำตอบ = ยังไม่เริ่มนับ (ลูกค้าไม่เสียเวลาถามต่อไปกับตอนที่ระบบล่ม)
+            if ($qaJustStarted) {
+                ChatConversation::whereKey($conversation->id)->update(['qa_started_at' => null]);
+                $conversation->refresh();
+            }
             // 🔮 (2026-11-03) และไม่กินโควตาคุยฟรี: dailyUsed() นับข้อความของลูกค้า ถ้าเก็บไว้ ส่งใหม่หนึ่งครั้ง
             //    = เสียโควตาสองข้อความแลกคำตอบเดียว · คำขอโทษก็ไม่เก็บ (ลูกค้าเห็นบนจอแล้ว ส่งใหม่ได้คำตอบจริงแทน)
             $userMessage->delete();
@@ -510,6 +646,10 @@ class ChatController extends Controller
         // would be charged for a message they never see. Refund on failure.
         try {
             if (! $degraded) {
+                // จำปุ่มชุดล่าสุดไว้ให้หน้าที่รีเฟรช (ชุดว่าง = ลบของเก่า ไม่ให้ปุ่มของคำตอบก่อนค้างอยู่)
+                $aiSuggestions !== []
+                    ? Cache::put(self::askKey($conversation->id), $aiSuggestions, now()->addHours(6))
+                    : Cache::forget(self::askKey($conversation->id));
                 ChatMessage::create([
                     'chat_conversation_id' => $conversation->id,
                     'role'        => 'assistant',
@@ -542,9 +682,13 @@ class ChatController extends Controller
             // จะโชว์ปุ่มคำถามลัดชุดไหน และต้องยุบแถบปุ่มไหมเมื่อแม่หมอถามกลับ
             // (ก่อนหน้านี้ฝั่ง client เดาเอง ตัวเลขโควตาจึงเคลื่อนจากของจริง)
             $awaiting = ChatSuggestions::isAwaitingAnswer($reply);
+            // ✨ พรีเมียมเสียง — ระหว่างเวลาถามต่อ ทุกคำตอบพูดออกเสียงของห้อง
+            $voiceUrl = ! $degraded && $kind !== 'offer' && $reading !== null
+                ? $this->speakReply($reading, $conversation, (string) $reply) : null;
 
             return response()->json([
                 'reply'       => $reply,
+                'voice_url'   => $voiceUrl,
                 'reply_html'  => Markdown::safe($reply),
                 'balance'     => $this->wallet->balance($user),
                 'cost'        => $kind === 'offer' ? 0.0 : $cost,
@@ -557,7 +701,12 @@ class ChatController extends Controller
                 'blocked'     => ChatPolicy::exhausted($user),
                 'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
-                'suggestions' => $awaiting || $offers !== [] ? [] : ChatSuggestions::followUp(),
+                // ⏳ นาฬิกาถามต่อ (null = ห้องคุยทั่วไป) — หน้าเว็บนับถอยหลังตามเวลาของเซิร์ฟเวอร์
+                'qa'          => ReadingQaClock::state($conversation, $reading),
+                'server_now'  => now()->getTimestamp(),
+                'suggestions' => $awaiting || $offers !== [] ? [] : $this->staticChips($request, ChatSuggestions::followUp()),
+                // ✨ (2026-11-05) ปุ่มจาก AI — แม่หมอถามกลับอยู่ = ตัวเลือกคำตอบ · ไม่ได้ถาม = คำถามที่น่าถามต่อ
+                'ai_suggestions' => $aiSuggestions,
                 // 🌙 (2026-09-15) ลูกค้าขอให้ทำนาย → การ์ดแพ็กเกจเปิดไพ่ (หักเครดิตตอนเปิดไพ่จริง)
                 'kind'        => $kind,
                 'offers'      => $offers,
@@ -566,6 +715,36 @@ class ChatController extends Controller
         }
 
         return redirect()->route('chat.index')->with('status', ChatRooms::short($conversation->persona) . 'ตอบกลับแล้ว');
+    }
+
+    /**
+     * ⏳ "พอแล้ว" — จบเวลาถามต่อของไพ่ชุดนี้ก่อนกำหนด (เจ้าของสั่ง "ปุ่ม พอแล้ว ด้วย หมายถึงเลิกก่อนเวลา")
+     *
+     * คำลาประกอบในเครื่อง ไม่ถาม AI ไม่คิดเงิน · กดซ้ำ = ได้สถานะเดิม ไม่มีคำลาซ้ำ
+     */
+    public function endQa(Request $request)
+    {
+        $data = $request->validate(['room' => 'nullable|string|max:16']);
+        $user = $request->user();
+        $room = ChatRooms::normalize($data['room'] ?? null);
+        $conversation = $this->conversationFor($request, $user, $room);
+        $reading = ReadingChatContext::readingOf($conversation);
+        if ($reading === null || $conversation->user_id !== $user->id) {
+            return response()->json(['error' => 'ห้องนี้ไม่ได้จับเวลาถามต่อค่ะ', 'reason_code' => 'no_clock'], 422);
+        }
+
+        $reply = null;
+        if (ReadingQaClock::end($conversation)) {
+            $reply = ReadingQaClock::farewell($conversation->persona);
+            ChatMessage::create(['chat_conversation_id' => $conversation->id, 'role' => 'assistant', 'content' => $reply]);
+        }
+
+        return response()->json([
+            'reply'      => $reply,
+            'reply_html' => $reply !== null ? Markdown::safe($reply) : null,
+            'qa'         => ReadingQaClock::state($conversation, $reading),
+            'server_now' => now()->getTimestamp(),
+        ]);
     }
 
     /**
@@ -707,7 +886,11 @@ class ChatController extends Controller
         //    และมีอายุ 24 ชม.) · บริบท = ไพ่ทุกใบ + คำพยากรณ์ฉบับเต็ม ส่งไปทุกรอบ ห้องฝั่ง Thaiprompt หมดอายุ
         //    หรือ cache ถูกล้างเมื่อไร แม่หมอก็ยังเห็นคำพยากรณ์ครบ
         $reading  = ReadingChatContext::readingOf($conversation);
-        $context  = $reading ? ReadingChatContext::for($reading) : null;
+        // ⏳ บรรทัดเวลาที่เหลือขึ้นก่อนบริบทไพ่ — ผู้พยากรณ์รู้ว่าเหลือกี่นาที (เจ้าของถาม "ทำไมบอทไม่รู้ว่าเหลือเวลาเท่าไหร่")
+        $timeLine = $reading ? ReadingQaClock::contextLine(ReadingQaClock::state($conversation, $reading)) : null;
+        $context  = $reading
+            ? trim(($timeLine !== null ? $timeLine . "\n\n" : '') . ReadingChatContext::for($reading, $timeLine !== null ? mb_strlen($timeLine) + 2 : 0))
+            : null;
         $grounded = $reading !== null;
 
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย
@@ -745,7 +928,13 @@ class ChatController extends Controller
             return $this->degradedFallback($message, $context);
         }
 
-        return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
+        return [
+            'reply'       => $out['reply'],
+            'degraded'    => false,
+            'kind'        => $out['kind'],
+            'offer_topic' => $out['offer_topic'],
+            'suggestions' => $out['suggestions'] ?? [],
+        ];
     }
 
     /**

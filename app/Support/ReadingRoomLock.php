@@ -60,6 +60,31 @@ final class ReadingRoomLock
             : "เริ่มพิธีเปิดไพ่กับ{$who}แล้ว — เปลี่ยนห้องได้เมื่อเปิดไพ่เสร็จ หรืออีกราว {$mins} นาที";
     }
 
+    /**
+     * ข้อมูลสำหรับแถบ "กำลังทำนายอยู่" ในห้องพยากรณ์ — เวลาหมดนับจากนาฬิกาของเซิร์ฟเวอร์ (ไม่ใช่เครื่องลูกค้า)
+     *
+     * @param  array{room: string, until: Carbon, reason: string, reading_id: int|null}  $lock
+     * @return array{reason:string,room:string,name:string,ends_at:int,message:string,resume_url:?string,resume_label:string,can_end:bool}
+     */
+    public static function view(array $lock): array
+    {
+        $isReading = $lock['reason'] === 'reading';
+
+        return [
+            'reason'       => $lock['reason'],
+            'room'         => $lock['room'],
+            'name'         => ChatRooms::name($lock['room']),
+            'ends_at'      => $lock['until']->getTimestamp(),
+            'message'      => $isReading ? 'กำลังอ่านไพ่ให้อยู่' : 'อยู่ในพิธีเปิดไพ่',
+            'resume_url'   => $isReading
+                ? ($lock['reading_id'] ? route('tarot.show', $lock['reading_id']) : null)
+                : route('tarot.pick'),
+            'resume_label' => $isReading ? 'ดูคำทำนาย' : 'กลับไปเลือกไพ่',
+            // จบพิธีก่อนจ่าย = ยกเลิกได้ ไม่เสียเงิน · คำทำนายที่จ่ายแล้วยกเลิกกลางทางไม่ได้ (กำลังอ่านอยู่)
+            'can_end'      => ! $isReading,
+        ];
+    }
+
     /** ช่วงสับ/เลือกไพ่ — จาก session ที่ tarot/begin เขียนไว้ */
     private static function fromPick(Request $request): ?array
     {

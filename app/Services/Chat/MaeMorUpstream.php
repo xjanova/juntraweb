@@ -95,6 +95,7 @@ class MaeMorUpstream
                 'reply'       => $reply,
                 'kind'        => in_array($kind, ['reply', 'guard', 'offer'], true) ? $kind : 'reply',
                 'offer_topic' => $kind === 'offer' ? ChatReadingIntent::normalizeTopic($res['data']['offer_topic'] ?? null) : null,
+                'suggestions' => self::cleanSuggestions($res['data']['suggestions'] ?? null),
             ];
         }
 
@@ -111,7 +112,39 @@ class MaeMorUpstream
             return null;
         }
 
-        return ['reply' => $reply, 'kind' => 'reply', 'offer_topic' => null];
+        return ['reply' => $reply, 'kind' => 'reply', 'offer_topic' => null, 'suggestions' => []];
+    }
+
+    /**
+     * ✨ ปุ่มที่ผู้พยากรณ์คิดมาให้ (data.suggestions) — กรองซ้ำฝั่งเว็บ ไม่เชื่อของที่ส่งข้ามระบบมาตรง ๆ
+     *
+     * เหลือเฉพาะข้อความสั้นล้วน: ไม่มีแท็ก ลิงก์ ราคา · ไม่ซ้ำ · ไม่เกิน 4 ปุ่ม · ยาวไม่เกิน 60 ตัว
+     *
+     * @return list<string>
+     */
+    public static function cleanSuggestions(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (! is_string($item)) {
+                continue;
+            }
+            $t = trim((string) preg_replace('/\s+/u', ' ', strip_tags($item)));
+            if ($t === '' || mb_strlen($t) > 60 || preg_match('~https?://|www\.|฿|บาท|[<>\[\]{}]~iu', $t)) {
+                continue;
+            }
+            if (! in_array($t, $out, true)) {
+                $out[] = $t;
+            }
+            if (count($out) >= 4) {
+                break;
+            }
+        }
+
+        return $out;
     }
 
     /**

@@ -182,6 +182,22 @@ class ChatSuggestions
     }
 
     /** @return array{label:string,prompt:string,icon:string} */
+    /**
+     * 🔒 (2026-11-05) ตัดปุ่มที่พาไปเริ่มดูดวง/เปิดไพ่ใบใหม่ออก — ใช้ระหว่างกำลังทำนายอยู่
+     *
+     * รับได้ทั้งชิป (label/prompt/icon) และข้อความล้วน (ปุ่มจาก AI) · ตัดสินด้วยตัวจับเจตนาเดียวกับห้องแชท
+     * (ChatReadingIntent::detect) ปุ่มไหนกดแล้วจะได้การ์ดเปิดไพ่ = ตัดทิ้ง
+     */
+    public static function withoutReadingStarters(array $items): array
+    {
+        return array_values(array_filter($items, function ($item) {
+            $text = is_array($item) ? (string) ($item['prompt'] ?? '') : (string) $item;
+
+            return $text !== '' && \App\Services\Chat\ChatReadingIntent::detect($text) === null
+                && ! str_contains($text, 'ดูดวงเชิงลึก');
+        }));
+    }
+
     private static function chip(string $label, string $prompt, string $icon): array
     {
         return ['label' => $label, 'prompt' => $prompt, 'icon' => $icon];

@@ -11,6 +11,8 @@ export default defineConfig({
                 'resources/js/theater/index.js',
                 // 🃏 โรงละครเปิดไพ่ (หน้าเลือกไพ่ + หน้าผล) — three.js + HUD ลายทอง
                 'resources/js/card-theater/index.js',
+                // 🎵 เพลงวนในห้องพยากรณ์ (หน้าแชทสด) — เครื่องเล่นตัวเดียวกับโรงละคร
+                'resources/js/oracle-room/music.js',
                 // 🏛️ ห้องพยากรณ์เต็มจอ (หน้าแชทสด)
                 'resources/css/oracle-room.css',
                 'resources/css/themes/mae-mor-chantra.css',

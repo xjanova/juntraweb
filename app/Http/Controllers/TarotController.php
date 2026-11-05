@@ -14,6 +14,7 @@ use App\Support\Pricing;
 use App\Support\ReadingCooldown;
 use App\Support\ReadingRoomLock;
 use App\Support\TarotSpreads;
+use App\Support\VoicePremium;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -230,6 +231,23 @@ class TarotController extends Controller
     }
 
     /** 🔒 ล็อกห้องระหว่างทำนาย — redirect พร้อมเหตุผล หรือ null ถ้าไปห้องนี้ได้ */
+    /**
+     * 🔒 (2026-11-05) "พอแล้ว" — จบพิธีเลือกไพ่ก่อนจ่าย ปลดล็อกห้องทันที ไม่มีการตัดเงิน
+     *
+     * เจ้าของสั่ง "ปุ่ม พอแล้ว ด้วย หมายถึงเลิกก่อนเวลา" · ใช้ได้เฉพาะช่วงสับ/เลือกไพ่ (ยังไม่ได้จ่าย)
+     * คำทำนายที่จ่ายแล้วกำลังอ่านอยู่ยกเลิกไม่ได้ — ล็อกนั้นจบเองเมื่อคำทำนายเสร็จ
+     */
+    public function abandon(Request $request)
+    {
+        $pick = $request->session()->pull('tarot_pick');
+        $room = is_array($pick) && ! empty($pick['room'])
+            ? \App\Support\ChatRooms::normalize((string) $pick['room'])
+            : $request->session()->get('chat_room');
+
+        return redirect()->route('chat.index', array_filter(['room' => $room]))
+            ->with('status', 'จบพิธีเปิดไพ่แล้วค่ะ ไม่มีการตัดเครดิต — อยากเปิดไพ่เมื่อไรก็กลับมาได้เลยนะคะ');
+    }
+
     private function roomLockBlock(Request $request, string $room)
     {
         $message = ReadingRoomLock::blockMessage($request, $room);
@@ -257,6 +275,16 @@ class TarotController extends Controller
         // session pick state is preserved so they can retry after.
         // Guarded by cost > 0 so admin can set the price to 0 (free reading)
         // without debit() throwing InvalidArgumentException.
+        // ✨ (2026-11-05) พรีเมียมเสียงผู้พยากรณ์ — เลือกที่หน้าจ่ายเงิน · ระบบเสียงไม่พร้อม = ไม่ขาย (เปิดไพ่ราคาปกติ)
+        $premium = $request->boolean('premium') && VoicePremium::offerable();
+        $premiumPrice = $premium ? VoicePremium::price() : 0.0;
+        if ($premium && $premiumPrice > 0
+            && bccomp(number_format((float) $this->wallet->balance($user), 2, '.', ''), number_format($cost + $premiumPrice, 2, '.', ''), 2) < 0) {
+            // เช็คก่อนตัดค่าไพ่ — ไม่ปล่อยให้ตัดค่าไพ่ไปแล้วค่อยรู้ว่าพรีเมียมไม่พอ
+            return redirect()->route('wallet.index')
+                ->with('status', 'ยอดเงินไม่พอสำหรับแพ็กเกจพรีเมียม (' . Pricing::format($cost + $premiumPrice) . ') — กรุณาเติมเงินเข้าวอลเลต ยังไม่มีการหักเครดิต');
+        }
+
         $tx = null;
         if ($cost > 0) {
             try {
@@ -267,6 +295,31 @@ class TarotController extends Controller
                 ]);
             } catch (InsufficientFundsException $e) {
                 return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต');
+            }
+        }
+
+        // ✨ ตัดพรีเมียมเป็นรายการแยก — คืนเฉพาะ +฿100 ได้โดยไม่แตะค่าไพ่ · คีย์จากฟอร์มเดิม = กดซ้ำไม่ตัดซ้ำ
+        $premiumTx = null;
+        if ($premium && $premiumPrice > 0) {
+            try {
+                $premiumTx = $this->wallet->debit($user, $premiumPrice, 'พรีเมียมเสียงผู้พยากรณ์: ' . (TarotSpreads::nameForType($type) ?? 'ไพ่ยิปซี'), [
+                    'reference_type'  => 'voice_premium',
+                    'method'          => 'system',
+                    'idempotency_key' => VoicePremium::idempotencyKey($user->id, (string) $request->input('_idem', Str::uuid())),
+                ]);
+            } catch (InsufficientFundsException $e) {
+                // ยอดหายไประหว่างทาง (อีกแท็บใช้ไป) — คืนค่าไพ่ที่เพิ่งตัด ให้ลูกค้าเลือกใหม่
+                if ($tx) {
+                    $this->wallet->refund($tx, 'ยอดไม่พอสำหรับพรีเมียม');
+                }
+
+                return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต (คืนค่าเปิดไพ่แล้ว)');
+            }
+            // ฟอร์มเก่าถูกส่งซ้ำหลังล็อกกันกดซ้ำหมดอายุ → debit() คืนรายการพรีเมียมเดิมที่ผูกกับคำทำนายใบก่อนแล้ว
+            // ห้ามเอามาผูกกับใบใหม่ (ได้พรีเมียมฟรี + tx ชี้ข้ามใบ) — ใบนี้เปิดแบบปกติ ไม่ตัดพรีเมียมเพิ่ม
+            if (! $premiumTx->wasRecentlyCreated && $premiumTx->reference_id !== null) {
+                $premium = false;
+                $premiumTx = null;
             }
         }
 
@@ -292,6 +345,13 @@ class TarotController extends Controller
                     // เก็บไว้กับรายการ — แม่หมอใช้ตอนทำนาย และหลังบ้านเห็นว่าคำทำนายนี้มีดวงวันเกิดประกอบ
                     'birth_date'   => TarotSpreads::wantsBirthDate(TarotSpreads::keyFromType($type) ?? '')
                         ? $request->input('birth_date') : null,
+                    // ✨ พรีเมียมเสียง — เล่าคำทำนายด้วยเสียง + ถามต่อ 20 นาทีพร้อมเสียง (VoicePremium)
+                    'premium'      => $premium ? [
+                        'status' => 'paid',
+                        'price'  => $premiumPrice,
+                        'tx_id'  => $premiumTx?->id,
+                        'at'     => now()->toIso8601String(),
+                    ] : null,
                 ], fn ($v) => $v !== null),
             ]);
 
@@ -309,6 +369,7 @@ class TarotController extends Controller
             if ($tx) {
                 $tx->update(['reference_id' => $reading->id]);
             }
+            $premiumTx?->update(['reference_id' => $reading->id]);
 
             // 🔮 (2026-09-15) แม่หมออ่านไพ่ "หลังส่งหน้า" — แพ็กเกจยาวบนเลนทำนายใช้ 36-55 วิ ชนเพดาน
             //    ~60 วิของคำขอหน้าเว็บ ลูกค้าเห็นไพ่ที่เปิดได้ทันที แล้วหน้าผลถามสถานะจนคำทำนายขึ้น
@@ -325,6 +386,17 @@ class TarotController extends Controller
             // Track whether the refund actually succeeded so we don't tell the
             // user "เครดิตถูกคืนแล้ว" when it didn't.
             $refunded = true;
+            if ($premiumTx && $premiumTx->status === 'success') {
+                try {
+                    $this->wallet->refund($premiumTx, 'ระบบขัดข้องระหว่างเปิดไพ่');
+                } catch (\Throwable $refundErr) {
+                    $refunded = false;
+                    Log::critical('Premium refund FAILED after reading failure — manual intervention needed', [
+                        'tx_id' => $premiumTx->id,
+                        'err'   => $refundErr->getMessage(),
+                    ]);
+                }
+            }
             if ($tx) {
                 try {
                     $this->wallet->refund($tx, 'ระบบขัดข้องระหว่างเปิดไพ่');

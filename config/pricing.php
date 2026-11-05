@@ -39,6 +39,9 @@ return [
     // Set to 0 to disable per-message billing.
     'chat_message' => env('PRICING_CHAT_MESSAGE', 2),
 
+    // ✨ (2026-11-05) พรีเมียมเสียงผู้พยากรณ์ — บวกเพิ่มจากค่าเปิดไพ่ (config/reading_voice.php)
+    'voice_premium' => env('PRICING_VOICE_PREMIUM', 100),
+
     // Top-up
     'topup_bundles' => [50, 100, 200, 500, 1000, 2000],
     'min_topup'     => env('PRICING_MIN_TOPUP', 20),

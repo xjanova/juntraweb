@@ -39,6 +39,8 @@ final class CardTheater
             // เทียบด้วย bccomp ทศนิยม 2 ตำแหน่ง — float ตรง ๆ อาจตัดสินผิดที่หลักสตางค์
             'enough'    => $balance === null || bccomp(number_format((float) $balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) >= 0,
             'topupUrl'  => route('wallet.topup'),
+            // ✨ (2026-11-05) พรีเมียมเสียงผู้พยากรณ์ (+฿100) — null = ระบบเสียงไม่พร้อม ไม่ขาย
+            'premium'   => VoicePremium::offer($cost, $balance === null ? null : (float) $balance),
         ];
     }
 

@@ -186,6 +186,60 @@
       @endunless
     @endif
 
+    {{-- ✨ (2026-11-05) พรีเมียมเสียง — หน้าผลขอให้เซิร์ฟเวอร์สร้างเสียงเล่าทีละบทจนครบ แล้วโหลดหน้าใหม่ให้โรงละครเล่นเสียง
+         ปิดหน้ากลางทาง = หยุดสร้าง กลับมาเปิดใหม่สร้างต่อ · ไม่ได้เสียงเลย = คืนเงินพรีเมียมอัตโนมัติ --}}
+    @if ($isOwner && data_get($reading->payload, 'premium') && ! $reading->isInProgress() && ! $reading->isFailed())
+      @php
+        $pv = \App\Services\Voice\ReadingVoiceBuilder::view($reading);
+      @endphp
+      <div class="panel" style="margin-top:28px;text-align:center" role="status" aria-live="polite"
+           x-data="premiumVoice(@js($pv), @js(route('tarot.voice.next', $reading)))" x-init="start()">
+        <template x-if="s.status === 'building'">
+          <div>
+            <div class="eyebrow" style="display:inline-flex">✨ พรีเมียม · เสียง{{ $oracleShort }}</div>
+            <p style="margin:12px 0 6px">{{ $oracleShort }}กำลังอัดเสียงเล่าคำทำนายให้คุณ… <span x-show="s.total" x-text="'บทที่ ' + Math.min(s.done + 1, s.total) + '/' + s.total"></span></p>
+            <div style="height:6px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden;max-width:360px;margin:0 auto">
+              <div style="height:100%;background:linear-gradient(90deg,#f5c46a,#ffe6a8);transition:width .6s" :style="'width:' + (s.total ? Math.round(s.done / s.total * 100) : 6) + '%'"></div>
+            </div>
+            <p class="followup-hint" style="margin-top:10px" x-show="slow">ใช้เวลาราว 1–2 นาที อ่านคำทำนายด้านล่างรอไปก่อนได้เลยค่ะ เสร็จแล้วหน้านี้จะพร้อมฟังเอง</p>
+          </div>
+        </template>
+        <template x-if="s.status === 'ready' || s.status === 'partial'">
+          <p style="margin:0">🎧 เสียง{{ $oracleShort }}เล่าคำทำนายพร้อมแล้ว — กดเปิดโรงละครคำทำนายเพื่อฟังได้เลยค่ะ</p>
+        </template>
+        <template x-if="s.status === 'none' && s.refunded">
+          <p style="margin:0">ขออภัยค่ะ ระบบเสียงขัดข้องจนอัดเสียงเล่าไม่ได้ — คืนค่าพรีเมียมเข้ากระเป๋าให้แล้ว (คำทำนายยังอ่านได้ครบตามเดิม)</p>
+        </template>
+      </div>
+      <script>
+        function premiumVoice(initial, url) {
+          return {
+            s: initial, slow: false, busy: false, misses: 0,
+            start() {
+              if (this.s.status !== 'building') return;
+              setTimeout(() => { this.slow = true; }, 8000);
+              this.tick();
+            },
+            async tick() {
+              if (this.busy || this.s.status !== 'building' || document.hidden) { setTimeout(() => this.tick(), 3000); return; }
+              this.busy = true;
+              try {
+                const r = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: {
+                  'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest',
+                  'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content } });
+                const j = await r.json().catch(() => null);
+                if (j && j.status) { this.s = j; this.misses = 0; } else { this.misses++; }
+              } catch (_) { this.misses++; }
+              this.busy = false;
+              // เสร็จแล้ว → โหลดหน้าใหม่ โรงละครจะได้ไฟล์เสียง + เวลาของแต่ละบท
+              if (this.s.status === 'ready' || this.s.status === 'partial') { setTimeout(() => location.reload(), 900); return; }
+              if (this.s.status === 'building' && this.misses < 6) setTimeout(() => this.tick(), this.misses ? 5000 : 400);
+            },
+          };
+        }
+      </script>
+    @endif
+
     {{-- 🎭 (2026-11-04) โรงละครคำทำนาย — เจ้าของคำทำนายเท่านั้น (มีเสียงเล่า/ข้อความของลูกค้าคนนี้) --}}
     @if ($isOwner && \App\Support\ReadingTheater::available($reading))
       <x-reading-theater :reading="$reading" :parsed="$sections" :can-chat="$canConsult" />
