@@ -315,6 +315,12 @@ class TarotController extends Controller
 
                 return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต (คืนค่าเปิดไพ่แล้ว)');
             }
+            // ฟอร์มเก่าถูกส่งซ้ำหลังล็อกกันกดซ้ำหมดอายุ → debit() คืนรายการพรีเมียมเดิมที่ผูกกับคำทำนายใบก่อนแล้ว
+            // ห้ามเอามาผูกกับใบใหม่ (ได้พรีเมียมฟรี + tx ชี้ข้ามใบ) — ใบนี้เปิดแบบปกติ ไม่ตัดพรีเมียมเพิ่ม
+            if (! $premiumTx->wasRecentlyCreated && $premiumTx->reference_id !== null) {
+                $premium = false;
+                $premiumTx = null;
+            }
         }
 
         // Consume the session pick state — we're committed now.
