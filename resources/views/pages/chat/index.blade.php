@@ -271,7 +271,7 @@
                         :greet="($fromReading ?? false) ? 'followup_ask' : 'room_greet'" />
         <div class="mor-plate">
           <div style="font-family:var(--thai);font-size:11px;color:var(--gold)">{{ $P['eyebrow'] }}</div>
-          <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">{{ $P['name'] }}</div>
+          <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">{{ $P['name'] }} <x-ai-badge /></div>
           <div style="display:flex;align-items:center;gap:6px;justify-content:center;margin-top:6px;font-size:12px;color:var(--ink-dim)">
             <span class="mor-online"></span>
             <span x-text="thinking ? persona.busy : 'พร้อมรับฟังอยู่ค่ะ'">พร้อมรับฟังอยู่ค่ะ</span>
@@ -293,7 +293,7 @@
         <div class="mor-mini">
           <x-oracle-stage :persona="$room" :poster="$P['image']" :alt="$P['name']" eager />
           <div style="min-width:0;flex:1">
-            <div style="font-family:var(--thai);font-weight:700;font-size:15px">{{ $P['name'] }}</div>
+            <div style="font-family:var(--thai);font-weight:700;font-size:15px">{{ $P['name'] }} <x-ai-badge /></div>
             <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-dim)">
               <span class="mor-online"></span>
               <span x-text="thinking ? persona.busy : 'ออนไลน์'">ออนไลน์</span>

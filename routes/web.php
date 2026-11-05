@@ -130,6 +130,11 @@ Route::prefix('auspicious')->name('auspicious.')->middleware('service.open:auspi
     Route::post('/find', 'find')->middleware('throttle:reading')->name('find');
 });
 
+// 🔴 (2026-11-04) ตัวเลขสดหน้าห้องผู้พยากรณ์ (ออนไลน์ / ดูดวงไปแล้ว / คิว) — ของจริงทั้งหมด แคช 15 วิ
+Route::get('/chat/live', \App\Http\Controllers\ChatLiveStatsController::class)
+    ->middleware('throttle:60,1')
+    ->name('chat.live');
+
 // AI Chat — send is throttled (per-user, named limiter in AppServiceProvider)
 // to prevent burst-debit + upstream abuse.
 Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(function () {

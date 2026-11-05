@@ -264,6 +264,26 @@ class JuntraServerClient
         return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
     }
 
+    /* ======================= LIVE STATS ======================= */
+
+    /**
+     * 🔴 (2026-11-04) ตัวเลขสดของแม่หมอจาก Thaiprompt — คนทัก DM อยู่ทุกช่องทาง · บิลจ่ายแล้วทั้งหมด · คิวเปิดไพ่
+     * ค่าทุกตัวเป็นของจริง (ฝั่งนั้นไม่บวกเลขสมมติ) ตัวไหนนับไม่ได้เป็น null
+     *
+     * @return array{chatting_now:?int,window_minutes:int,bills_total:?int,reading_queue:?int}|null  null = ถามไม่ได้ / Thaiprompt ยังไม่มี endpoint
+     */
+    public function liveStats(): ?array
+    {
+        $resp = $this->send(fn (PendingRequest $http) => $http->connectTimeout(2)->timeout(4)->get($this->url('/stats/live')));
+
+        if ($resp?->successful() && is_array($resp->json('data'))) {
+            return (array) $resp->json('data');
+        }
+        $this->logMiss('liveStats', $resp);
+
+        return null;
+    }
+
     /**
      * 📈 กราฟชีวิตมหาทักษา (คะแนนรายปีอายุ 0–100 · ช่วงดาวเสวย · จุดรุ่ง/ระวัง) ให้โรงละครคำทำนาย
      * คำนวณที่ Thaiprompt ก้อนเดียวกับรูปกราฟใน LINE (เว็บไม่มีผังดาวเต็ม) — ไม่ใช้ AI ไม่คิดเงิน
