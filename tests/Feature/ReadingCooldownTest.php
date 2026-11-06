@@ -128,9 +128,11 @@ class ReadingCooldownTest extends TestCase
         $this->cast($u, 'year');
         $reading = Reading::where('type', 'tarot_year')->firstOrFail();
 
-        $this->actingAs($u)->get(route('tarot.index'))->assertOk()
-            ->assertSee('เปิดได้อีกครั้ง 21 ต.ค. 2569 10:41 น.')
-            ->assertSee(route('tarot.show', $reading), false);
+        // 🔮 (2026-11-06) หน้ารวมแพ็กเกจปิดแล้ว — รายการไพ่ทุกแบบในห้องบอกวันที่เปิดได้อีกแทน
+        $this->assertNotNull($reading);
+        $this->actingAs($u)->get(route('tarot.index'))->assertRedirect(route('chat.index', ['room' => 'maemor', 'menu' => 1]));
+        $this->actingAs($u)->get(route('chat.index', ['room' => 'maemor', 'menu' => 1]))->assertOk()
+            ->assertSee('เปิดได้อีกครั้ง 21 ต.ค. 2569 10:41 น.');
 
         $this->actingAs($u)->post(route('tarot.begin'), ['spread' => 'year'])
             ->assertRedirect(route('tarot.index'))

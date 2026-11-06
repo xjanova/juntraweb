@@ -126,14 +126,14 @@ class TarotPackagesTest extends TestCase
     {
         $u = $this->member();
 
-        $this->get(route('tarot.index'))->assertOk()->assertDontSee('ไพ่ดูคุณไสย');
+        $this->assertNotContains('tarot_kunsai', array_column(ChatOffers::roomMenu('maemor', $u), 'key'), 'a hidden package is not on the room menu');
         $this->cast($u, 'kunsai')->assertSessionHasErrors('spread');
         $this->assertSame(['tarot_celtic', 'deep'], array_column(ChatOffers::for('kunsai'), 'key'), 'a hidden package never shows up as a chat card');
 
         Setting::put('tarot_kunsai_visible', '1', 'pricing');
         Cache::flush();
 
-        $this->get(route('tarot.index'))->assertOk()->assertSee('ไพ่ดูคุณไสย');
+        $this->assertContains('tarot_kunsai', array_column(ChatOffers::roomMenu('maemor', $u), 'key'));
         $this->cast($u, 'kunsai')->assertRedirect();
         $this->assertSame('kunsai', $this->sent[0]['spread_key']);
         $this->assertSame(361.0, (float) app(WalletService::class)->balance($u->fresh()), 'คุณไสย ฿139 (เจ้าของสั่ง 2026-11-03)');

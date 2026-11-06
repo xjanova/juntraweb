@@ -64,7 +64,7 @@ class SeoAndTrustTest extends TestCase
         $this->assertSame(array_values(array_column(config('business.social'), 'url')), $store['sameAs']);
 
         // ตราอยู่ทุกหน้าที่ใช้เลย์เอาต์ ไม่ใช่แค่หน้าแรก
-        $this->get(route('tarot.index'))->assertOk()->assertSee('class="dbd-badge"', false);
+        $this->get(route('tarot.free'))->assertOk()->assertSee('class="dbd-badge"', false);
     }
 
     public function test_public_pages_are_indexable_with_canonical_and_private_pages_are_noindex(): void
@@ -88,7 +88,9 @@ class SeoAndTrustTest extends TestCase
         $this->get(route('palmistry.index'))->assertOk()->assertSee('<meta name="robots" content="noindex,follow">', false);
 
         $xml = $this->get('/sitemap.xml')->assertOk()->assertHeader('Content-Type', 'application/xml; charset=UTF-8')->getContent();
-        $this->assertStringContainsString('<loc>' . route('tarot.index') . '</loc>', $xml);
+        $this->assertStringContainsString('<loc>' . route('tarot.free') . '</loc>', $xml);
+        // 🔮 (2026-11-06) /tarot เหลือแค่ทางพาเข้าห้อง (redirect) — ไม่อยู่ใน sitemap
+        $this->assertStringNotContainsString('<loc>' . route('tarot.index') . '</loc>', $xml);
         $this->assertStringNotContainsString(route('palmistry.index'), $xml);
         $this->assertStringNotContainsString('/horoscope', $xml);
         $this->assertNotFalse(simplexml_load_string($xml), 'sitemap ต้องเป็น XML ที่ถูกต้อง');
@@ -139,7 +141,7 @@ class SeoAndTrustTest extends TestCase
         }
 
         // หน้าอื่นมีแค่ข้อมูลร้าน ไม่มี FAQ ที่ไม่ได้แสดง
-        $tarot = $this->get(route('tarot.index'))->assertOk()->getContent();
+        $tarot = $this->get(route('tarot.free'))->assertOk()->getContent();
         $this->assertStringNotContainsString('FAQPage', $tarot);
         $this->assertStringContainsString('OnlineStore', $tarot);
     }

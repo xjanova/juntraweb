@@ -146,16 +146,7 @@ final class ChatOffers
                 if (\App\Support\ServiceGate::isClosed('deep')) {
                     continue;
                 }
-                $out[] = [
-                    'key'    => 'deep',
-                    'kind'   => 'deep',
-                    'spread' => null,
-                    'label'  => 'ดูดวงเชิงลึก',
-                    'cards'  => null,
-                    'price'  => (float) Pricing::for('deep'),
-                    'blurb'  => 'แม่หมอผสานดวงดาววันเกิด เลขศาสตร์ และไพ่ ตอบคำถามของลูกแบบเจาะลึก',
-                    'url'    => route('deep.index'),
-                ];
+                $out[] = self::deepCard();
 
                 continue;
             }
@@ -170,6 +161,67 @@ final class ChatOffers
         return $out;
     }
 
+    /**
+     * 🔮 (2026-11-06) ทุกแบบการเปิดไพ่ของห้อง — แทนหน้ารวมแพ็กเกจ /tarot ที่ปิดไปแล้ว
+     *    (เจ้าของสั่ง "หน้าเลือกเปิดไพ่ ชนิดไพ่ ไม่ต้องมีแล้ว ให้ไปเลือกในห้องแทน")
+     *
+     * แพ็กเกจประจำห้อง (ChatRooms::spread) ขึ้นก่อน ตามด้วยแบบอื่นของห้องตามลำดับในทะเบียน · ห้องแม่หมอปิดท้ายด้วยดูดวงเชิงลึก
+     * แบบที่ติดข้อห้ามเปิดซ้ำยังอยู่ในรายการ พร้อม `locked_until` (หน้าเดิมก็บอกบนการ์ดว่าเปิดได้อีกเมื่อไหร่)
+     *
+     * @return list<array{key:string,kind:string,spread:?string,label:string,cards:?int,price:float,blurb:string,url:string,locked_until:?string}>
+     */
+    public static function roomMenu(string $room, ?User $user = null): array
+    {
+        $room    = ChatRooms::normalize($room);
+        $primary = ChatRooms::spread($room);
+        $first   = [];
+        $rest    = [];
+        foreach (TarotSpreads::all() as $key => $meta) {
+            if (self::menuRoomOf($key) !== $room) {
+                continue;
+            }
+            $blocking = ReadingCooldown::blockingReading($user, $key);
+            $card = self::tarotCard($key, $meta) + [
+                'locked_until' => $blocking ? ReadingCooldown::thaiDate(ReadingCooldown::availableAt($blocking, $key)) : null,
+            ];
+            $key === $primary ? $first[] = $card : $rest[] = $card;
+        }
+        $out = array_merge($first, $rest);
+        if ($room === ChatRooms::DEFAULT && ! \App\Support\ServiceGate::isClosed('deep')) {
+            $out[] = self::deepCard() + ['locked_until' => null];
+        }
+
+        return $out;
+    }
+
+    /**
+     * ห้องที่ขายแบบไพ่นี้ — แบบประจำห้องบุษบา/คุณไสยอยู่ห้องนั้นเมื่อห้องเปิด ที่เหลือทั้งหมดอยู่ห้องแม่หมอ
+     * (ยังไม่เปิดห้องผู้พยากรณ์ = มีห้องแม่หมอห้องเดียว → ทุกแบบอยู่ห้องแม่หมอ)
+     */
+    public static function menuRoomOf(string $spread): string
+    {
+        if (! ChatRooms::personaUpstream()) {
+            return ChatRooms::DEFAULT;
+        }
+        $owner = ChatRooms::personaForSpread($spread);
+
+        return ChatRooms::isOpen($owner) ? $owner : ChatRooms::DEFAULT;
+    }
+
+    private static function deepCard(): array
+    {
+        return [
+            'key'    => 'deep',
+            'kind'   => 'deep',
+            'spread' => null,
+            'label'  => 'ดูดวงเชิงลึก',
+            'cards'  => null,
+            'price'  => (float) Pricing::for('deep'),
+            'blurb'  => 'แม่หมอผสานดวงดาววันเกิด เลขศาสตร์ และไพ่ ตอบคำถามของลูกแบบเจาะลึก',
+            'url'    => route('deep.index'),
+        ];
+    }
+
     private static function tarotCard(string $key, array $meta): array
     {
         return [
@@ -180,7 +232,7 @@ final class ChatOffers
             'cards'  => TarotSpreads::cardCount($key),
             'price'  => (float) Pricing::for(TarotSpreads::priceKey($key)),
             'blurb'  => (string) ($meta['tagline'] ?? ''),
-            'url'    => route('tarot.index'),
+            'url'    => route('chat.index', ['room' => self::menuRoomOf($key)]),
         ];
     }
 }

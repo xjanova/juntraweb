@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Zodiac;
+use App\Services\Chat\ChatOffers;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -95,7 +96,7 @@ class Seo
     {
         $rows = [
             ['home', 'หน้าแรก', 'daily', '1.0'],
-            ['tarot.index', 'ไพ่ยิปซีออนไลน์ (แพ็กเกจทั้งหมด)', 'weekly', '0.9'],
+            // tarot.index ไม่อยู่ใน sitemap แล้ว — ปิดหน้ารวมแพ็กเกจ (2026-11-06) เหลือแค่ทางพาเข้าห้อง (redirect)
             ['tarot.free', 'ดูดวงฟรี 1 ใบ', 'weekly', '0.9'],
             ['chat.index', 'คุยกับแม่หมอ (เลือกผู้พยากรณ์)', 'weekly', '0.8'],
             ['deep.index', 'ดูดวงเชิงลึก', 'weekly', '0.7'],
@@ -260,7 +261,7 @@ class Seo
             'priceCurrency' => 'THB',
             'price' => number_format($o['price'], 2, '.', ''),
             'availability' => 'https://schema.org/InStock',
-            'url' => route('tarot.index'),
+            'url' => route('chat.index', ['room' => ChatOffers::menuRoomOf($o['key'] ?? ''), 'menu' => 1]),
             'itemOffered' => [
                 '@type' => 'Service',
                 'name' => 'ไพ่ยิปซี ' . $o['name'] . ' (' . $o['cards'] . ' ใบ)',

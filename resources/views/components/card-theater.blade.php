@@ -31,7 +31,7 @@
 
   <header class="ct-top">
     @if ($isPick)
-      <a class="ct-icon ct-back" href="{{ $backUrl ?? route('tarot.index') }}" aria-label="กลับไปหน้ารวมไพ่">
+      <a class="ct-icon ct-back" href="{{ $backUrl ?? route('chat.index') }}" aria-label="กลับไปห้องพยากรณ์">
     @else
       <button class="ct-icon ct-back" type="button" aria-label="ปิดโรงละคร">
     @endif

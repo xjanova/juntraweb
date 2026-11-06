@@ -95,6 +95,7 @@
          topics: @js($topics),
          awaiting: @js((bool) $awaiting),
          crisisRoom: @js((bool) ($crisisRoom ?? false)),
+         menuOpen: @js((bool) ($menuOpen ?? false)),
          dailyLimit: @js((int) $dailyLimit),
          dailyLeft: @js((int) $dailyLeft),
          blocked: @js((bool) $exhausted),
@@ -207,6 +208,53 @@
               <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : 'เปิดไพ่'">เปิดไพ่</span>
             </button>
           @endforeach
+          @if (! empty($tableMenu))
+            {{-- 🔮 (2026-11-06) หน้ารวมแพ็กเกจ /tarot ปิดแล้ว — ไพ่ทุกแบบของห้องอยู่ในแผ่นนี้ --}}
+            <button type="button" class="or-offer is-more" @click="table.menu = true" :aria-expanded="table.menu.toString()" aria-controls="or-menu">
+              <span class="or-offer-icon" aria-hidden="true">🃏</span>
+              <span class="or-offer-text">
+                <strong>ไพ่แบบอื่น</strong>
+                <small>ทั้งหมด {{ count($tableMenu) }} แบบ</small>
+              </span>
+            </button>
+          @endif
+        </div>
+      @endif
+
+      @if (! empty($tableMenu))
+        <div id="or-menu" class="or-menu" x-show="table.menu && !crisisRoom" x-cloak @keydown.escape.window="table.menu = false"
+             role="dialog" aria-modal="true" aria-label="เลือกแบบการเปิดไพ่กับ{{ $P['short'] }}">
+          <div class="or-menu-backdrop" @click="table.menu = false"></div>
+          <div class="or-menu-sheet">
+            <div class="or-menu-head">
+              <strong>เลือกแบบการเปิดไพ่กับ{{ $P['short'] }}</strong>
+              <button type="button" class="or-menu-close" @click="table.menu = false" aria-label="ปิดรายการไพ่">✕</button>
+            </div>
+            <div class="or-menu-list">
+              @foreach ($tableMenu as $o)
+                @php $locked = $o['locked_until'] ?? null; @endphp
+                <button type="button" class="or-menu-item {{ $locked ? 'is-locked' : '' }}"
+                        @if ($locked) disabled @else :disabled="!!table.offerBusy" @click="openTable(@js($o))" @endif>
+                  <span class="or-offer-icon" aria-hidden="true">{{ $o['kind'] === 'deep' ? '🌟' : '🔮' }}</span>
+                  <span class="or-menu-text">
+                    <strong>{{ $o['label'] }}</strong>
+                    <small>
+                      @if (! empty($o['cards'])){{ $o['cards'] }} ใบ · @endif
+                      ฿{{ number_format($o['price'], $o['price'] == intval($o['price']) ? 0 : 2) }}
+                    </small>
+                    @if ($locked)
+                      <em>เปิดได้อีกครั้ง {{ $locked }}</em>
+                    @elseif ($o['blurb'] !== '')
+                      <em>{{ $o['blurb'] }}</em>
+                    @endif
+                  </span>
+                  @unless ($locked)
+                    <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : 'เปิดไพ่'">เปิดไพ่</span>
+                  @endunless
+                </button>
+              @endforeach
+            </div>
+          </div>
         </div>
       @endif
 
@@ -860,7 +908,7 @@ document.addEventListener('alpine:init', () => {
     topupUrl: cfg.topupUrl,
     payTimer: null,
     // ห้องพยากรณ์: แพ็กเกจบนโต๊ะ (ทำตัวเหมือนข้อความที่มีการ์ด — ใช้ startOffer/payAndOpen ตัวเดิม) · แผ่นแชทมือถือกางอยู่ไหม
-    table: { offerBusy: false, question: '' },
+    table: { offerBusy: false, question: '', menu: !!cfg.menuOpen },
     sheet: false,
 
     destroy() {
@@ -1045,7 +1093,7 @@ document.addEventListener('alpine:init', () => {
       this.scrollToBottom();
       // กดการ์ดแพ็กเกจแล้วกด "ย้อนกลับ" — เบราว์เซอร์คืนหน้าจาก bfcache พร้อมปุ่มที่ค้าง "กำลังพาไป..."
       window.addEventListener('pageshow', (e) => {
-        if (e.persisted) this.messages.forEach((m) => { if (m.offerBusy) m.offerBusy = false; });
+        if (e.persisted) { this.messages.forEach((m) => { if (m.offerBusy) m.offerBusy = false; }); this.table.offerBusy = false; }
       });
       // ⏳ นาฬิกาของป้ายบนโต๊ะ + ติดตามบิลที่ค้าง (เงินเข้าแล้วป้ายเปลี่ยนเอง ไม่ต้องรีเฟรช)
       if (this.qa && this.qa.over) this.qaOver(false);
@@ -1487,7 +1535,7 @@ document.addEventListener('alpine:init', () => {
         this.aiSuggestions = Array.isArray(j.ai_suggestions) ? j.ai_suggestions.filter(q => typeof q === 'string') : [];
         // 🤍 เซิร์ฟเวอร์บอกทุกคำตอบว่าห้องอยู่ในโหมดวิกฤตไหม (ไม่มีฟิลด์ = เว็บรุ่นเก่า ไม่แตะ)
         if (typeof j.crisis_room === 'boolean') this.crisisRoom = j.crisis_room;
-        if (this.crisisRoom) { this.suggestions = []; this.aiSuggestions = []; this.showTopics = false; }
+        if (this.crisisRoom) { this.suggestions = []; this.aiSuggestions = []; this.showTopics = false; this.table.menu = false; }
         this.setQa(j.qa, j.server_now);
         this.lastActive = Date.now();
 

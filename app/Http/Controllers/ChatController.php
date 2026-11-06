@@ -155,6 +155,10 @@ class ChatController extends Controller
         // 🤍 ลูกค้าที่ส่งสัญญาณอยากทำร้ายตัวเอง — ไม่มีการ์ด/แพ็กเกจ/ปุ่มชวนดูดวงเลยจนห้องวิกฤตหมดอายุ
         $crisisRoom = ChatCrisis::active($user);
         $hideOffers = $hideOffers || $crisisRoom;
+        // 🔮 (2026-11-06) ทุกแบบการเปิดไพ่ของห้อง — หน้ารวมแพ็กเกจ /tarot ปิดแล้ว ลูกค้าเลือกบนโต๊ะในห้องแทน
+        //    โต๊ะวางไม่เกิน 3 แบบที่เปิดได้ตอนนี้ (ผู้สูงอายุ ตัวเลือกมากไปคือไม่เลือก) ที่เหลืออยู่ใน "ไพ่แบบอื่น"
+        $menu  = $gate['allowed'] && ! $hideOffers ? ChatOffers::roomMenu((string) $conversation->persona, $user) : [];
+        $table = array_slice(array_values(array_filter($menu, fn ($o) => $o['locked_until'] === null)), 0, 3);
 
         return view('pages.chat.index', [
             'qa'           => $qa,
@@ -164,7 +168,10 @@ class ChatController extends Controller
             'offerCards'   => $hideOffers ? ['id' => null, 'offers' => []] : $this->offerCardsFor($conversation, $user),
             // 🔮 (2026-11-05) แพ็กเกจของห้องวางบนโต๊ะในห้องพยากรณ์ — กดเปิดไพ่ได้ตลอด ไม่ต้องรอแม่หมอยื่นการ์ด
             //    ยกเว้นตอนกำลังทำนายอยู่ หรือมีบิลเติมเงินค้าง (โชว์บิล/การทำนายที่ค้างแทน)
-            'tableOffers'  => $gate['allowed'] && ! $hideOffers ? array_slice(ChatOffers::forRoom((string) $conversation->persona, 'general', $user), 0, 3) : [],
+            'tableOffers'  => $table,
+            'tableMenu'    => count($menu) > count($table) ? $menu : [],
+            // /tarot (ลิงก์เดิมทั่วเว็บ) พามาที่นี่พร้อม ?menu=1 = เปิดรายการไพ่ทุกแบบให้ทันที
+            'menuOpen'     => $request->boolean('menu') && count($menu) > count($table),
             'roomLock'     => $lock !== null ? ReadingRoomLock::view($lock) : null,
             'pendingBill'  => $bill !== null ? ChatTopupController::billView($bill) : null,
             'aiSuggestions' => $crisisRoom ? [] : ($hideOffers ? ChatSuggestions::withoutReadingStarters((array) Cache::get(self::askKey($conversation->id), []))
