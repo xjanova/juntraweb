@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Exceptions\WalletAdminException;
 use App\Filament\Resources\ReadingResource\Pages;
 use App\Models\Reading;
 use App\Services\Readings\ReadingBillActions;
@@ -159,14 +160,31 @@ class ReadingResource extends Resource
                 ->visible(fn (Reading $record) => ReadingBill::refundable($record))
                 ->requiresConfirmation()
                 ->modalHeading(fn (Reading $record) => 'คืนเงินบิล '.ReadingBill::number($record))
-                ->modalDescription(fn (Reading $record) => 'คืน ฿'.number_format(ReadingBill::amount($record), 2)
-                    .' เข้าวอลเลตของลูกค้า — คำทำนายยังอยู่ให้ลูกค้าอ่านได้ บิลจะขึ้นว่า "คืนเงินแล้ว"')
+                ->modalDescription(function (Reading $record) {
+                    $s = ReadingBill::refundState($record);
+                    if (! $s) {
+                        return 'บิลนี้คืนเงินไม่ได้แล้ว';
+                    }
+                    // แอดมินคืนบางส่วนไปแล้ว (หน้ารายการวอลเลต) → ปุ่มนี้คืนแค่ส่วนที่เหลือ
+                    $partial = bccomp($s['refunded'], '0', 2) > 0
+                        ? ' (ตัดไป ฿'.number_format((float) $s['charged'], 2).' · คืนไปแล้ว ฿'.number_format((float) $s['refunded'], 2).')'
+                        : '';
+
+                    return 'คืน ฿'.number_format((float) $s['remaining'], 2).$partial
+                        .' เข้าวอลเลตของลูกค้า — คำทำนายยังอยู่ให้ลูกค้าอ่านได้ บิลจะขึ้นว่า "คืนเงินแล้ว"';
+                })
                 ->form([
                     Forms\Components\Textarea::make('reason')->label('เหตุผล (ลูกค้าเห็นในรายการวอลเลต)')
                         ->required()->maxLength(300)->rows(2),
                 ])
                 ->action(function (Reading $record, array $data) {
-                    $ok = app(ReadingBillActions::class)->refund($record, (string) $data['reason'], auth()->user());
+                    try {
+                        $ok = app(ReadingBillActions::class)->refund($record, (string) $data['reason'], auth()->user());
+                    } catch (WalletAdminException $e) {
+                        Notification::make()->title($e->getMessage())->danger()->send();
+
+                        return;
+                    }
                     $ok
                         ? Notification::make()->title('คืนเงินเรียบร้อย')->success()->send()
                         : Notification::make()->title('คืนเงินไม่ได้ — บิลนี้ถูกคืนไปแล้วหรือไม่ได้ตัดเงิน')->warning()->send();

@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Exceptions\DuplicateSlipException;
 use App\Exceptions\SlipAmountMismatchException;
 use App\Filament\Resources\WalletTransactionResource\Pages;
+use App\Filament\Support\WalletAdminForms;
 use App\Models\User;
 use App\Models\WalletTransaction;
 use App\Services\Wallet\WalletService;
@@ -15,6 +16,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Actions\Action;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
@@ -102,6 +104,8 @@ class WalletTransactionResource extends Resource
                     }
                     if ($reason = data_get($record->meta, 'reject_reason')) {
                         $lines[] = e('เหตุผลที่ปฏิเสธ: ' . $reason);
+                    } elseif ($reason = data_get($record->meta, 'reason')) {
+                        $lines[] = e('เหตุผล: ' . $reason);
                     }
                     return $lines
                         ? new \Illuminate\Support\HtmlString(implode('<br>', $lines))
@@ -114,6 +118,8 @@ class WalletTransactionResource extends Resource
     {
         return $table
             ->defaultSort('id', 'desc')
+            // ปุ่ม "ย้อนรายการ" ต้องรู้ว่าแถวนี้ถูกย้อน/คืนไปแล้วหรือยัง (WalletAdminForms::canRollback)
+            ->modifyQueryUsing(fn (Builder $query) => $query->withExists(['adminRollbacks', 'refunds']))
             ->columns([
                 Tables\Columns\TextColumn::make('created_at')->label('เวลา')->dateTime('d/m H:i')->sortable(),
                 Tables\Columns\TextColumn::make('user.name')->label('ผู้ใช้')->searchable(),
@@ -247,24 +253,30 @@ class WalletTransactionResource extends Resource
                             Notification::make()->title('อนุมัติไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
                         }
                     }),
-                Action::make('reverse')
-                    ->label('เรียกคืน')
+                // ย้อนรายการ (แทน "เรียกคืน" เดิมที่หักเท่าที่มีแบบเงียบ ๆ) — ย้อนได้ครั้งเดียว
+                // ยอดไม่พอ = ปฏิเสธ ไม่ยอมติดลบ · ลง audit ทุกครั้ง (AdminWalletService::rollback)
+                Action::make('rollback')
+                    ->label('ย้อนรายการ')
                     ->icon('heroicon-o-arrow-uturn-left')
                     ->color('warning')
-                    ->visible(fn (WalletTransaction $r) => $r->type === 'topup' && $r->status === 'success' && (bool) auth()->user()?->isAdmin())
-                    ->requiresConfirmation()
-                    ->modalDescription(fn (WalletTransaction $r) => 'จะหักคืน ฿' . number_format((float) $r->amount, 2) . ' จากวอลเลตของ ' . ($r->user->name ?? '#' . $r->user_id) . ' (ถ้ายอดคงเหลือไม่พอจะหักเท่าที่มี)')
-                    ->form([
-                        Forms\Components\Textarea::make('reason')->label('เหตุผลที่เรียกคืน')->rows(2)->required(),
-                    ])
-                    ->action(function (WalletTransaction $r, array $data) {
-                        try {
-                            app(WalletService::class)->reverseTopup($r, auth()->user(), $data['reason'] ?? null);
-                            Notification::make()->title('เรียกคืนเรียบร้อย')->success()->send();
-                        } catch (\Throwable $e) {
-                            Notification::make()->title('เรียกคืนไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
-                        }
-                    }),
+                    ->visible(fn (WalletTransaction $r) => self::canManageMoneyOn($r) && WalletAdminForms::canRollback($r))
+                    ->modalHeading(fn (WalletTransaction $r) => 'ย้อนรายการ #' . $r->id)
+                    ->modalIcon('heroicon-o-exclamation-triangle')
+                    ->modalIconColor('warning')
+                    ->modalSubmitActionLabel('ยืนยันย้อนรายการ')
+                    ->fillForm(fn (WalletTransaction $r) => WalletAdminForms::rollbackFill($r))
+                    ->form(WalletAdminForms::rollbackSchema())
+                    ->action(fn (WalletTransaction $r, array $data) => WalletAdminForms::handleRollback($r, $data)),
+                Action::make('refundDebit')
+                    ->label('คืนเงิน')
+                    ->icon('heroicon-o-receipt-refund')
+                    ->color('success')
+                    ->visible(fn (WalletTransaction $r) => self::canManageMoneyOn($r) && $r->type === 'debit' && $r->status === 'success' && $r->balance_after !== null)
+                    ->modalHeading(fn (WalletTransaction $r) => 'คืนเงินรายการหัก #' . $r->id)
+                    ->modalSubmitActionLabel('ยืนยันคืนเงิน')
+                    ->fillForm(fn (WalletTransaction $r) => WalletAdminForms::refundDebitFill($r))
+                    ->steps(WalletAdminForms::refundDebitSteps())
+                    ->action(fn (WalletTransaction $r, array $data) => WalletAdminForms::handleRefundDebit($r, $data)),
                 Action::make('reject')
                     ->label('ปฏิเสธ')
                     ->icon('heroicon-o-x-circle')
@@ -285,39 +297,51 @@ class WalletTransactionResource extends Resource
             ])
             ->headerActions([
                 Action::make('adjust')
-                    ->label('ปรับยอดผู้ใช้')
-                    ->icon('heroicon-o-plus-circle')
-                    ->color('gray')
+                    ->label('เติม / หัก / คืนเงิน')
+                    ->icon('heroicon-o-banknotes')
+                    ->color('success')
                     ->visible(fn () => (bool) auth()->user()?->isAdmin())
-                    ->modalHeading('ปรับยอดวอลเลตผู้ใช้ (manual adjustment)')
-                    ->form([
-                        Forms\Components\Select::make('user_id')
-                            ->label('ผู้ใช้')
-                            ->required()
-                            ->searchable()
-                            ->getSearchResultsUsing(fn (string $search) => User::query()
-                                ->where('name', 'like', "%{$search}%")
-                                ->orWhere('email', 'like', "%{$search}%")
-                                ->limit(20)->pluck('name', 'id')->toArray())
-                            ->getOptionLabelUsing(fn ($value) => optional(User::find($value))->name),
-                        Forms\Components\TextInput::make('amount')
-                            ->label('จำนวน')
-                            ->numeric()->required()
-                            ->helperText('เช่น 50 = เพิ่ม ฿50 ให้ผู้ใช้, -50 = หัก ฿50 (จะไม่ทำให้ติดลบ)'),
-                        Forms\Components\Textarea::make('reason')->label('เหตุผล')->rows(2)->required(),
-                    ])
+                    ->modalHeading('จัดการเงินในวอลเลตผู้ใช้')
+                    ->modalSubmitActionLabel('ยืนยันทำรายการ')
+                    ->fillForm(fn () => WalletAdminForms::adjustFill(null))
+                    ->steps(WalletAdminForms::adjustSteps(pickUser: true))
                     ->action(function (array $data) {
-                        try {
-                            $user = User::findOrFail($data['user_id']);
-                            app(WalletService::class)->adjust($user, (float) $data['amount'], $data['reason'], auth()->user());
-                            Cache::forget('wallet:pending_topup_count');
-                            Notification::make()->title('ปรับยอดเรียบร้อย')->success()->send();
-                        } catch (\Throwable $e) {
-                            Notification::make()->title('ปรับยอดไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
+                        $user = User::find($data['user_id'] ?? null);
+                        if (! $user) {
+                            Notification::make()->title('ไม่พบผู้ใช้')->danger()->send();
+
+                            return;
                         }
+                        WalletAdminForms::handleAdjust($user, $data);
+                    }),
+                Action::make('transfer')
+                    ->label('โอนเครดิต')
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->color('info')
+                    ->visible(fn () => (bool) auth()->user()?->isAdmin())
+                    ->modalHeading('โอนเครดิตระหว่างบัญชี')
+                    ->modalSubmitActionLabel('ยืนยันโอน')
+                    ->fillForm(fn () => WalletAdminForms::transferFill(null))
+                    ->steps(WalletAdminForms::transferSteps(pickFrom: true))
+                    ->action(function (array $data) {
+                        $from = User::find($data['from_user_id'] ?? null);
+                        if (! $from) {
+                            Notification::make()->title('ไม่พบบัญชีต้นทาง')->danger()->send();
+
+                            return;
+                        }
+                        WalletAdminForms::handleTransfer($from, $data);
                     }),
             ])
             ->bulkActions([]);
+    }
+
+    /** ปุ่มเงินบนแถวรายการ: แอดมินเท่านั้น และไม่ใช่รายการในวอลเลตของตัวเอง (ด่านจริงอยู่ที่ service) */
+    private static function canManageMoneyOn(WalletTransaction $tx): bool
+    {
+        $me = auth()->user();
+
+        return $me instanceof User && $me->isAdmin() && (int) $me->id !== (int) $tx->user_id;
     }
 
     public static function getPages(): array

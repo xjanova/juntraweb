@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 // คืนยอดเศษสตางค์ที่จองกับ Thaiprompt เมื่อรายการเติมเงินพ้น pending (ดู observer)
 #[ObservedBy(TopupReservationObserver::class)]
@@ -43,6 +44,21 @@ class WalletTransaction extends Model
     public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    /** การย้อนรายการนี้โดยแอดมิน (สมุดตรวจสอบ) — ย้อนได้ครั้งเดียว */
+    public function adminRollbacks(): HasMany
+    {
+        return $this->hasMany(WalletAdminAdjustment::class, 'original_transaction_id')->where('action', 'rollback');
+    }
+
+    /** แถวคืนเงินที่อ้างถึงรายการหักนี้ (ระบบคืน / แอดมินคืน / แอดมินย้อน) */
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(self::class, 'reference_id')
+            ->where('reference_type', 'wallet_transaction')
+            ->where('type', 'refund')
+            ->whereNotNull('balance_after');
     }
 
     public function isPositive(): bool

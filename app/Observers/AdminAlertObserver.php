@@ -58,7 +58,9 @@ class AdminAlertObserver implements ShouldHandleEventsAfterCommit
 
     private function walletCreated(WalletTransaction $tx): void
     {
-        if ($tx->type === 'adjustment') {
+        // รายการที่แอดมินทำด้วยมือ (AdminWalletService) แจ้งเป็น "แอดมินแตะยอด" เสมอ —
+        // คืนเงินโดยแอดมินไม่ใช่ "ดูดวงล้มเหลว"
+        if ($tx->type === 'adjustment' || $tx->method === \App\Services\Wallet\AdminWalletService::METHOD) {
             WalletAlerts::adjusted($tx);
         } elseif ($tx->type === 'refund') {
             ReadingAlerts::refunded($tx);

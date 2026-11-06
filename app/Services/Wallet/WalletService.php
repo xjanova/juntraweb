@@ -2,6 +2,7 @@
 
 namespace App\Services\Wallet;
 
+use App\Exceptions\AlreadyRefundedException;
 use App\Exceptions\DuplicateSlipException;
 use App\Exceptions\InsufficientFundsException;
 use App\Exceptions\SlipAmountMismatchException;
@@ -18,6 +19,9 @@ use Illuminate\Support\Str;
  * SELECT … FOR UPDATE on the wallet row, so two simultaneous debit
  * attempts for the same user serialise. bccomp/bcsub/bcadd are used
  * for the actual arithmetic to avoid float drift on long histories.
+ *
+ * Lock order: a path that locks both a wallet row and a wallet_transactions row locks the WALLET
+ * first, then the transaction (same as AdminWalletService) — two paths in opposite order deadlock.
  */
 class WalletService
 {
@@ -121,22 +125,98 @@ class WalletService
         });
     }
 
-    /** Refund a previous debit (creates a paired credit row pointing to the original). */
+    /**
+     * Refund what is still owed on a previous debit (creates a paired credit row pointing to the original).
+     *
+     * Pays back only charged − {@see refundedSoFar()}: an admin may already have refunded part of
+     * this debit (AdminWalletService::refundDebit leaves a partly refunded debit as 'success'), and
+     * that money must not go back twice. The debit row is re-read under lock — a caller holding a
+     * stale model (a reading finisher, the bill page) cannot refund a debit that was refunded or
+     * rolled back meanwhile.
+     *
+     * Lock order is the same as AdminWalletService: wallet row first, then the transaction row.
+     *
+     * @throws AlreadyRefundedException  nothing is left to refund
+     * @throws \RuntimeException          not a successful debit
+     */
     public function refund(WalletTransaction $debit, ?string $reason = null): WalletTransaction
     {
-        if ($debit->type !== 'debit' || $debit->status !== 'success') {
+        if ($debit->type !== 'debit' || ! $debit->wallet_id) {
             throw new \RuntimeException('Only successful debits can be refunded');
         }
-        $amount = abs((float) $debit->amount);
-        $tx = $this->credit($debit->user, $amount, 'คืนเครดิต: ' . ($debit->description ?? ''), [
-            'type'           => 'refund',
-            'reference_type' => 'wallet_transaction',
-            'reference_id'   => $debit->id,
-            'method'         => 'system',
-            'meta'           => ['reason' => $reason],
-        ]);
-        $debit->update(['status' => 'refunded']);
+
+        // attempts = 3: a deadlock / lock timeout at the top level is retried by Laravel
+        $tx = DB::transaction(function () use ($debit, $reason) {
+            $wallet = Wallet::whereKey($debit->wallet_id)->lockForUpdate()->firstOrFail();
+            $locked = WalletTransaction::whereKey($debit->id)->lockForUpdate()->firstOrFail();
+            if ($locked->type === 'debit' && $locked->status === 'refunded') {
+                throw new AlreadyRefundedException('This debit has already been refunded');
+            }
+            if ($locked->type !== 'debit' || $locked->status !== 'success') {
+                throw new \RuntimeException('Only successful debits can be refunded');
+            }
+
+            $charged   = number_format(abs((float) $locked->amount), 2, '.', '');
+            $already   = $this->refundedSoFar($locked);
+            $remaining = bcsub($charged, $already, 2);
+            if (bccomp($remaining, '0', 2) <= 0) {
+                throw new AlreadyRefundedException('This debit has already been refunded in full');
+            }
+
+            $newBal = bcadd((string) $wallet->balance, $remaining, 2);
+            $wallet->balance = $newBal;
+            $wallet->save();
+
+            $meta = ['reason' => $reason];
+            if (bccomp($already, '0', 2) > 0) {
+                // ส่วนที่เหลือหลังแอดมินคืนไปบางส่วนแล้ว
+                $meta['charged']         = $charged;
+                $meta['refunded_before'] = $already;
+            }
+
+            $refund = WalletTransaction::create([
+                'user_id'        => $locked->user_id,
+                'wallet_id'      => $wallet->id,
+                'type'           => 'refund',
+                'status'         => 'success',
+                'amount'         => $remaining,
+                'balance_after'  => $newBal,
+                'description'    => 'คืนเครดิต: ' . ($locked->description ?? ''),
+                'reference_type' => 'wallet_transaction',
+                'reference_id'   => $locked->id,
+                'method'         => 'system',
+                'meta'           => $meta,
+            ]);
+            $locked->update(['status' => 'refunded']);
+
+            return $refund;
+        }, 3);
+
+        // the caller's model is in sync again (it was the old behaviour of $debit->update())
+        $debit->status = 'refunded';
+        $debit->syncOriginalAttribute('status');
+
         return $tx;
+    }
+
+    /**
+     * Sum already paid back against this debit — by the system ({@see refund()}), an admin refund
+     * (AdminWalletService::refundDebit) or an admin rollback. All of them write a 'refund' row with
+     * reference_type = wallet_transaction / reference_id = the debit.
+     */
+    public function refundedSoFar(WalletTransaction $debit): string
+    {
+        $sum = '0.00';
+        WalletTransaction::where('reference_type', 'wallet_transaction')
+            ->where('reference_id', $debit->id)
+            ->where('type', 'refund')
+            ->whereNotNull('balance_after')
+            ->pluck('amount')
+            ->each(function ($a) use (&$sum) {
+                $sum = bcadd($sum, (string) $a, 2);
+            });
+
+        return $sum;
     }
 
     /** Record a top-up request awaiting admin approval (e.g. PromptPay slip uploaded). */
@@ -211,12 +291,12 @@ class WalletService
         $result = DB::transaction(function () use ($tx, $admin, $verifiedSlipAmount) {
             // Re-fetch the row UNDER LOCK and re-check status, so two admins
             // approving the same slip simultaneously can't both credit it
-            // (check-and-set is atomic inside the transaction).
+            // (check-and-set is atomic inside the transaction). Wallet first — see class doc.
+            $wallet = Wallet::where('id', $tx->wallet_id)->lockForUpdate()->firstOrFail();
             $locked = WalletTransaction::where('id', $tx->id)->lockForUpdate()->firstOrFail();
-            if ($locked->status !== 'pending') {
+            if ($locked->status !== 'pending' || (int) $locked->wallet_id !== (int) $wallet->id) {
                 throw new \RuntimeException('Not a pending top-up');
             }
-            $wallet = Wallet::where('id', $locked->wallet_id)->lockForUpdate()->firstOrFail();
             $newBal = bcadd((string) $wallet->balance, (string) $locked->amount, 2);
             $wallet->balance = $newBal;
             $wallet->save();
@@ -269,11 +349,12 @@ class WalletService
             throw new \RuntimeException('Not a top-up');
         }
         $result = DB::transaction(function () use ($tx, $meta) {
+            // wallet first, then the top-up — see class doc
+            $wallet = Wallet::where('id', $tx->wallet_id)->lockForUpdate()->firstOrFail();
             $locked = WalletTransaction::where('id', $tx->id)->lockForUpdate()->firstOrFail();
-            if ($locked->status !== 'pending') {
+            if ($locked->status !== 'pending' || (int) $locked->wallet_id !== (int) $wallet->id) {
                 throw new \RuntimeException('Not a pending top-up');
             }
-            $wallet = Wallet::where('id', $locked->wallet_id)->lockForUpdate()->firstOrFail();
             $newBal = bcadd((string) $wallet->balance, (string) $locked->amount, 2);
             $wallet->balance = $newBal;
             $wallet->save();
@@ -323,6 +404,9 @@ class WalletService
      * up to the available balance (never forces the wallet negative — if the
      * user already spent part of it, the shortfall is recorded in meta) and
      * flips the original top-up to 'refunded'.
+     *
+     * @deprecated หน้าแอดมินเปลี่ยนไปใช้ AdminWalletService::rollback() แล้ว (2026-11-04) —
+     *             มี audit + กันกดซ้ำ และปฏิเสธเมื่อยอดไม่พอแทนการหักเท่าที่มี
      */
     public function reverseTopup(WalletTransaction $tx, User $admin, ?string $reason = null): WalletTransaction
     {
@@ -379,11 +463,12 @@ class WalletService
         }
 
         return DB::transaction(function () use ($tx, $reason, $meta) {
+            // lock order: wallet first, then the transaction (same as refund() / AdminWalletService)
+            $wallet = Wallet::where('id', $tx->wallet_id)->lockForUpdate()->firstOrFail();
             $locked = WalletTransaction::where('id', $tx->id)->lockForUpdate()->firstOrFail();
-            if ($locked->status !== 'success') {
+            if ($locked->status !== 'success' || (int) $locked->wallet_id !== (int) $wallet->id) {
                 throw new \RuntimeException('รายการนี้ถูกเรียกคืนไปแล้ว');
             }
-            $wallet = Wallet::where('id', $locked->wallet_id)->lockForUpdate()->firstOrFail();
             $amount   = number_format((float) $locked->amount, 2, '.', '');
             $clawable = bccomp((string) $wallet->balance, $amount, 2) >= 0
                 ? $amount
@@ -415,7 +500,12 @@ class WalletService
         });
     }
 
-    /** Manual signed admin adjustment (promo credit, correction). Never goes negative. */
+    /**
+     * Manual signed admin adjustment (promo credit, correction). Never goes negative.
+     *
+     * @deprecated หน้าแอดมินเลิกใช้แล้ว (2026-11-04) — ใช้ AdminWalletService::adjust() ที่มี audit,
+     *             กันกดซ้ำ, ยอดอ้างอิง และปฏิเสธเมื่อยอดไม่พอ (ตัวนี้หักเท่าที่มีแบบเงียบ ๆ)
+     */
     public function adjust(User $user, float $signedAmount, string $reason, User $admin): WalletTransaction
     {
         $this->assertAdmin($admin);

@@ -2,6 +2,7 @@
 
 namespace App\Services\Tarot;
 
+use App\Exceptions\AlreadyRefundedException;
 use App\Models\Reading;
 use App\Models\WalletTransaction;
 use App\Services\FortuneBot\FortuneAiService;
@@ -103,6 +104,9 @@ class TarotReadingFinisher
         if ($tx && $tx->status === 'success') {
             try {
                 $this->wallet->refund($tx, $reason);
+            } catch (AlreadyRefundedException) {
+                // แอดมินคืน/ย้อนไปแล้วระหว่างนั้น — ไม่ต้องคืนซ้ำ ไม่ใช่ความผิดพลาด
+                Log::info('Tarot reading: debit was already refunded before the failure refund', ['reading' => $reading->id, 'tx_id' => $tx->id]);
             } catch (\Throwable $e) {
                 Log::critical('Tarot reading refund FAILED — manual intervention needed', [
                     'reading' => $reading->id, 'tx_id' => $tx->id, 'err' => $e->getMessage(),

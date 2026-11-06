@@ -3,11 +3,10 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
+use App\Filament\Support\WalletAdminForms;
 use App\Models\User;
-use App\Services\Wallet\WalletService;
 use Filament\Forms;
 use Filament\Forms\Form;
-use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -112,30 +111,60 @@ class UserResource extends Resource
         ])->actions([
             Tables\Actions\ViewAction::make()->label('ดู'),
             Tables\Actions\EditAction::make()->label('แก้ไข'),
-            Tables\Actions\Action::make('adjustWallet')
-                ->label('ปรับยอด')
+            Tables\Actions\ActionGroup::make(self::walletTableActions())
+                ->label('จัดการเงิน')
                 ->icon('heroicon-o-banknotes')
                 ->color('success')
-                ->visible(fn () => (bool) auth()->user()?->isAdmin())
-                ->modalHeading(fn (User $r) => 'ปรับยอดวอลเลตของ ' . $r->name)
-                ->form([
-                    Forms\Components\TextInput::make('amount')->label('จำนวน (฿)')->numeric()->required()
-                        ->helperText('บวก = เพิ่ม, ลบ = หัก (จะไม่ทำให้ติดลบ)'),
-                    Forms\Components\Textarea::make('reason')->label('เหตุผล')->rows(2)->required(),
-                ])
-                ->action(function (User $r, array $data) {
-                    try {
-                        app(WalletService::class)->adjust($r, (float) $data['amount'], $data['reason'], auth()->user());
-                        Notification::make()->title('ปรับยอดเรียบร้อย')->success()->send();
-                    } catch (\Throwable $e) {
-                        Notification::make()->title('ปรับยอดไม่สำเร็จ: ' . $e->getMessage())->danger()->send();
-                    }
-                }),
+                ->button()
+                ->visible(fn (User $r) => self::canManageWalletOf($r)),
             Tables\Actions\RestoreAction::make()->label('กู้คืน'),
         ])->bulkActions([
             Tables\Actions\DeleteBulkAction::make(),
             Tables\Actions\RestoreBulkAction::make(),
         ]);
+    }
+
+    /**
+     * ปุ่มเติม/หัก/คืนเงิน และโอนเครดิต — กติกาเงินทั้งหมดอยู่ที่ AdminWalletService
+     * (audit + กันกดซ้ำ + ยอดอ้างอิง + ห้ามติดลบ) ที่นี่แค่ UI
+     *
+     * @return array<Tables\Actions\Action>
+     */
+    public static function walletTableActions(): array
+    {
+        return [
+            Tables\Actions\Action::make('adjustWallet')
+                ->label('เติม / หัก / คืนเงิน')
+                ->icon('heroicon-o-banknotes')
+                ->color('success')
+                ->visible(fn (User $r) => self::canManageWalletOf($r))
+                ->modalHeading(fn (User $r) => 'จัดการเงินในวอลเลตของ ' . $r->name)
+                ->modalSubmitActionLabel('ยืนยันทำรายการ')
+                ->fillForm(fn (User $r) => WalletAdminForms::adjustFill($r))
+                ->steps(WalletAdminForms::adjustSteps())
+                ->action(fn (User $r, array $data) => WalletAdminForms::handleAdjust($r, $data)),
+            Tables\Actions\Action::make('transferWallet')
+                ->label('โอนเครดิตไปบัญชีอื่น')
+                ->icon('heroicon-o-arrows-right-left')
+                ->color('info')
+                ->visible(fn (User $r) => self::canManageWalletOf($r))
+                ->modalHeading(fn (User $r) => 'โอนเครดิตจากวอลเลตของ ' . $r->name)
+                ->modalSubmitActionLabel('ยืนยันโอน')
+                ->fillForm(fn (User $r) => WalletAdminForms::transferFill($r))
+                ->steps(WalletAdminForms::transferSteps())
+                ->action(fn (User $r, array $data) => WalletAdminForms::handleTransfer($r, $data)),
+        ];
+    }
+
+    /**
+     * ปุ่มจัดการเงินโชว์เฉพาะแอดมิน และไม่โชว์บนบัญชีของตัวเอง/บัญชีที่ถูกลบ
+     * (ซ่อนปุ่มเป็นแค่ UI — ด่านจริงอยู่ที่ AdminWalletService)
+     */
+    public static function canManageWalletOf(User $user): bool
+    {
+        $me = auth()->user();
+
+        return $me instanceof User && $me->isAdmin() && (int) $me->id !== (int) $user->id && ! $user->trashed();
     }
 
     public static function getPages(): array
