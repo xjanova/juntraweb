@@ -10,6 +10,9 @@
    *
    * ทำไมไม่ทำนายใน GET เลย: รีเฟรช/prefetch จะยิง AI ซ้ำและกินโควตาฟรีของระบบ
    */
+  // 🎁 (2026-11-06 เจ้าของสั่ง) ไพ่ 1 ใบฟรีเป็นของบุษบา ไม่ใช่แม่หมอ — ชื่อมาจากห้องที่ดูแลไพ่ฟรี (config/chat_rooms.php 'free')
+  $oracle   = \App\Support\FreeReadingPolicy::oracleSelf();
+  $freeRoom = \App\Support\ChatRooms::freeRoom();
   $allowed = (bool) ($gate['allowed'] ?? false);
   $code    = $gate['code'] ?? null;
 
@@ -68,16 +71,16 @@
            @if ($autoCast) x-init="$nextTick(() => { if (! sent) { sent = true; $refs.castForm.submit(); } })" @endif>
 
         <div class="free-orb"><x-glyph name="crystal" :size="40" /></div>
-        <div class="eyebrow" style="display:inline-flex">ของขวัญจากแม่หมอ</div>
+        <div class="eyebrow" style="display:inline-flex">ของขวัญจาก{{ $oracle }}</div>
 
         @if ($isRetry)
           <h2 style="margin-bottom:10px">ลอง <em>อีกครั้ง</em> นะคะ</h2>
-          <p class="free-note">สิทธิ์ดูดวงฟรีของคุณยังอยู่ครบค่ะ กดปุ่มด้านล่างเพื่อให้แม่หมอเปิดไพ่ใหม่</p>
+          <p class="free-note">สิทธิ์ดูดวงฟรีของคุณยังอยู่ครบค่ะ กดปุ่มด้านล่างเพื่อให้{{ $oracle }}เปิดไพ่ใหม่</p>
         @else
-          <h2 style="margin-bottom:10px">แม่หมอกำลัง <em>สับไพ่ให้คุณ</em></h2>
+          <h2 style="margin-bottom:10px">{{ $oracle }}กำลัง <em>สับไพ่ให้คุณ</em></h2>
           <p class="free-note">
             นิ่ง ๆ สักครู่นะคะ ให้จิตของคุณเลือกไพ่เอง —
-            แม่หมอจะอ่านให้ฟังว่าชีวิตช่วงนี้ของคุณกำลังเดินไปทางไหน
+            {{ $oracle }}จะอ่านให้ฟังว่าชีวิตช่วงนี้ของคุณกำลังเดินไปทางไหน
           </p>
         @endif
 
@@ -97,8 +100,8 @@
     @elseif ($code === 'in_flight')
       {{-- ── กำลังเปิดไพ่อยู่ (อีกแท็บ/กดซ้ำ) — รอแล้วรีเฟรชเอง ────── --}}
       <div class="free-orb"><x-glyph name="crystal" :size="40" /></div>
-      <div class="eyebrow" style="display:inline-flex">ของขวัญจากแม่หมอ</div>
-      <h2 style="margin-bottom:10px">แม่หมอกำลัง <em>เปิดไพ่ให้อยู่</em></h2>
+      <div class="eyebrow" style="display:inline-flex">ของขวัญจาก{{ $oracle }}</div>
+      <h2 style="margin-bottom:10px">{{ $oracle }}กำลัง <em>เปิดไพ่ให้อยู่</em></h2>
       <p class="free-note">รอสักครู่นะคะ หน้านี้จะพาไปที่คำทำนายให้เองเมื่อเสร็จ</p>
       <div x-data x-init="setTimeout(() => window.location.reload(), 5000)"></div>
       <div class="free-actions">
@@ -110,7 +113,7 @@
       <div class="free-orb"><x-glyph name="moon" :size="40" /></div>
       <div class="eyebrow" style="display:inline-flex">ดูดวงฟรี 1 ใบ</div>
       <h2 style="margin-bottom:10px">เข้าสู่ระบบใหม่ <em>อีกครั้งนะคะ</em></h2>
-      <p class="free-note">เซสชันของคุณหมดอายุแล้วค่ะ กดปุ่มด้านล่างเพื่อเข้าระบบใหม่ แล้วแม่หมอจะเปิดไพ่ให้ทันที</p>
+      <p class="free-note">เซสชันของคุณหมดอายุแล้วค่ะ กดปุ่มด้านล่างเพื่อเข้าระบบใหม่ แล้ว{{ $oracle }}จะเปิดไพ่ให้ทันที</p>
       <div class="free-actions">
         <a href="{{ $loginUrl }}" class="btn btn-primary">เข้าสู่ระบบใหม่
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
@@ -123,8 +126,8 @@
       <div class="eyebrow" style="display:inline-flex">ดูดวงฟรี 1 ใบ</div>
       <h2 style="margin-bottom:10px">เข้าสู่ระบบ <em>เพื่อรับคำทำนาย</em></h2>
       <p class="free-note">
-        แม่หมอเก็บคำทำนายไว้ให้คุณย้อนดูได้ทุกเมื่อ จึงขอให้เข้าระบบสักครู่ค่ะ —
-        ใช้บัญชีเดิมที่คุณคุยกับแม่หมออยู่ ไม่ต้องกรอกอะไรใหม่
+        {{ $oracle }}เก็บคำทำนายไว้ให้คุณย้อนดูได้ทุกเมื่อ จึงขอให้เข้าระบบสักครู่ค่ะ —
+        ใช้บัญชีเดิมที่คุณคุยกับ{{ $oracle }}อยู่ ไม่ต้องกรอกอะไรใหม่
       </p>
       <div class="free-actions">
         <a href="{{ $loginUrl }}" class="btn btn-primary">เข้าสู่ระบบแล้วรับไพ่
@@ -139,17 +142,17 @@
       <h2 style="margin-bottom:10px">{{ $gate['reason'] ?? 'ตอนนี้ยังเปิดไพ่ฟรีให้ไม่ได้ค่ะ' }}</h2>
       <p class="free-note">
         @if ($code === 'daily_cap')
-          แม่หมออ่านไพ่เองทีละคน วันนี้เลยเปิดได้จำกัดค่ะ 🙏 พรุ่งนี้มาใหม่นะคะ
+          {{ $oracle }}อ่านไพ่ให้ทีละคน วันนี้เลยเปิดได้จำกัดค่ะ 🙏 พรุ่งนี้มาใหม่นะคะ
           หรือถ้าอยากดูตอนนี้เลย เลือกเปิดไพ่ชุดเต็มได้เลยค่ะ
         @else
-          ถ้าอยากให้แม่หมออ่านลึกกว่านี้ เลือกเปิดไพ่ชุดเต็มได้เลยค่ะ
+          ถ้าอยากให้{{ $oracle }}อ่านลึกกว่านี้ เลือกเปิดไพ่ชุดเต็มได้เลยค่ะ
         @endif
       </p>
       <div class="free-actions">
         <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ชุดเต็ม
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </a>
-        <a href="{{ route('chat.index') }}" class="btn btn-ghost">คุยกับแม่หมอ</a>
+        <a href="{{ route('chat.index', ['room' => $freeRoom]) }}" class="btn btn-ghost">คุยกับ{{ $oracle }}</a>
       </div>
     @endif
 

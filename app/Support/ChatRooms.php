@@ -74,16 +74,57 @@ final class ChatRooms
         return self::personaUpstream() ? self::normalize($key) : null;
     }
 
-    /** persona ของคำทำนายจากแพ็กเกจ — quick → บุษบา · kunsai → คุณไสย · อื่น ๆ → แม่หมอ */
+    /**
+     * persona ของคำทำนายจากแบบไพ่ — ผู้พยากรณ์ที่มีแบบนี้ใน `spreads` ของตัวเอง
+     * (single/three/quick → บุษบา · kunsai → คุณไสย · ที่เหลือ/แบบที่ไม่มีเจ้าของ → แม่หมอ)
+     */
     public static function personaForSpread(?string $spread): string
     {
+        if ($spread === null) {
+            return self::DEFAULT;
+        }
         foreach (self::all() as $key => $room) {
-            if ($spread !== null && ($room['spread'] ?? null) === $spread) {
+            if (in_array($spread, self::spreadsOf($room), true)) {
                 return $key;
             }
         }
 
         return self::DEFAULT;
+    }
+
+    /**
+     * 🃏 (2026-11-06) แบบไพ่ทั้งหมดที่ผู้พยากรณ์คนนี้ดู ตามลำดับเมนู (config `spreads`)
+     *
+     * @return list<string>
+     */
+    public static function spreads(string $key): array
+    {
+        $room = self::get($key);
+
+        return $room !== null ? self::spreadsOf($room) : [];
+    }
+
+    /**
+     * 🎁 ห้องที่ดูแลไพ่ 1 ใบฟรีรายวัน — ห้องที่ตั้ง `free` และเปิดอยู่ ไม่งั้นห้องแม่หมอ
+     * (เจ้าของ 2026-11-06: "ไพ่ 1 ใบ บุษบาเป็นคนดูแลไม่ใช่แม่หมอ")
+     */
+    public static function freeRoom(): string
+    {
+        foreach (self::all() as $key => $room) {
+            if (! empty($room['free']) && self::isOpen($key)) {
+                return $key;
+            }
+        }
+
+        return self::DEFAULT;
+    }
+
+    /** @return list<string> */
+    private static function spreadsOf(array $room): array
+    {
+        $list = array_values(array_filter((array) ($room['spreads'] ?? []), 'is_string'));
+
+        return $list !== [] ? $list : array_values(array_filter([(string) ($room['spread'] ?? '')]));
     }
 
     /**
@@ -173,6 +214,20 @@ final class ChatRooms
         foreach (self::all() as $key => $room) {
             $spread = (string) $room['spread'];
             $meta   = TarotSpreads::get($spread);
+            // 🃏 (2026-11-06) ไพ่ทุกแบบของห้อง (บุษบา 1 ใบ · 3 ใบ · ไพ่ด่วน) — หน้าเลือกผู้พยากรณ์โชว์ครบพร้อมราคา
+            $products = [];
+            foreach (self::spreadsOf($room) as $s) {
+                if (! array_key_exists($s, TarotSpreads::all())) {
+                    continue;
+                }
+                $m = TarotSpreads::get($s);
+                $products[] = [
+                    'spread' => $s,
+                    'name'   => (string) ($m['name_th'] ?? $s),
+                    'cards'  => TarotSpreads::cardCount($s),
+                    'price'  => (float) Pricing::for(TarotSpreads::priceKey($s)),
+                ];
+            }
             $out[]  = [
                 'key'     => $key,
                 'name'    => $room['name'],
@@ -186,6 +241,8 @@ final class ChatRooms
                 'image'   => asset(is_file(public_path($room['image'])) ? $room['image'] : 'images/hero-chantra.webp'),
                 'accent'  => $room['accent'] ?? 'violet',
                 'open'    => self::isOpen($key),
+                'free'    => ! empty($room['free']) && FreeReadingPolicy::enabled() && self::freeRoom() === $key,
+                'products' => $products,
                 'product' => [
                     'spread' => $spread,
                     'name'   => (string) ($meta['name_th'] ?? $spread),

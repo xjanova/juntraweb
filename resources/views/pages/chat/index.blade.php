@@ -80,7 +80,7 @@
        @endif
        x-data="chatBot({
          room: @js($room),
-         persona: @js(['name' => $P['name'], 'short' => $P['short'], 'self' => $P['self'], 'busy' => $P['busy']]),
+         persona: @js(['name' => $P['name'], 'short' => $P['short'], 'self' => $P['self'], 'busy' => $P['busy'], 'customer' => \App\Support\ChatRooms::customer($room)]),
          messages: @js($initialMessages),
          suggestions: @js($suggestions),
          aiSuggestions: @js(array_values($aiSuggestions ?? [])),
@@ -96,6 +96,13 @@
          awaiting: @js((bool) $awaiting),
          crisisRoom: @js((bool) ($crisisRoom ?? false)),
          menuOpen: @js((bool) ($menuOpen ?? false)),
+         {{-- 🎂 (2026-11-06) วันเกิดกรอกในแชท → โปรไฟล์ · ?free=1 (มาจาก /tarot/free ที่ยังไม่มีวันเกิด) = ขอวันเกิดแล้วพาไปเปิดไพ่ฟรีต่อ --}}
+         birthDate: @js($birthDate ?? null),
+         birthLabel: @js($birthLabel ?? null),
+         birthUrl: @js(route('chat.birth')),
+         accountBirthUrl: @js(route('account.astrology')),
+         freeCard: @js(collect($tableOffers ?? [])->firstWhere('kind', 'free')),
+         freeIntent: @js((bool) ($freeIntent ?? false)),
          dailyLimit: @js((int) $dailyLimit),
          dailyLeft: @js((int) $dailyLeft),
          blocked: @js((bool) $exhausted),
@@ -112,7 +119,7 @@
          maxTopup: @js((int) config('pricing.max_topup', 50000)),
          {{-- ปุ่มไปต่อหลังเติมเงิน — บริการที่แอดมินปิดไว้ (ServiceGate) ไม่แสดง --}}
          nextSteps: @js(array_values(array_filter([
-           ['icon' => '🔮', 'label' => 'เปิดไพ่ยิปซี', 'url' => route('tarot.index')],
+           ['icon' => '🔮', 'label' => 'เปิดไพ่กับ' . $P['short'], 'url' => route('chat.index', ['room' => $room, 'menu' => 1])],
            \App\Support\ServiceGate::isClosed('deep') ? null : ['icon' => '🌟', 'label' => 'ดูดวงเชิงลึก', 'url' => route('deep.index')],
            \App\Support\ServiceGate::isClosed('numerology') ? null : ['icon' => '🔢', 'label' => 'เลขศาสตร์', 'url' => route('numerology.index')],
            \App\Support\ServiceGate::isClosed('auspicious') ? null : ['icon' => '📿', 'label' => 'ฤกษ์ยาม', 'url' => route('auspicious.index')],
@@ -194,34 +201,68 @@
 
       {{-- ═══ แพ็กเกจของห้องวางบนโต๊ะ — กดเปิดไพ่ได้ตลอด (คำถามล่าสุดที่พิมพ์ติดไปด้วย) ═══ --}}
       @if ($tableOffers)
-        <div class="or-table" x-show="!crisisRoom" role="group" aria-label="เปิดไพ่กับ{{ $P['short'] }}">
-          @foreach ($tableOffers as $o)
-            <button type="button" class="or-offer" :disabled="!!table.offerBusy" @click="openTable(@js($o))">
-              <span class="or-offer-icon" aria-hidden="true">{{ $o['kind'] === 'deep' ? '🌟' : '🔮' }}</span>
-              <span class="or-offer-text">
-                <strong>{{ $o['label'] }}</strong>
-                <small>
-                  @if (! empty($o['cards'])){{ $o['cards'] }} ใบ · @endif
-                  ฿{{ number_format($o['price'], $o['price'] == intval($o['price']) ? 0 : 2) }}
-                </small>
-              </span>
-              <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : 'เปิดไพ่'">เปิดไพ่</span>
-            </button>
-          @endforeach
-          @if (! empty($tableMenu))
-            {{-- 🔮 (2026-11-06) หน้ารวมแพ็กเกจ /tarot ปิดแล้ว — ไพ่ทุกแบบของห้องอยู่ในแผ่นนี้ --}}
-            <button type="button" class="or-offer is-more" @click="table.menu = true" :aria-expanded="table.menu.toString()" aria-controls="or-menu">
-              <span class="or-offer-icon" aria-hidden="true">🃏</span>
-              <span class="or-offer-text">
-                <strong>ไพ่แบบอื่น</strong>
-                <small>ทั้งหมด {{ count($tableMenu) }} แบบ</small>
-              </span>
-            </button>
-          @endif
+        {{-- 🃏 (2026-11-06 เจ้าของสั่ง) เมนูกราฟิก "ไพ่ที่ผู้พยากรณ์คนนี้ดู" — พัดไพ่ตามจำนวนใบ · ล้นจอเลื่อนสไลด์ได้ (นิ้ว/ล้อเมาส์/ลาก/ลูกศร) --}}
+        <div class="or-table-wrap" x-show="!crisisRoom" x-data="{ l: false, r: false }">
+          <button type="button" class="or-slide is-prev" x-show="l" x-cloak aria-label="เลื่อนไปทางซ้าย" @click="$refs.row.scrollBy({ left: -$refs.row.clientWidth * .8, behavior: 'smooth' })">‹</button>
+          <div class="or-table" x-ref="row" role="group" aria-label="ไพ่ที่{{ $P['short'] }}ดู"
+               x-init="window.juntraHScroll && window.juntraHScroll($el, (a, b) => { l = a; r = b; })">
+            @foreach ($tableOffers as $o)
+              @php
+                $locked = $o['locked_until'] ?? null;
+                $seeUrl = $o['reading_url'] ?? null;
+                $n      = (int) ($o['cards'] ?? 0);
+                $shown  = max(1, min($n, 5));
+                $price  = (float) $o['price'];
+                $priceText = $price <= 0 ? 'ฟรี' : '฿' . number_format($price, $price == intval($price) ? 0 : 2);
+                $goText = $o['kind'] === 'free' ? 'เปิดฟรี' : 'เปิดไพ่';
+              @endphp
+              @if ($locked && $seeUrl)
+                {{-- ไพ่ฟรีของวันนี้รับไปแล้ว — กดดูผลเดิมได้ --}}
+                <a href="{{ $seeUrl }}" class="or-offer is-locked is-free">
+              @else
+                <button type="button" class="or-offer {{ $o['kind'] === 'free' ? 'is-free' : '' }} {{ $locked ? 'is-locked' : '' }}"
+                        @if ($locked) disabled @else :disabled="!!table.offerBusy" @click="openTable(@js($o))" @endif>
+              @endif
+                <span class="or-fan" style="--n: {{ $shown }}" aria-hidden="true">
+                  @if ($o['kind'] === 'deep')
+                    <span class="or-fan-star">🌟</span>
+                  @else
+                    @for ($i = 0; $i < $shown; $i++)<i style="--i: {{ $i }}"></i>@endfor
+                    @if ($n > 5)<b>{{ $n }}</b>@endif
+                  @endif
+                  @if ($o['kind'] === 'free')<em class="or-free-tag">ฟรี</em>@endif
+                </span>
+                <span class="or-offer-text">
+                  <strong>{{ $o['label'] }}</strong>
+                  <small>@if ($n > 0){{ $n }} ใบ · @endif{{ $priceText }}</small>
+                  @if ($locked)<small class="or-offer-lock">{{ $seeUrl ? 'ดูไพ่ของวันนี้ · ใบใหม่' : 'เปิดได้อีกครั้ง' }} {{ $locked }}</small>@endif
+                </span>
+                @unless ($locked)
+                  <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : @js($goText)">{{ $goText }}</span>
+                @endunless
+              @if ($locked && $seeUrl)
+                </a>
+              @else
+                </button>
+              @endif
+            @endforeach
+            @if (! empty($tableMenu))
+              {{-- รายละเอียดทุกแบบ (คำอธิบายเต็ม) --}}
+              <button type="button" class="or-offer is-more" @click="table.menu = true" :aria-expanded="table.menu.toString()" aria-controls="or-menu">
+                <span class="or-offer-icon" aria-hidden="true">🃏</span>
+                <span class="or-offer-text">
+                  <strong>ดูรายละเอียด</strong>
+                  <small>ทั้งหมด {{ count($tableMenu) }} แบบ</small>
+                </span>
+              </button>
+            @endif
+          </div>
+          <button type="button" class="or-slide is-next" x-show="r" x-cloak aria-label="เลื่อนไปทางขวา" @click="$refs.row.scrollBy({ left: $refs.row.clientWidth * .8, behavior: 'smooth' })">›</button>
         </div>
       @endif
 
       @if (! empty($tableMenu))
+        {{-- 🔮 (2026-11-06) หน้ารวมแพ็กเกจ /tarot ปิดแล้ว — รายละเอียดไพ่ทุกแบบของห้องอยู่ในแผ่นนี้ --}}
         <div id="or-menu" class="or-menu" x-show="table.menu && !crisisRoom" x-cloak @keydown.escape.window="table.menu = false"
              role="dialog" aria-modal="true" aria-label="เลือกแบบการเปิดไพ่กับ{{ $P['short'] }}">
           <div class="or-menu-backdrop" @click="table.menu = false"></div>
@@ -235,12 +276,12 @@
                 @php $locked = $o['locked_until'] ?? null; @endphp
                 <button type="button" class="or-menu-item {{ $locked ? 'is-locked' : '' }}"
                         @if ($locked) disabled @else :disabled="!!table.offerBusy" @click="openTable(@js($o))" @endif>
-                  <span class="or-offer-icon" aria-hidden="true">{{ $o['kind'] === 'deep' ? '🌟' : '🔮' }}</span>
+                  <span class="or-offer-icon" aria-hidden="true">{{ $o['kind'] === 'deep' ? '🌟' : ($o['kind'] === 'free' ? '🎁' : '🔮') }}</span>
                   <span class="or-menu-text">
                     <strong>{{ $o['label'] }}</strong>
                     <small>
                       @if (! empty($o['cards'])){{ $o['cards'] }} ใบ · @endif
-                      ฿{{ number_format($o['price'], $o['price'] == intval($o['price']) ? 0 : 2) }}
+                      {{ $o['price'] <= 0 ? 'ฟรี' : '฿' . number_format($o['price'], $o['price'] == intval($o['price']) ? 0 : 2) }}
                     </small>
                     @if ($locked)
                       <em>เปิดได้อีกครั้ง {{ $locked }}</em>
@@ -249,7 +290,7 @@
                     @endif
                   </span>
                   @unless ($locked)
-                    <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : 'เปิดไพ่'">เปิดไพ่</span>
+                    <span class="or-offer-go" x-text="table.offerBusy === @js($o['key']) ? 'กำลังพาไป…' : @js($o['kind'] === 'free' ? 'เปิดฟรี' : 'เปิดไพ่')">{{ $o['kind'] === 'free' ? 'เปิดฟรี' : 'เปิดไพ่' }}</span>
                   @endunless
                 </button>
               @endforeach
@@ -293,6 +334,10 @@
             <button type="button" class="or-offer-go" :disabled="hold.billBusy"
                     @click="hold.billPaid ? location.reload() : resumeBill()"
                     x-text="hold.billPaid ? 'เปิดไพ่ได้แล้ว' : (hold.billBusy ? 'กำลังเปิด…' : 'ดู QR จ่ายต่อ')">ดู QR จ่ายต่อ</button>
+            {{-- 🧾 (2026-11-06) ทางออกจากบิลค้าง — เดิมไม่มี ลูกค้าที่เปลี่ยนใจติดอยู่ 48 ชม. · แตะสองครั้งกันพลาด --}}
+            <button type="button" class="or-hold-end" x-show="!hold.billPaid" :disabled="hold.billBusy"
+                    @click="cancelHoldBill()"
+                    x-text="hold.confirmCancel ? 'โอนแล้วอย่ายกเลิก · แตะอีกครั้งเพื่อยกเลิก' : 'ยกเลิกบิล'">ยกเลิกบิล</button>
           </div>
         </div>
       @endif
@@ -443,6 +488,39 @@
               <div class="msg-head" x-show="m.role === 'assistant' && m.state !== 'system'" x-text="persona.name">{{ $P['name'] }}</div>
               <div class="msg-body" x-show="m.kind !== 'topup'" x-html="m.html"></div>
 
+              {{-- 🎂 (2026-11-06) วันเดือนปีเกิด กรอกในแชท → โปรไฟล์ (เลือกจากรายการ — ผู้สูงอายุไม่ต้องพิมพ์รูปแบบวันที่) --}}
+              <template x-if="m.kind === 'birth'">
+                <form class="birth-form" @submit.prevent="saveBirth(m)">
+                  <div class="birth-row">
+                    <select x-model="m.birth.d" aria-label="วันที่เกิด" :disabled="m.birth.done">
+                      <option value="">วันที่</option>
+                      <template x-for="d in 31" :key="'d' + d"><option :value="d" x-text="d"></option></template>
+                    </select>
+                    <select x-model="m.birth.m" aria-label="เดือนเกิด" :disabled="m.birth.done">
+                      <option value="">เดือน</option>
+                      <template x-for="(n, i) in thMonths" :key="'m' + i"><option :value="i + 1" x-text="n"></option></template>
+                    </select>
+                    <select x-model="m.birth.y" aria-label="ปีเกิด (พ.ศ.)" :disabled="m.birth.done">
+                      <option value="">ปี พ.ศ.</option>
+                      <template x-for="y in birthYears()" :key="'y' + y"><option :value="y" x-text="y"></option></template>
+                    </select>
+                  </div>
+                  <div class="birth-err" role="alert" x-show="m.birth.error" x-text="m.birth.error"></div>
+                  <div class="birth-actions">
+                    <button type="submit" class="btn btn-primary" :disabled="m.birth.busy || m.birth.done"
+                            x-text="m.birth.done ? 'บันทึกแล้ว ✓' : (m.birth.busy ? 'กำลังบันทึก…' : 'บันทึกวันเกิด')">บันทึกวันเกิด</button>
+                    <a :href="cfg.accountBirthUrl" class="birth-alt" x-show="!m.birth.done">หรือแก้ที่หน้าบัญชีของฉัน</a>
+                  </div>
+                </form>
+              </template>
+              {{-- 🎂 ยืนยันวันเกิดก่อนเปิดไพ่ — ผิดก็กดแก้ได้ทันที --}}
+              <template x-if="m.kind === 'birth-confirm'">
+                <div class="birth-actions">
+                  <button type="button" class="btn btn-primary" :disabled="m.done" @click="m.done = true; continueAfterBirth(m.then)">ถูกต้อง เปิดไพ่เลย</button>
+                  <button type="button" class="chip" :disabled="m.done" @click="m.done = true; askBirth(m.then, true)">วันเกิดไม่ถูก แก้ไข</button>
+                </div>
+              </template>
+
               {{-- ═══ การ์ดแพ็กเกจเปิดไพ่ ═══════════════════════════════
                    ลูกค้าขอให้ทำนาย → แม่หมอยื่นแพ็กเกจ (คุยฟรี · หักเครดิตตอนเปิดไพ่จริงเท่านั้น)
                    ไพ่ยิปซี: POST ไปขั้นเลือกไพ่พร้อมคำถามที่เพิ่งพิมพ์ · เครดิตไม่พอ: เติมในแชทได้เลย --}}
@@ -451,7 +529,7 @@
                   <template x-for="o in m.offers" :key="o.key">
                     <div class="offer-card" :class="o.kind === 'deep' && 'is-deep'">
                       <div class="offer-top">
-                        <span class="offer-icon" aria-hidden="true" x-text="o.kind === 'deep' ? '🌟' : '🔮'"></span>
+                        <span class="offer-icon" aria-hidden="true" x-text="o.kind === 'deep' ? '🌟' : (o.kind === 'free' ? '🎁' : '🔮')"></span>
                         <div class="offer-name" x-text="o.label"></div>
                         <span class="offer-meta" x-show="o.cards" x-text="o.cards + ' ใบ'"></span>
                       </div>
@@ -460,7 +538,7 @@
                         <span class="offer-price" x-text="priceLabel(o.price)"></span>
                         <button type="button" class="btn btn-primary offer-go" x-show="canAfford(o)"
                                 :disabled="!!m.offerBusy" @click="startOffer(m, o)"
-                                x-text="m.offerBusy === o.key ? 'กำลังพาไป...' : (o.kind === 'deep' ? 'เริ่มดูดวง' : 'เลือกไพ่เลย')"></button>
+                                x-text="m.offerBusy === o.key ? 'กำลังพาไป...' : (o.kind === 'deep' ? 'เริ่มดูดวง' : (o.kind === 'free' ? 'เปิดไพ่ฟรี' : 'เลือกไพ่เลย'))"></button>
                       </div>
                       {{-- เครดิตไม่พอ: ทางง่ายสุด = สแกนจ่ายเท่าที่ขาดแล้วพาไปเปิดไพ่เอง
                            (หลายคนไม่เข้าใจเรื่อง "เติมเครดิต") ส่วนคนคล่องยังเลือกเติมเก็บไว้ได้ --}}
@@ -501,6 +579,25 @@
                         </template>
                       </div>
                       <div class="pay-sub" style="margin-top:10px;color:#f59999" x-show="m.pay.error" x-text="m.pay.error"></div>
+                      {{-- มีบิลเดิมรอจ่ายอยู่ (เช่นเปิดไว้อีกแท็บ) — จ่ายใบเดิม หรือยกเลิกแล้วออกใบใหม่ ไม่ออกซ้อน --}}
+                      <div class="pay-actions" x-show="m.pay.conflict">
+                        <button type="button" class="chip chip-strong" :disabled="m.pay.busy" @click="useOldBill(m)">
+                          <span class="chip-icon">🧾</span> จ่ายบิลเดิม
+                        </button>
+                        <button type="button" class="chip" :disabled="m.pay.busy" @click="replaceBill(m, m.pay.conflict)"
+                                x-text="m.pay.confirmCancel ? 'โอนบิลเดิมแล้วอย่ายกเลิก · แตะอีกครั้ง' : 'ยกเลิกบิลเดิมแล้วออกใหม่'"></button>
+                      </div>
+                    </div>
+                  </template>
+
+                  {{-- บิลนี้ปิดแล้ว (ยกเลิก / หมดอายุ / แอดมินตรวจแล้วไม่พบยอด) — หยุดรอ บอกตรง ๆ --}}
+                  <template x-if="m.pay.step === 'closed'">
+                    <div>
+                      <div class="pay-title">บิลนี้ปิดแล้วค่ะ</div>
+                      <div class="pay-sub pay-bill" x-show="m.pay.reference_code">
+                        เลขที่บิล <strong x-text="m.pay.reference_code"></strong>
+                      </div>
+                      <div class="pay-sub" x-text="m.pay.closed"></div>
                     </div>
                   </template>
 
@@ -529,15 +626,29 @@
                         เข้าบัญชี <strong x-text="m.pay.promptpay_name"></strong>
                       </div>
 
-                      <div class="pay-sub" style="text-align:center;margin-top:8px" x-show="m.pay.then && !m.pay.superseded">
+                      <div class="pay-sub" style="text-align:center;margin-top:8px" x-show="m.pay.then && !m.pay.superseded && !m.pay.short">
                         จ่ายแล้ว{{ $P['self'] }}พาไป<span x-text="m.pay.then?.offer.kind === 'deep' ? 'ดูดวง' : 'เลือกไพ่'"></span>
                         <strong x-text="m.pay.then?.offer.label"></strong> ให้เองเลยค่ะ
+                      </div>
+
+                      {{-- 💸 บิลเดิมยอดไม่พอสำหรับแพ็กเกจที่เพิ่งกด — บอกตรง ๆ ไม่สัญญาว่า "จ่ายแล้วพาไปเลย" --}}
+                      <div class="pay-short" x-show="m.pay.short && !m.pay.superseded">
+                        <div class="pay-sub">
+                          บิลนี้ยอด <strong x-text="'฿' + Number(m.pay.base_amount || m.pay.payable).toLocaleString('th-TH')"></strong>
+                          ยังไม่พอสำหรับ <strong x-text="m.pay.then?.offer.label"></strong>
+                          (ต้องเติมอีก <strong x-text="'฿' + Number(m.pay.short).toLocaleString('th-TH')"></strong>)
+                        </div>
+                        <div class="pay-sub">จ่ายบิลนี้ก่อนแล้วเติมส่วนที่เหลือทีหลังก็ได้ หรือยกเลิกบิลนี้แล้วออก QR ยอดใหม่ค่ะ</div>
+                        <div class="pay-actions" style="justify-content:center">
+                          <button type="button" class="chip" :disabled="m.pay.busy" @click="replaceBill(m)"
+                                  x-text="m.pay.confirmCancel ? 'โอนบิลนี้แล้วอย่ายกเลิก · แตะอีกครั้ง' : ('ยกเลิกบิลนี้ ออก QR ฿' + Number(m.pay.short).toLocaleString('th-TH'))"></button>
+                        </div>
                       </div>
 
                       {{-- ถูกแทนด้วยการ์ดยอดใหม่ — หยุดรอที่ใบนี้ แต่ถ้าโอนไปแล้วเงินก็ยังเข้าตามปกติ --}}
                       <div class="pay-wait" x-show="!m.pay.superseded">
                         <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                        <span x-text="m.pay.waited < 600 ? persona.self + 'กำลังรอเงินเข้าอยู่ค่ะ...' : 'ยังไม่พบเงินเข้า — แนบสลิปให้' + persona.self + 'ได้เลยค่ะ'"></span>
+                        <span x-text="m.pay.has_slip ? 'ได้รับสลิปแล้ว กำลังตรวจสอบค่ะ...' : (m.pay.waited < 600 ? persona.self + 'กำลังรอเงินเข้าอยู่ค่ะ...' : 'ยังไม่พบเงินเข้า — โอนแล้วแนบสลิปให้' + persona.self + 'ได้เลยค่ะ')"></span>
                       </div>
                       <div class="pay-sub" style="text-align:center;margin-top:10px" x-show="m.pay.superseded">
                         ใช้ยอดใหม่ด้านล่างแทนนะคะ (ถ้าโอนยอดนี้ไปแล้ว ระบบเติมให้เองค่ะ)
@@ -670,7 +781,7 @@
                 </div>
                 <div class="chip-row">
                   <a :href="cfg.freshUrl" class="chip chip-strong" x-show="qa && qa.over"><span class="chip-icon">💬</span> คุยเรื่องอื่นต่อ</a>
-                  <a href="{{ route('tarot.index') }}" class="chip chip-strong"><span class="chip-icon">🔮</span> เปิดไพ่ยิปซี</a>
+                  <a href="{{ route('chat.index', ['room' => $room, 'menu' => 1]) }}" class="chip chip-strong"><span class="chip-icon">🔮</span> เปิดไพ่กับ{{ $P['short'] }}</a>
                   <a href="{{ route('tarot.free') }}" class="chip"><span class="chip-icon">✨</span> ดูดวงฟรี 1 ใบ</a>
                   @serviceopen('deep')<a href="{{ route('deep.index') }}" class="chip chip-strong"><span class="chip-icon">🌟</span> ดูดวงเชิงลึก</a>@endserviceopen
                   @serviceopen('horoscope')<a href="{{ route('horoscope.index') }}" class="chip"><span class="chip-icon">🌙</span> ดวงรายวัน</a>@endserviceopen
@@ -741,6 +852,11 @@
                           :aria-expanded="showTopics.toString()">
                     <span class="chip-icon" aria-hidden="true">⋯</span>
                     <span x-text="showTopics ? 'ปิดหมวดคำถาม' : 'หมวดคำถาม'"></span>
+                  </button>
+                  {{-- 🎂 วันเกิดในโปรไฟล์ — ผิดกดแก้ในแชทได้เลย --}}
+                  <button type="button" class="chip" x-show="canTopupInChat && !crisisRoom" :disabled="thinking" @click="askBirth(null, true)">
+                    <span class="chip-icon" aria-hidden="true">🎂</span>
+                    <span x-text="birth.label ? 'วันเกิด ' + birth.label : 'ใส่วันเกิด'"></span>
                   </button>
                 </div>
 
@@ -845,6 +961,10 @@
     Object.assign(actor.style, { top: `${ty - hgt}px`, height: `${hgt}px`, width: `${Math.round(Math.min(W, hgt * 0.9))}px`, left: `${x + iw / 2}px` });
     shell.style.setProperty('--or-table', `${ty}px`);
     shell.style.setProperty('--or-cx', `${x + iw / 2}px`);
+    // 🃏 ความกว้างที่แถวการ์ดบนโต๊ะใช้ได้ = พื้นที่ฉากที่แผงแชทไม่ได้บัง (กลางโต๊ะ ± ระยะถึงขอบที่ใกล้กว่า)
+    //    ไม่มีค่านี้ แถวกว้างเท่าจอ → ล้นออกซ้ายนอกจอ การ์ดใบแรก (ไพ่ฟรี) โดนตัด และลูกศรเลื่อนตกขอบ
+    const cxNow = x + iw / 2;
+    shell.style.setProperty('--or-tw', `${Math.max(240, 2 * Math.min(cxNow, (W - side) - cxNow))}px`);
     scene.classList.add('is-ready');
   };
   const img = new Image();
@@ -868,7 +988,7 @@ document.addEventListener('alpine:init', () => {
       lockEnds: cfg.roomLock ? cfg.roomLock.ends_at : null,
       bill: cfg.pendingBill || null,
       billEnds: cfg.pendingBill ? cfg.pendingBill.expires_at : null,
-      billPaid: false, billSlip: !!(cfg.pendingBill && cfg.pendingBill.has_slip), billBusy: false,
+      billPaid: false, billSlip: !!(cfg.pendingBill && cfg.pendingBill.has_slip), billBusy: false, confirmCancel: false,
       confirmEnd: false,
     },
     // นาฬิกาเซิร์ฟเวอร์ − นาฬิกาเครื่อง (วินาที) — นับถอยหลังตรงกับเวลาจริงแม้เครื่องลูกค้าตั้งเวลาเพี้ยน
@@ -907,9 +1027,15 @@ document.addEventListener('alpine:init', () => {
     canTopupInChat: !!cfg.canTopupInChat,
     topupUrl: cfg.topupUrl,
     payTimer: null,
+    payWatch: null,     // การ์ด QR ที่กำลังรอเงินเข้า (poll ทีละใบ)
     // ห้องพยากรณ์: แพ็กเกจบนโต๊ะ (ทำตัวเหมือนข้อความที่มีการ์ด — ใช้ startOffer/payAndOpen ตัวเดิม) · แผ่นแชทมือถือกางอยู่ไหม
     table: { offerBusy: false, question: '', menu: !!cfg.menuOpen },
     sheet: false,
+    // 🎂 (2026-11-06) วันเกิดในโปรไฟล์ — ไม่มี = ขอในแชทก่อนเปิดไพ่ทุกแบบ · ไพ่ฟรียืนยันวันเกิดอีกครั้ง (ผิดแก้ได้)
+    birth: { date: cfg.birthDate || null, label: cfg.birthLabel || null },
+    birthConfirmed: false,
+    thMonths: ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'],
+    _years: null,
 
     destroy() {
       clearInterval(this.clockTimer);
@@ -1063,7 +1189,7 @@ document.addEventListener('alpine:init', () => {
     async resumeBill(then = null) {
       if (!this.hold.bill || this.hold.billBusy) return;
       const had = this.messages.find(x => x.kind === 'topup' && x.pay?.id === this.hold.bill.id && x.pay.step !== 'done');
-      if (had) { if (then) had.pay.then = then; this.sheet = true; this.scrollToBottom(true); return; }
+      if (had) { if (then) { had.pay.then = then; this.markShort(had); } this.sheet = true; this.scrollToBottom(true); return; }
       this.hold.billBusy = true;
       try {
         const r = await fetch(this.hold.bill.resume_url, {
@@ -1071,11 +1197,14 @@ document.addEventListener('alpine:init', () => {
         });
         const j = await r.json().catch(() => ({}));
         if (r.status === 410) { if (j.paid) this.billPaidNow(); else location.reload(); return; }
+        if (r.status === 419 || r.status === 401) { this.say(this.staleText); return; }
+        if (r.status === 409) { this.say(j.error || 'บิลนี้แนบสลิปแล้ว กำลังตรวจสอบอยู่ค่ะ'); return; }
         if (!r.ok) { this.say(j.error || 'เปิดบิลไม่สำเร็จ ลองใหม่อีกครั้งนะคะ'); return; }
         const m = this.push('assistant', '', 'ok', '', {
           kind: 'topup',
-          pay: { step: 'qr', busy: false, uploading: false, error: '', notice: '', waited: 0, then, superseded: false, ...j },
+          pay: { step: 'qr', busy: false, uploading: false, error: '', notice: '', waited: 0, then, superseded: false, short: 0, confirmCancel: false, conflict: null, ...j },
         });
+        this.markShort(m);
         this.sheet = true;
         this.watchTopup(m);
         this.scrollToBottom(true);
@@ -1100,10 +1229,19 @@ document.addEventListener('alpine:init', () => {
       this.$watch('draft', () => { this.lastActive = Date.now(); });
       this.startClock();
       this.watchBill();
+      // 📱 กลับมาจากแอพธนาคาร → ถามทันทีว่าเงินเข้าหรือยัง (ไม่ต้องรอรอบ poll / ไม่สนว่าหยุด poll ไปแล้ว)
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        if (this.payWatch && this.payWatch.pay.step === 'qr') this.pollTopup(this.payWatch);
+        if (this.hold.bill && !this.hold.billPaid) this.watchBill();   // ป้ายบิลค้าง: เริ่มนับรอบใหม่
+      });
       // คำถามที่ติดมาจากหน้าผลไพ่ — ยิงครั้งเดียวให้คำตอบขึ้นเลยโดยไม่ต้องพิมพ์ซ้ำ
       // (เซิร์ฟเวอร์ pull() ออกจาก session แล้ว รีเฟรชจึงไม่ยิงซ้ำ/ไม่คิดเงินซ้ำ)
       if (cfg.autosend && String(cfg.autosend).trim()) {
         this.$nextTick(() => this.send(String(cfg.autosend)));
+      } else if (cfg.freeIntent && cfg.freeCard && !cfg.freeCard.locked_until) {
+        // 🎁 มาจาก /tarot/free ที่ยังไม่มีวันเกิด → ขอวันเกิดในแชท แล้วพาไปเปิดไพ่ฟรีต่อเอง
+        this.$nextTick(() => this.openTable(cfg.freeCard));
       }
     },
 
@@ -1171,8 +1309,88 @@ document.addEventListener('alpine:init', () => {
       // เทียบเป็นสตางค์ — float ตรง ๆ (19.99 vs 19.990000001) ทำให้คนที่เงินพอดีเห็นปุ่มเติมเงิน
       return Number(o.price) <= 0 || Math.round(Number(this.balance) * 100) >= Math.round(Number(o.price) * 100);
     },
+    /* ---------- 🎂 วันเดือนปีเกิด (2026-11-06) ---------- */
+    birthYears() {
+      if (!this._years) {
+        const top = new Date().getFullYear() + 543;
+        this._years = Array.from({ length: top - 2443 + 1 }, (_, i) => top - i);   // พ.ศ. ปีนี้ → 2443 (ค.ศ. 1900)
+      }
+      return this._years;
+    },
+    // ยังไม่มีวันเกิด → ขอในแชทก่อน แล้วทำต่อจากที่กดไว้ (next) · คืน true = หยุดไว้ก่อน
+    gateBirth(next) {
+      if (this.birth.date) return false;
+      this.askBirth(next);
+      return true;
+    },
+    askBirth(next, edit = false) {
+      const p = this.persona;
+      const pre = this.birth.date ? String(this.birth.date).split('-') : null;
+      const text = edit && this.birth.label
+        ? `วันเกิดที่${p.self}จำไว้คือ ${this.birth.label} ค่ะ ถ้าไม่ถูก เลือกใหม่แล้วกดบันทึกได้เลยนะคะ`
+        : `ก่อนเปิดไพ่ ${p.self}ขอวันเดือนปีเกิดของ${p.customer || 'คุณ'}หน่อยนะคะ ✨ บันทึกไว้ในโปรไฟล์ ครั้งหน้าไม่ต้องกรอกอีก`;
+      this.sheet = true;   // มือถือ: กางแผ่นแชทให้เห็นฟอร์ม
+      this.push('assistant', this.escape(text), 'ok', '', {
+        kind: 'birth',
+        birth: { d: pre ? String(+pre[2]) : '', m: pre ? String(+pre[1]) : '', y: pre ? String(+pre[0] + 543) : '', busy: false, error: '', done: false },
+        then: next || null,
+      });
+      this.scrollToBottom(true);
+    },
+    confirmBirth(next) {
+      const p = this.persona;
+      const text = `${p.self}จะเปิดไพ่ให้${p.customer || 'คุณ'}ที่เกิดวันที่ ${this.birth.label} นะคะ ถูกต้องไหมคะ`;
+      this.sheet = true;
+      this.push('assistant', this.escape(text), 'ok', '', { kind: 'birth-confirm', done: false, then: next || null });
+      this.scrollToBottom(true);
+    },
+    continueAfterBirth(next) {
+      this.birthConfirmed = true;
+      if (!next || !next.o) return;
+      if (next.how === 'table') this.openTable(next.o);
+      else if (next.how === 'pay') this.payAndOpen(next.m, next.o);
+      else this.startOffer(next.m, next.o);
+    },
+    async saveBirth(m) {
+      const b = m.birth;
+      if (b.busy || b.done) return;
+      b.error = '';
+      const d = Number(b.d), mo = Number(b.m), y = Number(b.y) - 543;
+      if (!d || !mo || !Number(b.y)) { b.error = 'กรุณาเลือกวัน เดือน และปีเกิดให้ครบค่ะ'; return; }
+      // 31 เมษายน / 29 กุมภาพันธ์ปีที่ไม่ใช่อธิกสุรทิน — บอกก่อนส่ง (เซิร์ฟเวอร์ตรวจซ้ำอีกชั้น)
+      const dt = new Date(Date.UTC(y, mo - 1, d));
+      if (dt.getUTCMonth() !== mo - 1) { b.error = 'วันที่นี้ไม่มีในเดือนนั้นค่ะ ลองเลือกใหม่นะคะ'; return; }
+      const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      b.busy = true;
+      try {
+        const r = await fetch(cfg.birthUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ birth_date: iso, room: this.room }),
+        });
+        if (r.status === 419 || r.status === 401) { b.error = 'หน้านี้เปิดไว้นานเกินไปค่ะ กรุณารีเฟรชหน้าแล้วลองใหม่นะคะ'; return; }
+        if (r.status === 429) { b.error = 'บันทึกบ่อยเกินไปค่ะ รอสักครู่แล้วลองใหม่นะคะ'; return; }
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) {
+          b.error = (j.errors && j.errors.birth_date && j.errors.birth_date[0]) || 'บันทึกไม่สำเร็จ ลองใหม่อีกครั้งนะคะ';
+          return;
+        }
+        b.done = true;
+        this.birth = { date: j.birth_date, label: j.label };
+        this.push('assistant', this.escape(j.message), 'ok', '');
+        this.continueAfterBirth(m.then);
+      } catch (_) {
+        b.error = 'เชื่อมต่อไม่ได้ค่ะ ลองใหม่อีกครั้งนะคะ';
+      } finally {
+        b.busy = false;
+      }
+    },
     // กดแพ็กเกจบนโต๊ะ — คำถามล่าสุดที่ลูกค้าพิมพ์ติดไปหน้าเลือกไพ่ · เครดิตไม่พอ = จ่ายในแชทแล้วพาไปต่อ
     openTable(o) {
+      if (this.gateBirth({ how: 'table', o })) return;
       const last = [...this.messages].reverse().find((x) => x.role === 'user' && x.text);
       this.table.question = last ? String(last.text).slice(0, 300) : '';
       if (this.canAfford(o)) { this.startOffer(this.table, o); return; }
@@ -1181,6 +1399,14 @@ document.addEventListener('alpine:init', () => {
     },
     startOffer(m, o) {
       if (m.offerBusy) return;      // กดซ้ำ = ส่งฟอร์มซ้ำ (ยังไม่หักเงิน แต่พาไปหน้าเดิมสองรอบ)
+      if (this.gateBirth({ how: 'start', m, o })) return;
+      if (o.kind === 'free') {
+        // 🎁 ไพ่ฟรีวันละใบ — ยืนยันวันเกิดก่อน (ผิดแก้ได้ทันที) แล้วไปหน้าเปิดไพ่ฟรี (สิทธิ์ตัดสินที่เซิร์ฟเวอร์อีกรอบ)
+        if (!this.birthConfirmed) { this.confirmBirth({ how: 'start', m, o }); return; }
+        m.offerBusy = o.key;
+        window.location.href = o.url;
+        return;
+      }
       m.offerBusy = o.key;
       if (o.kind === 'deep') {
         // คำถามส่งผ่าน sessionStorage ไม่ใส่ใน URL — เรื่องดูดวงเป็นเรื่องส่วนตัว ห้ามค้างใน log
@@ -1223,16 +1449,20 @@ document.addEventListener('alpine:init', () => {
      */
     payAndOpen(m, o) {
       if (m.offerBusy) return;
-      // 🧾 มีบิลค้างอยู่ → จ่ายบิลเดิมก่อน ไม่ออกบิลใหม่ซ้อน
+      if (this.gateBirth({ how: 'pay', m, o })) return;
+      // 🧾 มีบิลค้างอยู่ → จ่ายบิลเดิมก่อน ไม่ออกบิลใหม่ซ้อน (ยอดไม่พอ การ์ดบอกเองพร้อมปุ่มยกเลิกออกใหม่)
       if (this.hold.bill && !this.hold.billPaid) { this.resumeBill({ msg: m, offer: o }); return; }
       this.voice('credit_low');
       const then = { msg: m, offer: o };
       const amount = this.payAmount(o);
-      const open = this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && !x.pay?.superseded);
+      const open = this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && x.pay?.step !== 'closed' && !x.pay?.superseded);
       if (open) {
         // กดซ้ำ/กดแพ็กเกจอื่นระหว่างรอ: ใบเดิมยอดพอ → ใช้ใบเดิม เปลี่ยนแค่ปลายทาง
-        if (open.pay.step === 'qr' && Number(open.pay.base_amount) >= amount) {
+        if (open.pay.step === 'qr') {
+          // ใบเดิมยังรอจ่าย → ห้ามออกใบซ้อน (เซิร์ฟเวอร์ก็ไม่ยอม) · ยอดไม่พอ = การ์ดถามว่ายกเลิกออกใหม่ไหม
           open.pay.then = then;
+          this.markShort(open);
+          this.sheet = true;
           this.scrollToBottom(true);
           return;
         }
@@ -1242,8 +1472,6 @@ document.addEventListener('alpine:init', () => {
           this.chooseAmount(open, amount);
           return;
         }
-        // ใบเดิมยอดไม่พอสำหรับแพ็กเกจนี้ → เลิกรอใบเดิม ออก QR ใหม่
-        open.pay.superseded = true;
       }
       const card = this.openTopup(then, true);
       this.chooseAmount(card, amount);
@@ -1278,14 +1506,14 @@ document.addEventListener('alpine:init', () => {
     /* ---------- เติมเงินในแชท ---------- */
     openTopup(then = null, fresh = false) {
       // มีการ์ดที่ยังจ่ายไม่เสร็จอยู่แล้วก็เลื่อนไปหาใบเดิม ไม่สร้างซ้อน
-      const open = fresh ? null : this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && !x.pay?.superseded);
+      const open = fresh ? null : this.messages.find(x => x.kind === 'topup' && x.pay?.step !== 'done' && x.pay?.step !== 'closed' && !x.pay?.superseded);
       if (open) { this.scrollToBottom(true); return open; }
       if (!fresh && this.hold.bill && !this.hold.billPaid) { this.resumeBill(then); return null; }
 
       // kind/pay ต้องใส่ตอน push — ใส่ทีหลังบนอ็อบเจกต์ดิบจะไม่ผ่าน proxy ของ Alpine
       const m = this.push('assistant', '', 'ok', '', {
         kind: 'topup',
-        pay: { step: 'choose', busy: false, uploading: false, error: '', notice: '', waited: 0, then, superseded: false },
+        pay: { step: 'choose', busy: false, uploading: false, error: '', notice: '', waited: 0, then, superseded: false, short: 0, confirmCancel: false, conflict: null },
       });
       this.scrollToBottom(true);
       return m;
@@ -1293,7 +1521,7 @@ document.addEventListener('alpine:init', () => {
 
     /** เงินเข้าแล้ว (จาก poll หรือสลิป) — อัปเดตยอด ปลดล็อกแชท และพาไปแพ็กเกจที่ตั้งใจจ่าย */
     afterPaid(m, balance) {
-      clearInterval(this.payTimer);
+      if (this.payWatch === m) { clearInterval(this.payTimer); this.payWatch = null; }
       m.pay.step = 'done';
       if (this.hold.bill && m.pay.id === this.hold.bill.id) { this.hold.billPaid = true; clearInterval(this.billTimer); }
       if (balance !== undefined && balance !== null && Number.isFinite(Number(balance))) this.balance = Number(balance);
@@ -1327,12 +1555,23 @@ document.addEventListener('alpine:init', () => {
           },
           body: JSON.stringify({ amount }),
         });
+        if (r.status === 419 || r.status === 401) { m.pay.error = this.staleText; return; }
+        if (r.status === 429) { m.pay.error = 'กดถี่เกินไปค่ะ รอสักครู่แล้วลองใหม่นะคะ'; return; }
         const j = await r.json().catch(() => ({}));
+        if (r.status === 409 && j.bill) {
+          // มีบิลเดิมรอจ่าย (ยอดไม่พอ) — ไม่ออกซ้อน ให้ลูกค้าเลือกเอง
+          m.pay.error = j.error;
+          m.pay.conflict = j.bill;
+          m.pay.retryAmount = amount;
+          if (!this.hold.bill) this.hold.bill = j.bill;
+          return;
+        }
         if (!r.ok) {
           m.pay.error = j.error || 'สร้างรายการเติมเงินไม่สำเร็จ ลองใหม่อีกครั้งนะคะ';
           return;
         }
-        Object.assign(m.pay, j, { step: 'qr', waited: 0, error: '', notice: '' });
+        Object.assign(m.pay, j, { step: 'qr', waited: 0, error: '', notice: j.reused ? 'ใช้บิลเดิมที่ยังรอชำระอยู่นะคะ ไม่ต้องจ่ายสองใบค่ะ' : '', conflict: null });
+        this.markShort(m);
         this.watchTopup(m);
       } catch (e) {
         m.pay.error = 'เครือข่ายมีปัญหาค่ะ ลองใหม่อีกครั้งนะคะ';
@@ -1344,23 +1583,145 @@ document.addEventListener('alpine:init', () => {
 
     /**
      * ถามเซิร์ฟเวอร์เป็นระยะว่าเงินเข้าหรือยัง
-     * หยุดเองที่ 10 นาที — ไม่ปล่อยให้ยิงไม่จบถ้าลูกค้าเปิดค้างไว้
+     * 10 นาทีแรกทุก 5 วิ แล้วช้าลงเป็นทุก 30 วิจนครบ 1 ชม. (เดิมหยุดที่ 10 นาที — SMS ช้า/ลูกค้าโอนช้า
+     * เงินเข้าแล้วจอไม่เปลี่ยน) · กลับมาที่แท็บนี้ = ถามทันที (visibilitychange)
+     * บิลปิดไปแล้ว (ยกเลิก/หมดอายุ/แอดมินปฏิเสธ) → หยุดและบอกตรง ๆ ไม่หมุนรอไปเรื่อย ๆ
      */
     watchTopup(m) {
       clearInterval(this.payTimer);
-      this.payTimer = setInterval(async () => {
+      this.payWatch = m;
+      this.payTimer = setInterval(() => {
         m.pay.waited += 5;
-        if (m.pay.waited > 600) { clearInterval(this.payTimer); return; }
-        try {
-          const r = await fetch(cfg.topupStatusUrl.replace('__ID__', m.pay.id), {
-            credentials: 'same-origin',
-            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-          });
-          if (!r.ok) return;
-          const j = await r.json();
-          if (j.paid && m.pay.step !== 'done') this.afterPaid(m, j.balance);
-        } catch (_) { /* เน็ตสะดุดชั่วคราว — รอบหน้าลองใหม่ */ }
+        if (m.pay.step !== 'qr' || m.pay.waited > 3600) { clearInterval(this.payTimer); return; }
+        if (m.pay.waited > 600 && m.pay.waited % 30 !== 0) return;
+        this.pollTopup(m);
       }, 5000);
+    },
+    async pollTopup(m) {
+      if (m.pay.polling || m.pay.step !== 'qr') return;
+      m.pay.polling = true;
+      try {
+        const r = await fetch(cfg.topupStatusUrl.replace('__ID__', m.pay.id), {
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j.balance !== undefined && Number.isFinite(Number(j.balance))) this.balance = Number(j.balance);
+        m.pay.has_slip = !!j.has_slip;
+        if (j.paid) { if (m.pay.step !== 'done') this.afterPaid(m, j.balance); return; }
+        if (j.status !== 'pending' || j.expired) this.closeBill(m, j.expired ? 'expired' : j.status);
+      } catch (_) { /* เน็ตสะดุดชั่วคราว — รอบหน้าลองใหม่ */ } finally {
+        m.pay.polling = false;
+      }
+    },
+    closeBill(m, status) {
+      if (this.payWatch === m) { clearInterval(this.payTimer); this.payWatch = null; }
+      m.pay.step = 'closed';
+      m.pay.closed = {
+        cancelled: 'บิลนี้ถูกยกเลิกแล้วค่ะ ถ้าโอนไปแล้ว แนบสลิปที่หน้ากระเป๋าเงินหรือติดต่อแอดมินได้เลยนะคะ',
+        rejected: 'แอดมินตรวจแล้วยังไม่พบยอดโอนของบิลนี้ค่ะ ถ้าโอนแล้วติดต่อแอดมินพร้อมสลิปได้เลยนะคะ',
+        expired: 'บิลนี้หมดเวลาชำระแล้วค่ะ อยากเติมเครดิตเลือกยอดใหม่ได้เลยนะคะ',
+      }[status] || 'บิลนี้ไม่ได้รอชำระแล้วค่ะ';
+      if (this.hold.bill && this.hold.bill.id === m.pay.id) this.hold.bill = null;
+    },
+    /** 💸 บิลที่เปิดอยู่ยอดไม่พอสำหรับแพ็กเกจที่ตั้งใจจะเปิด → จำส่วนที่ต้องเติมจริงไว้ให้การ์ดบอก */
+    markShort(m) {
+      const t = m.pay.then;
+      if (!t || !t.offer) { m.pay.short = 0; return; }
+      const need = this.payAmount(t.offer);
+      const base = Number(m.pay.base_amount || m.pay.payable || 0);
+      m.pay.short = need > base + 0.001 ? need : 0;
+    },
+    /** มีบิลเดิมรอจ่าย → เปิดใบเดิมแทนใบที่กำลังจะออก */
+    useOldBill(m) {
+      m.pay.superseded = true;
+      m.pay.step = 'closed';
+      m.pay.closed = 'ใช้บิลเดิมด้านล่างแทนนะคะ';
+      this.resumeBill(m.pay.then);
+    },
+    /**
+     * ยกเลิกบิล (แตะสองครั้ง — ถ้าโอนไปแล้วแต่ยกเลิก เงินก้อนนั้นจะหาบิลไม่เจอ ต้องให้แอดมินตามให้)
+     * แล้วออก QR ใหม่ด้วยยอดที่ต้องการ · bill = บิลอื่นที่ชนอยู่ (ไม่ส่ง = บิลของการ์ดนี้เอง)
+     */
+    async replaceBill(m, bill = null) {
+      if (m.pay.busy) return;
+      if (!m.pay.confirmCancel) {
+        m.pay.confirmCancel = true;
+        setTimeout(() => { m.pay.confirmCancel = false; }, 4000);
+        return;
+      }
+      m.pay.confirmCancel = false;
+      const url = bill ? bill.cancel_url : m.pay.cancel_url;
+      const amount = bill ? m.pay.retryAmount : m.pay.short;
+      m.pay.busy = true;
+      m.pay.error = '';
+      try {
+        const res = await this.cancelBill(url);
+        if (res.paid) {
+          // บิลนั้นเพิ่งได้รับเงินพอดี — ไม่ยกเลิก ไม่ออกใหม่
+          if (!bill) { m.pay.busy = false; this.afterPaid(m, res.balance); return; }
+          if (res.balance !== undefined) this.balance = Number(res.balance);
+          m.pay.error = 'บิลเดิมเพิ่งได้รับเงินพอดีค่ะ ✓';
+          m.pay.conflict = null;
+          return;
+        }
+        if (!res.ok) { m.pay.error = res.error; return; }
+        if (this.hold.bill && this.hold.bill.id === (bill ? bill.id : m.pay.id)) this.hold.bill = null;
+        if (bill) {
+          m.pay.conflict = null;
+          m.pay.busy = false;
+          await this.chooseAmount(m, amount);
+          return;
+        }
+        this.closeBill(m, 'cancelled');
+        m.pay.closed = 'ยกเลิกบิลนี้แล้วค่ะ ใช้ QR ยอดใหม่ด้านล่างได้เลยนะคะ';
+        const card = this.openTopup(m.pay.then, true);
+        this.chooseAmount(card, amount);
+      } finally {
+        m.pay.busy = false;
+      }
+    },
+    /** @returns {Promise<{ok:boolean, paid?:boolean, balance?:number, error?:string}>} */
+    async cancelBill(url) {
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+        });
+        if (r.status === 419 || r.status === 401) return { ok: false, error: this.staleText };
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.ok) return { ok: true, balance: j.balance };
+        if (j.paid) return { ok: false, paid: true, balance: j.balance };
+        // 410 อื่น ๆ (ถูกยกเลิก/หมดอายุไปก่อนแล้ว) = ไม่มีอะไรต้องยกเลิก ไปต่อได้
+        if (r.status === 410) return { ok: true };
+        return { ok: false, error: j.error || 'ยกเลิกบิลไม่สำเร็จ ลองใหม่อีกครั้งนะคะ' };
+      } catch (_) {
+        return { ok: false, error: 'เครือข่ายมีปัญหาค่ะ ลองใหม่อีกครั้งนะคะ' };
+      }
+    },
+    /** ปุ่ม "ยกเลิกบิล" บนป้ายบิลค้าง — สำเร็จแล้วรีโหลดให้โต๊ะไพ่กลับมา */
+    async cancelHoldBill() {
+      if (!this.hold.bill || this.hold.billBusy) return;
+      if (!this.hold.confirmCancel) {
+        this.hold.confirmCancel = true;
+        setTimeout(() => { this.hold.confirmCancel = false; }, 4000);
+        return;
+      }
+      this.hold.confirmCancel = false;
+      this.hold.billBusy = true;
+      const res = await this.cancelBill(this.hold.bill.cancel_url);
+      this.hold.billBusy = false;
+      if (res.paid) { this.billPaidNow(res.balance); return; }
+      if (!res.ok) { this.say(res.error); return; }
+      location.reload();
+    },
+    get staleText() {
+      return 'หน้านี้เปิดไว้นานเกินไปค่ะ กรุณารีเฟรชหน้าแล้วลองใหม่นะคะ (เงินที่โอนไปแล้วไม่หายค่ะ)';
     },
 
     async copyAmount(m, e) {
@@ -1394,9 +1755,11 @@ document.addEventListener('alpine:init', () => {
           },
           body: fd,
         });
+        if (r.status === 419 || r.status === 401) { m.pay.error = this.staleText; return; }
+        if (r.status === 413) { m.pay.error = 'รูปสลิปใหญ่เกินไปค่ะ ลองครอปหรือแคปหน้าจอใหม่นะคะ'; return; }
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
-          m.pay.error = j.error || 'ส่งสลิปไม่สำเร็จ ลองใหม่อีกครั้งนะคะ';
+          m.pay.error = (j.errors && j.errors.slip && j.errors.slip[0]) || j.error || 'ส่งสลิปไม่สำเร็จ ลองใหม่อีกครั้งนะคะ';
           return;
         }
 
@@ -1407,6 +1770,7 @@ document.addEventListener('alpine:init', () => {
         }
 
         m.pay.notice = j.message || 'ได้รับสลิปแล้วค่ะ';
+        m.pay.has_slip = true;
       } catch (_) {
         m.pay.error = 'เครือข่ายมีปัญหาค่ะ ลองส่งสลิปใหม่อีกครั้งนะคะ';
       } finally {

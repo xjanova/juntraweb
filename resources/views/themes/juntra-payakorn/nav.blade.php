@@ -9,16 +9,9 @@
   {{-- :class binds the .open state; x-on:click closes the menu after tapping a
        link so navigation on mobile doesn't leave the panel hanging open. --}}
   <nav class="nav-links" id="navLinks" :class="{ open: open }" x-on:click="open = false">
-    {{-- บริการที่แอดมินปิดไว้ (ServiceGate) หายจากเมนูเอง — ตอนนี้เหลือไพ่เป็นหลัก (เจ้าของ 2026-09-15) --}}
-    <a href="{{ route('tarot.index') }}">ไพ่ยิปซี</a>
-    <a href="{{ route('tarot.free') }}">ดูดวงฟรี</a>
-    @serviceopen('horoscope')<a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>@endserviceopen
-    @serviceopen('deep')<a href="{{ route('deep.index') }}">ดูดวงเชิงลึก</a>@endserviceopen
-    @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
-    @serviceopen('palmistry')<a href="{{ route('palmistry.index') }}">ลายมือ</a>@endserviceopen
-    @serviceopen('auspicious')<a href="{{ route('auspicious.index') }}">ฤกษ์ยาม</a>@endserviceopen
-    <a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a>
-    <a href="{{ route('download') }}">แอพมือถือ</a>
+    {{-- 🔮 (2026-11-06 เจ้าของสั่ง) "ลดเมนูด้านบนลงเหลือเพียงเข้าห้องพยากรณ์ แล้วต้องเริ่มที่เลือกผู้พยากรณ์ก่อน"
+         ทุกบริการ (ไพ่ทุกแบบ · ไพ่ฟรีวันละใบ · ดูดวงเชิงลึก) อยู่ในห้องของผู้พยากรณ์แต่ละคนแล้ว --}}
+    <a href="{{ route('chat.index', ['pick' => 1]) }}" class="nav-oracle">🔮 เข้าห้องพยากรณ์</a>
     @auth
       <a href="{{ route('wallet.index') }}">วอลเลต</a>
       <a href="{{ route('account.dashboard') }}">บัญชี</a>

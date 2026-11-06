@@ -27,7 +27,7 @@
       <h4>เกี่ยวกับ</h4>
       @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
       @serviceopen('palmistry')<a href="{{ route('palmistry.index') }}">ดูลายมือ</a>@endserviceopen
-      <a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a>
+      <a href="{{ route('chat.index', ['pick' => 1]) }}">เข้าห้องพยากรณ์</a>
       @auth
         <a href="{{ route('account.history') }}">ประวัติของฉัน</a>
       @endauth

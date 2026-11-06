@@ -173,7 +173,9 @@ class ChatRoomsTest extends TestCase
 
         $this->assertSame('busaba', \App\Support\OracleMedia::personaFor('quick'));
         $this->assertSame('kunsai', \App\Support\OracleMedia::personaFor('kunsai'));
-        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('three'));
+        // 🌸 (2026-11-06) ไพ่ 3 ใบย้ายไปห้องบุษบา · ไพ่ความรักยังเป็นของแม่หมอ
+        $this->assertSame('busaba', \App\Support\OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('love'));
     }
 
     public function test_closed_room_notice_shows_once_on_the_picker(): void
@@ -231,8 +233,10 @@ class ChatRoomsTest extends TestCase
         $this->allRoomsOpen();
         $keys = fn (string $room, string $topic) => array_column(\App\Services\Chat\ChatOffers::forRoom($room, $topic), 'key');
 
-        $this->assertSame(['tarot_celtic'], $keys('maemor', 'love'));
-        $this->assertSame(['tarot_quick'], $keys('busaba', 'career'));
+        // 🃏 (2026-11-06) แต่ละห้องยื่นเฉพาะไพ่ที่ผู้พยากรณ์คนนั้นดู — ห้องแม่หมอเรียงตามเรื่องที่ถาม
+        $this->assertSame('tarot_love', $keys('maemor', 'love')[0]);
+        $this->assertNotContains('tarot_quick', $keys('maemor', 'love'));
+        $this->assertSame(['tarot_single', 'tarot_three', 'tarot_quick'], array_values(array_diff($keys('busaba', 'career'), ['free'])));
         $this->assertSame(['tarot_kunsai'], $keys('kunsai', 'general'));
         // เรื่องของ/คุณไสยในห้องอื่น → การ์ดคุณไสย ตรงกับที่ผู้พยากรณ์บอกว่า "ต้องให้แม่หมอส่องให้โดยเฉพาะ"
         $this->assertSame(['tarot_kunsai'], $keys('busaba', 'kunsai'));
@@ -344,13 +348,26 @@ class ChatRoomsTest extends TestCase
         $this->assertSame(['tarot_kunsai'], array_column(ChatOffers::forRoom('busaba', 'kunsai', $user), 'key'));
         $this->assertSame(config('chat_rooms.rooms.busaba.handoff'), ChatOffers::invite('kunsai', 'busaba', $user));
 
-        // เพิ่งเปิดไพ่ของห้องไป (ติดข้อห้ามเปิดซ้ำ) → ไม่มีการ์ด → ห้ามพูดว่า "กดการ์ดด้านล่าง"
+        // เพิ่งเปิดไพ่ด่วนไป (ติดข้อห้ามเปิดซ้ำ) → ไม่ยื่นใบนั้น แต่ยังมีไพ่แบบอื่นของบุษบา
         Setting::put('tarot_quick_cooldown_days', '7', 'tarot', false);
         Cache::flush();
         Reading::create([
             'user_id' => $user->id, 'session_token' => 'q1', 'type' => 'tarot_quick',
             'question' => 'งานใหม่จะผ่านไหม', 'payload' => ['cost' => 39], 'result' => 'ผ่าน',
         ]);
+        $this->assertNotContains('tarot_quick', array_column(ChatOffers::forRoom('busaba', 'career', $user), 'key'));
+        $this->assertNotSame(config('chat_rooms.rooms.busaba.no_offer'), ChatOffers::invite('career', 'busaba', $user));
+
+        // ทุกใบของห้องติดข้อห้าม + ไพ่ฟรีปิด → ไม่มีการ์ด → ห้ามพูดว่า "กดการ์ดด้านล่าง"
+        Setting::put('free_reading_enabled', '0', 'tarot', false);
+        foreach (['single', 'three'] as $i => $spread) {
+            Setting::put("tarot_{$spread}_cooldown_days", '7', 'tarot', false);
+            Reading::create([
+                'user_id' => $user->id, 'session_token' => 's' . $i, 'type' => 'tarot_' . $spread,
+                'question' => 'งานใหม่จะผ่านไหม', 'payload' => ['cost' => 9], 'result' => 'ผ่าน',
+            ]);
+        }
+        Cache::flush();
         $this->assertSame([], ChatOffers::forRoom('busaba', 'career', $user));
         $line = ChatOffers::invite('career', 'busaba', $user);
         $this->assertSame(config('chat_rooms.rooms.busaba.no_offer'), $line);

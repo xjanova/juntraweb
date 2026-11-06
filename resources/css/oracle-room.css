@@ -187,3 +187,45 @@ html.or-open body > nav, html.or-open body > footer { display: none; }
   .or-menu { align-items: flex-end; padding: 0; }
   .or-menu-sheet { width: 100%; max-height: 82vh; border-radius: 20px 20px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
 }
+
+/* 🃏 (2026-11-06 เจ้าของสั่ง) เมนูกราฟิก "ไพ่ที่ผู้พยากรณ์คนนี้ดู" — พัดไพ่ตามจำนวนใบ (1 ใบ · 3 ใบ · 10 ใบ…)
+   แถวเดียวเสมอ ล้นจอ = เลื่อนสไลด์ได้ (นิ้ว · ล้อเมาส์ · ลาก · ลูกศร — resources/js/hscroll.js)
+   ตำแหน่งบนฉากย้ายจาก .or-table ไปที่ .or-table-wrap (ลูกศรต้องอยู่นอกแถวที่เลื่อน) */
+.or-table-wrap { position: absolute; z-index: 4; left: var(--or-cx); top: calc(var(--or-table) + 2.5vh); transform: translateX(-50%);
+  width: max-content; max-width: calc(min(100%, var(--or-tw, 100%)) - 32px); }   /* --or-tw = ฉากที่แผงแชทไม่บัง (สคริปต์จัดฉาก) */
+.or-table-wrap .or-table { position: static; transform: none; width: auto; max-width: 100%; flex-wrap: nowrap; justify-content: flex-start;
+  overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: none; padding: 10px 4px 8px; }
+.or-table-wrap .or-table::-webkit-scrollbar { display: none; }
+.or-table-wrap .or-offer { flex: none; scroll-snap-align: start; text-decoration: none; }
+.or-slide { position: absolute; z-index: 2; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
+  font-size: 22px; line-height: 1; color: #3a1d05; border: 0; box-shadow: 0 4px 14px rgba(0, 0, 0, .55);
+  background: linear-gradient(180deg, #fbe39c, #e2b552 45%, #c99232 55%, #f2cf78); }
+.or-slide.is-prev { left: -12px; }
+.or-slide.is-next { right: -12px; }
+@media (hover: none) { .or-slide { display: none; } }   /* จอสัมผัส: ปัดนิ้วเอา ลูกศรบังการ์ด */
+
+.or-fan { position: relative; flex: none; width: calc(26px + (var(--n, 1) - 1) * 8px); height: 40px; margin-right: 2px; }
+.or-fan i { position: absolute; left: calc(var(--i, 0) * 8px); bottom: 0; width: 26px; height: 38px; border-radius: 4px;
+  background: #2a1050 url('/images/juntra/theater/card-back.webp') center / cover no-repeat; border: 1px solid rgba(245, 216, 154, .75);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .55); transform-origin: 50% 110%; transform: rotate(calc((var(--i, 0) - (var(--n, 1) - 1) / 2) * 9deg)); }
+.or-fan b { position: absolute; right: -6px; bottom: -4px; min-width: 20px; padding: 1px 5px; border-radius: 10px; font-size: 11px; text-align: center;
+  color: #3a1d05; background: #f5d89a; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+.or-fan-star { position: absolute; inset: 0; display: grid; place-items: center; font-size: 26px; }
+.or-free-tag { position: absolute; top: -9px; left: -8px; padding: 1px 6px; border-radius: 8px; font-style: normal; font-size: 10.5px; font-weight: 700;
+  color: #0f2a12; background: linear-gradient(180deg, #c9f7c4, #7fd88a); box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+.or-offer.is-free { box-shadow: 0 10px 28px rgba(0, 0, 0, .5), 0 0 24px rgba(127, 216, 138, .35); }
+.or-offer.is-locked { opacity: .78; cursor: default; }
+a.or-offer.is-locked { cursor: pointer; }
+.or-offer.is-locked:hover { transform: none; }
+.or-offer-lock { color: #9eddae !important; }
+
+@media (max-width: 899.98px) {
+  .or-table-wrap { top: calc(var(--or-table) - 66px); max-width: calc(min(100%, var(--or-tw, 100%)) - 20px); }
+  .or-table-wrap .or-table { top: auto; max-width: 100%; padding: 9px 2px 4px; }
+  .or-fan { width: calc(20px + (var(--n, 1) - 1) * 6px); height: 32px; }
+  .or-fan i { left: calc(var(--i, 0) * 6px); width: 20px; height: 30px; border-radius: 3px; }
+  .or-fan-star { font-size: 20px; }
+}
+@media (max-width: 899.98px) and (max-height: 640px) {
+  .or-table-wrap { display: none; }
+}

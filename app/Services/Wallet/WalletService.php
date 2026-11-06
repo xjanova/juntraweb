@@ -584,9 +584,11 @@ class WalletService
     /** Number of still-pending top-ups for a user. */
     public function pendingTopupCount(User $user): int
     {
+        // บิลที่หมดอายุแล้วไม่นับ — เดิมนับด้วย ลูกค้าที่ทิ้ง QR ไว้หลายใบจึงติดเพดาน 48 ชม. ทั้งที่ไม่มีบิลไหนจ่ายได้แล้ว
         return WalletTransaction::where('user_id', $user->id)
             ->where('type', 'topup')
             ->where('status', 'pending')
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->count();
     }
 

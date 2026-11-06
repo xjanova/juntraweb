@@ -76,13 +76,13 @@ class MaeMorUpstream
     /**
      * @return array{reply:string,kind:string,offer_topic:?string,suggestions:list<string>,crisis:bool,crisis_room:?bool}|null  null = ไม่มีคำตอบจริง (ผู้เรียกลองห้องใหม่/ถอยไปทางสำรอง)
      */
-    public function send(User $user, string $session, string $text, bool $grounded = false, ?string $context = null, ?string $persona = null, int $timeout = 45): ?array
+    public function send(User $user, string $session, string $text, bool $grounded = false, ?string $context = null, ?string $persona = null, int $timeout = 45, ?string $roomStatus = null): ?array
     {
         [$mode, $sid] = str_contains($session, ':') ? explode(':', $session, 2) : ['usr', $session];
         $this->lastFailure = null;
 
         if ($mode === 'srv') {
-            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded, $context, $this->thaipromptUserId($user), $persona, $timeout);
+            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded, $context, $this->thaipromptUserId($user), $persona, $timeout, $roomStatus);
             $reply = trim((string) ($res['data']['reply'] ?? ''));
             if ($res['status'] !== 'ok' || $reply === '') {
                 $this->lastFailure = $res['status'] === 'ok' ? 'empty' : ($this->server->lastFailure() ?? 'busy');

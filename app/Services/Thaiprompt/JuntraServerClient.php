@@ -203,7 +203,7 @@ class JuntraServerClient
      *                        ให้คำขอทั้งก้อนจบก่อน Apache ตัดที่ ~60 วิ
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45): array
+    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45, ?string $roomStatus = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
@@ -225,6 +225,9 @@ class JuntraServerClient
                 // ✨ (2026-11-05) ให้ผู้พยากรณ์คิดปุ่ม "ถามต่อ/ตอบ" จากบทสนทนา → data.suggestions
                 //    Thaiprompt รุ่นก่อนไม่รู้จักฟิลด์นี้ก็แค่ไม่ส่งกลับ (หน้าแชทใช้ปุ่มลัดเดิมแทน)
                 'suggest'    => 1,
+                // 🧭 (2026-11-06) สถานะห้องจากระบบ (บทบาท/ห้อง/เมนู+ราคา/เครดิต/บิลค้าง/เวลาเหลือ) — App\Services\Chat\RoomStatus
+                //    Thaiprompt รุ่นก่อนไม่รู้จักฟิลด์นี้ก็แค่ไม่ใช้
+                'room_status' => $roomStatus !== null ? mb_substr($roomStatus, 0, 2000) : null,
             ], fn ($v) => $v !== null && $v !== '')));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {
