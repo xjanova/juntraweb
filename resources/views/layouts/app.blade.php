@@ -34,7 +34,7 @@
 <meta property="og:url" content="{{ \App\Support\Seo::canonical() }}">
 <meta property="og:title" content="@yield('title', config('app.name', 'แม่หมอจันทรา'))">
 <meta property="og:description" content="{{ $seoDescription }}">
-<meta property="og:image" content="@yield('og-image', asset('images/juntra/og-default.jpg'))">
+<meta property="og:image" content="@yield('og-image', asset('images/juntra/og-maemor.jpg'))">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">

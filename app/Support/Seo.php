@@ -205,7 +205,7 @@ class Seo
             'alternateName' => ['แม่หมอจันทรา', 'Juntra Payakorn', $biz['shop_name_en'], 'จันทรา.online'],
             'url' => $home,
             'logo' => asset('images/juntra/logo.webp'),
-            'image' => asset('images/juntra/og-default.jpg'),
+            'image' => asset('images/juntra/og-maemor.jpg'),
             'description' => self::DEFAULT_DESCRIPTION,
             'foundingDate' => $biz['started_at'],
             'areaServed' => 'TH',

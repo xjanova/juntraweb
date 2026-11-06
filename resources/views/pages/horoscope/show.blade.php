@@ -17,7 +17,7 @@
     // การ์ดแชร์ประจำราศี (1200×630) — เช็คไฟล์จริงเหมือนกัน เพราะ crawler
     // ของ Facebook/LINE ไม่ลองใหม่ให้ ถ้ายิงไปเจอ 404 รอบเดียวก็จำเป็นการ์ดเปล่า
     $zodiacOg = "images/juntra/og/{$zodiac->slug}.jpg";
-    $zodiacOg = file_exists(public_path($zodiacOg)) ? $zodiacOg : 'images/juntra/og-default.jpg';
+    $zodiacOg = file_exists(public_path($zodiacOg)) ? $zodiacOg : 'images/juntra/og-maemor.jpg';
 @endphp
 @section('og-image', asset($zodiacOg))
 <section class="canvas" style="padding-top:160px">
