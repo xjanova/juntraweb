@@ -1,7 +1,9 @@
 import './bootstrap';
 import Alpine from 'alpinejs';
+import heroSlides from './hero-slides';
 
 window.Alpine = Alpine;
+Alpine.data('heroSlides', heroSlides);
 
 document.addEventListener('DOMContentLoaded', () => {
     const wrap = document.getElementById('twinkle');
