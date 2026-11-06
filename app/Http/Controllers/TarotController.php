@@ -7,8 +7,10 @@ use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Jobs\InterpretTarotReading;
 use App\Models\Reading;
 use App\Models\TarotCard;
+use App\Services\Chat\ChatOffers;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Wallet\WalletService;
+use App\Support\ChatRooms;
 use App\Support\OracleMedia;
 use App\Support\Pricing;
 use App\Support\ReadingCooldown;
@@ -30,25 +32,21 @@ class TarotController extends Controller
         private WalletService $wallet,
     ) {}
 
+    /**
+     * 🔮 (2026-11-06) หน้ารวมแพ็กเกจปิดแล้ว — เจ้าของสั่ง "หน้าเลือกเปิดไพ่ ชนิดไพ่ ไม่ต้องมีแล้ว ให้ไปเลือกในห้องแทน"
+     *
+     * ลิงก์ /tarot ที่อยู่ทั่วเว็บ (เมนู หน้าแรก ปุ่มกลับ ทางที่ begin/cast ปฏิเสธ) พาเข้าห้องผู้พยากรณ์
+     * พร้อมรายการไพ่ทุกแบบเปิดอยู่ · ?spread= = ห้องที่ขายแบบนั้น · ข้อความแจ้ง (status) ตามไปถึงห้อง
+     */
     public function index(Request $request)
     {
-        // Decorate each registered spread with its live resolved price so the
-        // landing page lists every "รูปแบบการวางไพ่" without hardcoding.
-        $user = $request->user();
-        $spreads = collect(TarotSpreads::all())->map(function ($meta, $key) use ($user) {
-            $meta['key']   = $key;
-            $meta['count'] = count($meta['positions']);
-            $meta['price'] = Pricing::for(TarotSpreads::priceKey($key));
-            // ข้อห้ามเปิดซ้ำ — บอกบนการ์ดเลยว่าเปิดได้อีกเมื่อไหร่ ไม่ต้องให้ลูกค้าเลือกไพ่ก่อนแล้วค่อยรู้
-            $blocking = ReadingCooldown::blockingReading($user, $key);
-            $meta['locked_until']   = $blocking ? ReadingCooldown::thaiDate(ReadingCooldown::availableAt($blocking, $key)) : null;
-            $meta['locked_reading'] = $blocking?->id;
-            return $meta;
-        })->values()->all();
+        $request->session()->reflash();
+        $spread = $request->query('spread');
+        $room = is_string($spread) && in_array($spread, TarotSpreads::keys(), true)
+            ? ChatOffers::menuRoomOf($spread)
+            : ChatRooms::DEFAULT;
 
-        return view('pages.tarot.index', [
-            'spreads' => $spreads,
-        ]);
+        return redirect()->route('chat.index', ['room' => $room, 'menu' => 1]);
     }
 
     /**

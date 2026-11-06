@@ -71,8 +71,9 @@ class TarotOnlyStorefrontTest extends TestCase
 
     public function test_a_package_link_from_the_home_page_preselects_it(): void
     {
-        $this->get(route('tarot.index', ['spread' => 'love']))->assertOk()->assertSee("spread: 'love'", false);
-        $this->get(route('tarot.index', ['spread' => 'nonsense']))->assertOk()->assertSee("spread: 'three'", false);
+        // 🔮 (2026-11-06) หน้ารวมแพ็กเกจปิดแล้ว — ลิงก์แพ็กเกจพาเข้าห้องที่ขายแบบนั้น พร้อมรายการไพ่ทุกแบบเปิดอยู่
+        $this->get(route('tarot.index', ['spread' => 'love']))->assertRedirect(route('chat.index', ['room' => 'maemor', 'menu' => 1]));
+        $this->get(route('tarot.index', ['spread' => 'nonsense']))->assertRedirect(route('chat.index', ['room' => 'maemor', 'menu' => 1]));
     }
 
     public function test_readings_already_bought_stay_readable_when_the_service_closes(): void
