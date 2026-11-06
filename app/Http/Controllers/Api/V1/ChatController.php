@@ -15,6 +15,7 @@ use App\Services\Chat\MaeMorUpstream;
 use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
+use App\Support\ChatCrisis;
 use App\Support\ChatRooms;
 use App\Support\ChatSuggestions;
 use App\Support\Pricing;
@@ -242,7 +243,7 @@ class ChatController extends Controller
         //    จะได้ 409 แทนที่จะได้เหตุผลจริงว่าโควตาหมด
         if (ChatPolicy::exhausted($user)) {
             return response()->json([
-                'message'     => ChatPolicy::limitMessage($conversation->persona),
+                'message'     => ChatCrisis::active($user) ? ChatCrisis::limitMessage($conversation->persona) : ChatPolicy::limitMessage($conversation->persona),
                 'reason_code' => 'daily_limit',
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => 0,
@@ -285,15 +286,22 @@ class ChatController extends Controller
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
-        $topic    = $kind === 'offer' ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null;
+        // 🤍 (2026-11-06) crisis = คำปลอบของเทิร์นนี้ (ไม่คิดเงิน) · crisis_room = ห้องโหมดวิกฤต (ไม่ขายอะไรเลย)
+        $crisis   = (bool) ($dispatch['crisis'] ?? false);
+        if (array_key_exists('crisis_room', $dispatch)) {
+            ChatCrisis::remember($user, $dispatch['crisis_room']);
+        }
+        $crisisRoom = $crisis || ChatCrisis::active($user);
+        $topic    = $kind === 'offer' && ! $crisisRoom ? ChatReadingIntent::normalizeTopic($dispatch['offer_topic'] ?? null) : null;
         $offers   = $topic !== null ? ChatOffers::forRoom((string) $conversation->persona, $topic, $user) : [];
 
         // Debit only AFTER a successful reply — fairer when upstream blips. And
         // NEVER for a degraded placeholder (no AI key + upstream unreachable):
         // the user gets the "not ready" note for free (parity with web). Nor
         // for an offer of reading packages — the reading is what gets paid for.
+        // Nor for a crisis turn: comfort for someone who wants to hurt themselves is never billed.
         $debitTx = null;
-        if ($cost > 0 && !$degraded && $kind !== 'offer') {
+        if ($cost > 0 && !$degraded && $kind !== 'offer' && ! $crisis) {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับ' . ChatRooms::name((string) $conversation->persona), [
                     'reference_type' => 'chat_message',
@@ -349,7 +357,9 @@ class ChatController extends Controller
                 // (ข้อความที่เก็บในห้องไม่มีรายการนี้ ประวัติแสดงเป็นการ์ดจาก offer_topic แทน)
                 'reply'       => $reply . ChatOffers::asText($offers),
                 'balance'     => (float) $this->wallet->balance($user),
-                'cost'        => $kind === 'offer' ? 0.0 : $cost,
+                'cost'        => $kind === 'offer' || $crisis ? 0.0 : $cost,
+                'crisis'      => $crisis,
+                'crisis_room' => $crisisRoom,
                 'degraded'    => $degraded,
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => ChatPolicy::dailyLeft($user),
@@ -357,7 +367,7 @@ class ChatController extends Controller
                 'blocked'     => ChatPolicy::exhausted($user),
                 'next_cost'   => ChatPolicy::costFor($user),
                 'awaiting'    => $awaiting,
-                'suggestions' => $awaiting || $offers !== [] ? [] : ChatSuggestions::followUp(),
+                'suggestions' => $awaiting || $offers !== [] || $crisisRoom ? [] : ChatSuggestions::followUp(),
                 // 🌙 (2026-09-15) ลูกค้าขอให้ทำนาย → แพ็กเกจเปิดไพ่ (หักเครดิตตอนเปิดไพ่จริง ไม่ใช่ตอนนี้)
                 'kind'        => $kind,
                 'offers'      => $offers,
@@ -383,7 +393,8 @@ class ChatController extends Controller
 
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นแพ็กเกจเลย ไม่ถาม AI
         //    ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว ("จากไพ่ชุดนี้ ดวงความรักเป็นยังไง" ต้องได้คำตอบ ไม่ใช่ใบเสนอราคา)
-        if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
+        //    🤍 ห้องวิกฤต: ผู้พยากรณ์ตอบเสมอ ไม่ยื่นแพ็กเกจให้คนที่บอกว่าอยากทำร้ายตัวเอง
+        if (! $grounded && ! ChatCrisis::active($user) && ($topic = ChatReadingIntent::detect($message)) !== null) {
             return ['reply' => ChatOffers::invite($topic, $room, $user), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
@@ -406,7 +417,14 @@ class ChatController extends Controller
             return $this->degradedFallback($message, $context);
         }
 
-        return ['reply' => $out['reply'], 'degraded' => false, 'kind' => $out['kind'], 'offer_topic' => $out['offer_topic']];
+        return [
+            'reply'       => $out['reply'],
+            'degraded'    => false,
+            'kind'        => $out['kind'],
+            'offer_topic' => $out['offer_topic'],
+            'crisis'      => $out['crisis'] ?? false,
+            'crisis_room' => $out['crisis_room'] ?? null,
+        ];
     }
 
     private function openUpstreamSession($user, ChatConversation $conversation, ?string $context = null): ?string
