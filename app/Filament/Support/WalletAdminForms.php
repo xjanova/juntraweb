@@ -187,17 +187,36 @@ class WalletAdminForms
 
     // ───────────────────────────── ย้อนรายการ ─────────────────────────────
 
-    /** เช็คเบื้องต้นสำหรับซ่อน/แสดงปุ่ม — ด่านจริงอยู่ที่ service */
+    /**
+     * เช็คเบื้องต้นสำหรับซ่อน/แสดงปุ่ม — ด่านจริงอยู่ที่ service
+     *
+     * รายการเติม/ปรับยอด/คืนเครดิตที่ถูกย้อนแล้ว สถานะยังเป็น success (ไม่ได้เปลี่ยนเป็น refunded
+     * เหมือนเติมเงิน/หักค่าบริการ) → ดูจากสมุดตรวจสอบ · รายการหักที่คืนไปบางส่วนแล้วก็ย้อนไม่ได้
+     * ตารางโหลด admin_rollbacks_exists / refunds_exists มาให้แล้ว (withExists) ไม่ต้อง query ทีละแถว
+     */
     public static function canRollback(WalletTransaction $tx): bool
     {
         $action = data_get($tx->meta, 'admin_action');
 
-        return $tx->status === 'success'
+        $basic = $tx->status === 'success'
             && $tx->balance_after !== null
             && in_array($tx->type, ['topup', 'debit', 'refund', 'adjustment'], true)
             && $tx->reference_type !== 'wallet_transaction'
             && ! in_array($action, ['rollback', 'transfer_out', 'transfer_in'], true)
             && bccomp((string) $tx->amount, '0', 2) !== 0;
+        if (! $basic) {
+            return false;
+        }
+
+        $rolledBack = $tx->getAttribute('admin_rollbacks_exists') ?? $tx->adminRollbacks()->exists();
+        if ($rolledBack) {
+            return false;
+        }
+        if ($tx->type === 'debit') {
+            return ! ($tx->getAttribute('refunds_exists') ?? $tx->refunds()->exists());
+        }
+
+        return true;
     }
 
     public static function rollbackFill(WalletTransaction $tx): array

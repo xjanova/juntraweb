@@ -23,7 +23,9 @@ return new class extends Migration {
 
         Schema::create('wallet_admin_adjustments', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('wallet_id')->constrained('wallets')->cascadeOnDelete();
+            // ลบวอลเลต/ผู้ใช้ (force delete) แล้วหลักฐานต้องยังอยู่ → ว่างได้ + nullOnDelete (ไม่ใช่ cascade)
+            // ตัวตนเจ้าของยังอยู่ที่ user_id (ไม่มี FK)
+            $table->foreignId('wallet_id')->nullable()->constrained('wallets')->nullOnDelete();
             // เจ้าของวอลเลต (เก็บซ้ำไว้ค้นหาเร็ว)
             $table->unsignedBigInteger('user_id')->index();
             // แอดมินที่ทำรายการ — ถ้าบัญชีแอดมินถูกลบ ประวัติยังอยู่ (ชื่ออยู่ใน admin_name)

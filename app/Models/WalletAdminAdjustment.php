@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * ⚠️ ห้ามแก้/ลบแถวในตารางนี้จากหน้าจอใด ๆ — เป็นหลักฐานทางบัญชี
  *
  * @property int $id
- * @property int $wallet_id
+ * @property int|null $wallet_id null เมื่อวอลเลตถูกลบไปแล้ว (แถวตรวจสอบยังอยู่)
  * @property int $user_id เจ้าของวอลเลต
  * @property int|null $admin_id แอดมินที่ทำรายการ
  * @property string|null $admin_name ชื่อแอดมิน ณ ตอนทำรายการ

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\AlreadyRefundedException;
 use App\Exceptions\WalletAdminException;
 use App\Filament\Resources\UserResource\Pages\ListUsers;
 use App\Filament\Resources\WalletTransactionResource\Pages\ListWalletTransactions;
@@ -392,6 +393,151 @@ class AdminWalletManagementTest extends TestCase
         $this->assertSame('10.00', $this->balance($a));
         $this->assertSame('0.00', $this->balance($b));
         $this->assertSame(0, WalletAdminAdjustment::count());
+    }
+
+    // ───────────── review fixes (PR #22): คืนซ้ำ / โมเดลเก่า / โอนชนกัน / ปุ่มย้อน / audit ─────────────
+
+    public function test_system_refund_after_a_partial_admin_refund_pays_back_only_the_remainder(): void
+    {
+        $admin = $this->admin();
+        $u = $this->member(200);
+        $debit = app(WalletService::class)->debit($u, 100, 'ดูดวงไพ่ยิปซี');
+
+        $this->svc->refundDebit($debit, 40, 'ไพ่ใบหนึ่งขึ้นผิด', $admin, 'k-rem1');
+        $this->assertSame('140.00', $this->balance($u));
+
+        // $debit ในมือยังเป็นโมเดลเก่า (status success) — แบบเดียวกับตัวปิดรายการคำทำนาย
+        $rest = app(WalletService::class)->refund($debit, 'ระบบคืนอัตโนมัติ');
+        $this->assertSame('60.00', (string) $rest->amount);
+        $this->assertSame('100.00', data_get($rest->meta, 'charged'));
+        $this->assertSame('40.00', data_get($rest->meta, 'refunded_before'));
+        $this->assertSame('200.00', $this->balance($u), 'คืนรวมต้องเท่ายอดที่หัก ไม่ใช่ 240');
+        $this->assertSame('refunded', $debit->fresh()->status);
+        $this->assertSame('100.00', $this->svc->refundedSoFar($debit));
+
+        try {
+            app(WalletService::class)->refund($debit->fresh(), 'คืนซ้ำ');
+            $this->fail('คืนครบแล้วต้องไม่คืนอีก');
+        } catch (AlreadyRefundedException) {
+        }
+        $this->assertSame('200.00', $this->balance($u));
+        $this->assertLedgerReconciles();
+    }
+
+    public function test_system_refund_with_a_stale_model_does_nothing_after_an_admin_rollback(): void
+    {
+        $admin = $this->admin();
+        $u = $this->member(200);
+        $stale = app(WalletService::class)->debit($u, 100, 'ดูดวงเชิงลึก');
+
+        $this->svc->rollback(WalletTransaction::find($stale->id), 'ลูกค้ากดผิด', $admin, 'k-stale');
+        $this->assertSame('200.00', $this->balance($u));
+        $this->assertSame('success', $stale->status, 'โมเดลในมือยังไม่รู้ว่าถูกย้อนไปแล้ว');
+
+        try {
+            app(WalletService::class)->refund($stale, 'ระบบขัดข้องระหว่างทำนาย');
+            $this->fail('รายการที่ถูกย้อนแล้วต้องไม่ถูกคืนอีก');
+        } catch (AlreadyRefundedException) {
+        }
+        $this->assertSame('200.00', $this->balance($u));
+        $this->assertSame(1, WalletTransaction::where('type', 'refund')->where('reference_id', $stale->id)->count());
+        $this->assertLedgerReconciles();
+    }
+
+    /** service ที่ "ไม่เห็น" ผลเดิมตอนเช็คหลัง lock — จำลองอีกคำขอที่เพิ่ง commit (ไปชน unique index แทน) */
+    private function racyService(): AdminWalletService
+    {
+        return new class(app(WalletService::class)) extends AdminWalletService {
+            protected function findReplay(int $walletId, ?string $idempotencyKey): ?WalletTransaction
+            {
+                return null;
+            }
+        };
+    }
+
+    public function test_transfer_that_loses_the_duplicate_key_race_returns_the_first_transfer_as_an_array(): void
+    {
+        $admin = $this->admin();
+        $a = $this->member(100);
+        $b = $this->member(0);
+
+        $first = $this->svc->transfer($a, $b, 30, 'รวมบัญชี', $admin, 'k-race');
+        $again = $this->racyService()->transfer($a, $b, 30, 'รวมบัญชี', $admin, 'k-race');
+
+        $this->assertIsArray($again);
+        $this->assertTrue($again['replayed']);
+        $this->assertSame($first['out']->id, $again['out']->id);
+        $this->assertSame($first['in']->id, $again['in']?->id);
+        $this->assertSame('70.00', $this->balance($a));
+        $this->assertSame('30.00', $this->balance($b));
+        $this->assertSame(2, WalletAdminAdjustment::count());
+        $this->assertLedgerReconciles();
+    }
+
+    public function test_adjust_that_loses_the_duplicate_key_race_returns_the_first_entry(): void
+    {
+        $admin = $this->admin();
+        $u = $this->member(0);
+
+        $first = $this->svc->adjust($u, 'credit', 25, 'ของขวัญ', $admin, 'k-race2');
+        $again = $this->racyService()->adjust($u, 'credit', 25, 'ของขวัญ', $admin, 'k-race2');
+
+        $this->assertSame($first->id, $again->id);
+        $this->assertFalse($again->wasRecentlyCreated);
+        $this->assertSame('25.00', $this->balance($u));
+    }
+
+    public function test_same_key_on_another_wallet_is_a_new_entry_not_a_replay(): void
+    {
+        $admin = $this->admin();
+        $a = $this->member(0);
+        $b = $this->member(0);
+        $this->svc->adjust($a, 'credit', 10, 'โทเคนเดียวกันคนละวอลเลต', $admin, 'k-shared');
+
+        $tx = $this->racyService()->adjust($b, 'credit', 7, 'โทเคนเดียวกันคนละวอลเลต', $admin, 'k-shared');
+        $this->assertTrue($tx->wasRecentlyCreated);
+        $this->assertSame($b->id, (int) $tx->user_id);
+        $this->assertSame('7.00', $this->balance($b));
+        $this->assertSame('10.00', $this->balance($a));
+    }
+
+    public function test_rollback_button_hides_once_an_adjustment_was_rolled_back_or_a_debit_partly_refunded(): void
+    {
+        $admin = $this->admin();
+        $u = $this->member(200);
+        $credit = $this->svc->adjust($u, 'credit', 50, 'เติมผิดคน', $admin, 'k-btn1');
+        $debit = app(WalletService::class)->debit($u, 100, 'ดูดวงเชิงลึก');
+        $this->actingAs($admin);
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+        Livewire::test(ListWalletTransactions::class)
+            ->assertTableActionVisible('rollback', $credit)
+            ->assertTableActionVisible('rollback', $debit);
+
+        $this->svc->rollback($credit, 'ย้อนเติมผิดคน', $admin, 'k-btn2');
+        $this->svc->refundDebit($debit, 10, 'คืนบางส่วน', $admin, 'k-btn3');
+
+        $this->assertSame('success', $credit->fresh()->status, 'ปรับยอดที่ถูกย้อนยังเป็น success');
+        Livewire::test(ListWalletTransactions::class)
+            ->assertTableActionHidden('rollback', $credit)
+            ->assertTableActionHidden('rollback', $debit)
+            ->assertTableActionVisible('refundDebit', $debit);
+    }
+
+    public function test_audit_rows_survive_when_the_user_and_wallet_are_force_deleted(): void
+    {
+        $admin = $this->admin();
+        $u = $this->member(0);
+        $this->svc->adjust($u, 'credit', 15, 'ก่อนลบบัญชี', $admin, 'k-del');
+        $userId = $u->id;
+
+        $u->forceDelete();
+
+        $this->assertDatabaseMissing('wallets', ['user_id' => $userId]);
+        $row = WalletAdminAdjustment::sole();
+        $this->assertNull($row->wallet_id);
+        $this->assertSame($userId, (int) $row->user_id);
+        $this->assertSame('ก่อนลบบัญชี', $row->reason);
     }
 
     // ─────────────────────────── หน้าแอดมิน (Filament) ───────────────────────────

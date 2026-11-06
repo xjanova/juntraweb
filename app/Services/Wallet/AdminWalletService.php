@@ -94,7 +94,7 @@ class AdminWalletService
                 'description'     => $label . ': ' . $reason,
                 'idempotency_key' => $idempotencyKey,
             ]);
-        });
+        }, fn () => $this->entryFor($wallet->id, $idempotencyKey));
     }
 
     /**
@@ -157,7 +157,7 @@ class AdminWalletService
             }
 
             return $tx;
-        });
+        }, fn () => $this->entryFor((int) $debit->wallet_id, $idempotencyKey));
     }
 
     /**
@@ -238,7 +238,7 @@ class AdminWalletService
             }
 
             return $tx;
-        });
+        }, fn () => $this->entryFor((int) $transaction->wallet_id, $idempotencyKey));
     }
 
     /**
@@ -277,11 +277,8 @@ class AdminWalletService
                 throw new WalletAdminException('ไม่พบวอลเลต');
             }
 
-            if ($replay = $this->findReplay($src->id, $idempotencyKey)) {
-                $in = WalletAdminAdjustment::where('idempotency_key', $idempotencyKey)
-                    ->where('wallet_id', $dst->id)->first()?->walletTransaction;
-
-                return ['out' => $replay, 'in' => $in, 'replayed' => true];
+            if ($this->findReplay($src->id, $idempotencyKey)) {
+                return $this->transferReplay($src->id, $dst->id, $idempotencyKey);
             }
 
             $this->assertMayTouch($src, $admin);
@@ -314,49 +311,47 @@ class AdminWalletService
             ]);
 
             return ['out' => $out, 'in' => $in, 'replayed' => false];
-        });
+        }, fn () => $this->transferReplay($fromWallet->id, $toWallet->id, $idempotencyKey));
     }
 
-    /** ยอดที่คืนให้รายการหักนี้ไปแล้ว (ทั้งที่ระบบคืนเองและแอดมินคืน) */
+    /** ยอดที่คืนให้รายการหักนี้ไปแล้ว (ระบบคืนเอง / แอดมินคืน / แอดมินย้อน) — นับที่เดียวกับ WalletService::refund() */
     public function refundedSoFar(WalletTransaction $debit): string
     {
-        $sum = '0.00';
-        WalletTransaction::where('reference_type', 'wallet_transaction')
-            ->where('reference_id', $debit->id)
-            ->where('type', 'refund')
-            ->whereNotNull('balance_after')
-            ->pluck('amount')
-            ->each(function ($a) use (&$sum) {
-                $sum = bcadd($sum, (string) $a, 2);
-            });
-
-        return $sum;
+        return $this->wallets->refundedSoFar($debit);
     }
 
     // ───────────────────────────── ภายใน ─────────────────────────────
 
     /**
      * รันใน DB transaction — ถ้าชน unique index ของ idempotency_key (กดซ้ำพร้อมกันเป๊ะ)
-     * ถือว่าเป็นการส่งซ้ำ แล้วคืนผลของรายการแรก
+     * ถือว่าเป็นการส่งซ้ำ แล้วคืนผลของรายการแรก ผ่าน $replay (รูปเดียวกับที่ $work คืน —
+     * โอน = array, อย่างอื่น = WalletTransaction) · หาผลเดิมไม่เจอ = โยน error เดิมต่อ
+     *
+     * @param  callable(): mixed  $replay  คืน null เมื่อหาผลเดิมไม่เจอ
      */
-    private function run(?string $idempotencyKey, callable $work): mixed
+    private function run(?string $idempotencyKey, callable $work, callable $replay): mixed
     {
         try {
             return DB::transaction($work);
         } catch (QueryException $e) {
             $dup = in_array((string) ($e->errorInfo[1] ?? ''), ['1062', '19'], true)
                 || str_contains($e->getMessage(), 'waa_idem_wallet_unique');
-            if ($idempotencyKey && $dup) {
-                $first = WalletAdminAdjustment::where('idempotency_key', $idempotencyKey)->orderBy('id')->first();
-                if ($first?->walletTransaction) {
-                    $tx = $first->walletTransaction;
-                    $tx->wasRecentlyCreated = false;
-
-                    return $tx;
-                }
+            if ($idempotencyKey && $dup && ($first = $replay()) !== null) {
+                return $first;
             }
             throw $e;
         }
+    }
+
+    /** ผลเดิมของการโอนที่ใช้โทเคนนี้ (ทั้งสองขา) — null ถ้ายังไม่มีขาออก */
+    private function transferReplay(int $srcWalletId, int $dstWalletId, ?string $idempotencyKey): ?array
+    {
+        $out = $this->entryFor($srcWalletId, $idempotencyKey);
+        if (! $out) {
+            return null;
+        }
+
+        return ['out' => $out, 'in' => $this->entryFor($dstWalletId, $idempotencyKey), 'replayed' => true];
     }
 
     private function lockWallet(int $walletId): Wallet
@@ -369,8 +364,18 @@ class AdminWalletService
         return $wallet;
     }
 
-    /** หาผลเดิมของโทเคนนี้บนวอลเลตนี้ (เรียกหลัง lock แล้ว) */
-    private function findReplay(int $walletId, ?string $idempotencyKey): ?WalletTransaction
+    /**
+     * หาผลเดิมของโทเคนนี้บนวอลเลตนี้ (เรียกหลัง lock แล้ว)
+     *
+     * protected เพื่อให้เทสต์จำลอง "อีกคำขอเพิ่ง commit หลังเราเช็ค" ได้ (ทางสำรอง unique index ใน run())
+     */
+    protected function findReplay(int $walletId, ?string $idempotencyKey): ?WalletTransaction
+    {
+        return $this->entryFor($walletId, $idempotencyKey);
+    }
+
+    /** รายการเงินที่บันทึกด้วยโทเคนนี้บนวอลเลตนี้ (wasRecentlyCreated = false) */
+    private function entryFor(int $walletId, ?string $idempotencyKey): ?WalletTransaction
     {
         if (! $idempotencyKey) {
             return null;

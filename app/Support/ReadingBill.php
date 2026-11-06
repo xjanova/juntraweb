@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\Reading;
 use App\Models\WalletTransaction;
+use App\Services\Wallet\WalletService;
 
 /**
  * มุมมอง "บิลดูดวง" ของรายการคำทำนาย — หลังบ้านแบบเดียวกับหน้าจัดการบิลของ Thaiprompt
@@ -100,14 +101,44 @@ final class ReadingBill
         return $id ? WalletTransaction::find($id) : null;
     }
 
-    /** แอดมินคืนเงินได้ไหม — มีแถวตัดเงินที่ยังไม่ถูกคืน และไม่ใช่รายการที่ระบบกำลังจัดการอยู่ */
+    /**
+     * แอดมินคืนเงินได้ไหม — มีแถวตัดเงินที่ยังคืนไม่ครบ และไม่ใช่รายการที่ระบบกำลังจัดการอยู่
+     * (แอดมินอาจคืนบางส่วนไปแล้วจากหน้ารายการวอลเลต → ปุ่มนี้คืนได้แค่ส่วนที่เหลือ)
+     */
     public static function refundable(Reading $r): bool
     {
         if ($r->isInProgress() || $r->isFailed() || self::amount($r) <= 0) {
             return false;
         }
 
-        return self::debit($r)?->status === 'success';
+        return self::refundRemaining($r) > 0;
+    }
+
+    /**
+     * ยอดที่ยังคืนได้ของบิลนี้ = ยอดที่ตัด − ที่คืนไปแล้ว (ทุกทาง) · 0 เมื่อไม่มีแถวตัดเงินที่สำเร็จ
+     *
+     * @return array{charged: string, refunded: string, remaining: string}|null
+     */
+    public static function refundState(Reading $r): ?array
+    {
+        $debit = self::debit($r);
+        if (! $debit || $debit->type !== 'debit' || $debit->status !== 'success') {
+            return null;
+        }
+        $charged  = number_format(abs((float) $debit->amount), 2, '.', '');
+        $refunded = app(WalletService::class)->refundedSoFar($debit);
+        $remaining = bcsub($charged, $refunded, 2);
+
+        return [
+            'charged'   => $charged,
+            'refunded'  => $refunded,
+            'remaining' => bccomp($remaining, '0', 2) > 0 ? $remaining : '0.00',
+        ];
+    }
+
+    public static function refundRemaining(Reading $r): float
+    {
+        return (float) (self::refundState($r)['remaining'] ?? 0);
     }
 
     /** ทำนายใหม่ได้ไหม — ไพ่ที่ไม่ได้กำลังอ่านอยู่ (ไพ่ฟรี 1 ใบใช้ทางอื่น ไม่รองรับ) */

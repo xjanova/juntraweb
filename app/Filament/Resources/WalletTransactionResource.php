@@ -16,6 +16,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Actions\Action;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
@@ -117,6 +118,8 @@ class WalletTransactionResource extends Resource
     {
         return $table
             ->defaultSort('id', 'desc')
+            // ปุ่ม "ย้อนรายการ" ต้องรู้ว่าแถวนี้ถูกย้อน/คืนไปแล้วหรือยัง (WalletAdminForms::canRollback)
+            ->modifyQueryUsing(fn (Builder $query) => $query->withExists(['adminRollbacks', 'refunds']))
             ->columns([
                 Tables\Columns\TextColumn::make('created_at')->label('เวลา')->dateTime('d/m H:i')->sortable(),
                 Tables\Columns\TextColumn::make('user.name')->label('ผู้ใช้')->searchable(),

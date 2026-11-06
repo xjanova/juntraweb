@@ -2,19 +2,25 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\WalletAdminException;
 use App\Filament\Resources\ReadingResource;
+use App\Filament\Resources\ReadingResource\Pages\ListReadings;
 use App\Filament\Resources\ReadingResource\Widgets\ReadingBillStats;
 use App\Jobs\InterpretTarotReading;
 use App\Models\Reading;
 use App\Models\TarotCard;
 use App\Models\User;
 use App\Services\Readings\ReadingBillActions;
+use App\Services\Wallet\AdminWalletService;
 use App\Services\Wallet\WalletService;
 use App\Support\ReadingBill;
+use Filament\Facades\Filament;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Str;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -102,6 +108,65 @@ class ReadingBillAdminTest extends TestCase
         $this->assertSame(200.0, (float) app(WalletService::class)->balance($u->fresh()));
         $this->assertNotNull($r->result, 'the customer keeps the reading');
         $this->assertSame(['refunded'], ReadingResource::applyStatus(Reading::query(), 'refunded')->get()->map(fn ($x) => ReadingBill::status($x))->all());
+    }
+
+    public function test_bill_refund_after_a_partial_admin_refund_returns_only_the_remainder(): void
+    {
+        $u = $this->member();
+        $r = $this->bill($u, 100);
+        $admin = $this->admin();
+        app(AdminWalletService::class)->refundDebit(ReadingBill::debit($r), 40, 'ไพ่ใบหนึ่งขึ้นผิด', $admin, 'k-bill-1');
+        $this->assertSame(140.0, (float) app(WalletService::class)->balance($u->fresh()));
+
+        $this->assertTrue(ReadingBill::refundable($r));
+        $this->assertSame(['charged' => '100.00', 'refunded' => '40.00', 'remaining' => '60.00'], ReadingBill::refundState($r));
+
+        $this->actingAs($admin);
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        Livewire::test(ListReadings::class)
+            ->mountTableAction('refund', $r)
+            ->assertSee('คืน ฿60.00')
+            ->assertSee('คืนไปแล้ว ฿40.00');
+
+        $this->assertTrue(app(ReadingBillActions::class)->refund($r, 'ลูกค้าไม่พอใจ', $admin));
+        $this->assertSame(200.0, (float) app(WalletService::class)->balance($u->fresh()), '฿100 charge → ฿100 back, not ฿140');
+        $this->assertSame('60.00', data_get($r->fresh()->payload, 'refund_amount'));
+        $this->assertSame('refunded', ReadingBill::status($r->fresh()));
+        $this->assertFalse(ReadingBill::refundable($r->fresh()));
+    }
+
+    public function test_bill_refund_is_hidden_and_refused_after_a_full_admin_refund(): void
+    {
+        $u = $this->member();
+        $r = $this->bill($u, 100);
+        $admin = $this->admin();
+        app(AdminWalletService::class)->refundDebit(ReadingBill::debit($r), 100, 'คืนเต็ม', $admin, 'k-bill-2');
+
+        $this->assertFalse(ReadingBill::refundable($r));
+        $this->actingAs($admin);
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        Livewire::test(ListReadings::class)->assertTableActionHidden('refund', $r);
+
+        $this->assertFalse(app(ReadingBillActions::class)->refund($r, 'กดจากหน้าเก่า', $admin));
+        $this->assertSame(200.0, (float) app(WalletService::class)->balance($u->fresh()));
+        $this->assertNull(data_get($r->fresh()->payload, 'refunded_at'));
+    }
+
+    public function test_bill_refund_lock_conflict_becomes_a_thai_message_not_a_500(): void
+    {
+        $u = $this->member();
+        $r = $this->bill($u, 100);
+        $deadlock = new QueryException('mysql', 'select * from `wallets` for update', [],
+            new \PDOException('SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction'));
+        $this->mock(WalletService::class, fn ($m) => $m->shouldReceive('refund')->andThrow($deadlock));
+
+        try {
+            app(ReadingBillActions::class)->refund($r, 'ลูกค้าไม่พอใจ', $this->admin());
+            $this->fail('lock conflict ต้องกลายเป็นข้อความให้แอดมิน');
+        } catch (WalletAdminException $e) {
+            $this->assertStringContainsString('ลองใหม่', $e->getMessage());
+        }
+        $this->assertNull(data_get($r->fresh()->payload, 'refunded_at'));
     }
 
     public function test_retry_re_reads_the_same_cards_without_charging(): void
