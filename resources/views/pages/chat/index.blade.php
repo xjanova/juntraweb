@@ -94,6 +94,7 @@
          idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
          topics: @js($topics),
          awaiting: @js((bool) $awaiting),
+         crisisRoom: @js((bool) ($crisisRoom ?? false)),
          dailyLimit: @js((int) $dailyLimit),
          dailyLeft: @js((int) $dailyLeft),
          blocked: @js((bool) $exhausted),
@@ -192,7 +193,7 @@
 
       {{-- ═══ แพ็กเกจของห้องวางบนโต๊ะ — กดเปิดไพ่ได้ตลอด (คำถามล่าสุดที่พิมพ์ติดไปด้วย) ═══ --}}
       @if ($tableOffers)
-        <div class="or-table" role="group" aria-label="เปิดไพ่กับ{{ $P['short'] }}">
+        <div class="or-table" x-show="!crisisRoom" role="group" aria-label="เปิดไพ่กับ{{ $P['short'] }}">
           @foreach ($tableOffers as $o)
             <button type="button" class="or-offer" :disabled="!!table.offerBusy" @click="openTable(@js($o))">
               <span class="or-offer-icon" aria-hidden="true">{{ $o['kind'] === 'deep' ? '🌟' : '🔮' }}</span>
@@ -687,7 +688,7 @@
                       <span x-text="s.label"></span>
                     </button>
                   </template>
-                  <button type="button" class="chip" x-show="topics.length" :disabled="thinking"
+                  <button type="button" class="chip" x-show="topics.length && !crisisRoom" :disabled="thinking"
                           @click="showTopics = !showTopics"
                           :aria-expanded="showTopics.toString()">
                     <span class="chip-icon" aria-hidden="true">⋯</span>
@@ -698,7 +699,7 @@
                 {{-- ตั้งใจไม่ใส่ x-transition: ถ้า transition ไม่จบ (แท็บพื้นหลัง /
                      เบราว์เซอร์ไม่วาดเฟรม) อิลิเมนต์จะค้างที่ opacity:0 = ผู้ใช้กด
                      ปุ่มแล้วเหมือนไม่มีอะไรเกิดขึ้น ซึ่งคือสิ่งที่ต้องเลี่ยงที่สุดในหน้านี้ --}}
-                <div class="chat-topics" x-show="showTopics" x-cloak>
+                <div class="chat-topics" x-show="showTopics && !crisisRoom" x-cloak>
                   <template x-for="t in topics" :key="t.key">
                     <div>
                       <div class="chat-topic-name"><span x-text="t.icon"></span> <span x-text="t.label"></span></div>
@@ -838,6 +839,8 @@ document.addEventListener('alpine:init', () => {
     cfg,
     topics: cfg.topics || [],
     awaiting: !!cfg.awaiting,
+    // 🤍 ลูกค้าที่ส่งสัญญาณอยากทำร้ายตัวเอง — ไม่มีแพ็กเกจบนโต๊ะ ปุ่มชวนดูดวง หมวดคำถาม หรือเสียงประโยคประจำ
+    crisisRoom: !!cfg.crisisRoom,
     dailyLimit: cfg.dailyLimit || 0,
     dailyLeft: cfg.dailyLeft || 0,
     blocked: !!cfg.blocked,
@@ -959,11 +962,13 @@ document.addEventListener('alpine:init', () => {
         text = 'ยังอยู่กับ' + self + 'ไหมคะ 🌙 ยังถามต่อได้อีกราว ' + mins + ' นาทีนะคะ กดคำถามด้านล่างหรือพิมพ์มาได้เลยค่ะ';
       } else if (inQa) {
         text = 'ถ้าได้คำตอบครบแล้ว กดปุ่ม "พอแล้ว" ด้านบนได้เลยนะคะ ' + self + 'ขอให้ทุกอย่างคลี่คลายค่ะ 🙏';
+      } else if (this.crisisRoom) {
+        text = self + 'ยังอยู่ตรงนี้นะคะ 🤍 อยากเล่าอะไรเพิ่ม พิมพ์มาได้เลย ' + self + 'รอฟังค่ะ';
       } else {
         text = 'ยังอยู่ไหมคะ 🌙 อยากให้' + self + 'ช่วยดูเรื่องไหนต่อ เลือกจากปุ่มด้านล่าง หรือพิมพ์เล่ามาได้เลยค่ะ';
       }
       this.push('assistant', this.escape(text), 'ok', text, { kind: 'nudge' });
-      if (this.nudges === 1) this.voice('followup_ask', false);
+      if (this.nudges === 1 && !this.crisisRoom) this.voice('followup_ask', false);
       this.scrollToBottom();
     },
     startClock() {
@@ -1480,6 +1485,9 @@ document.addEventListener('alpine:init', () => {
         this.suggestOpen = false;
         if (Array.isArray(j.suggestions) && j.suggestions.length) this.suggestions = j.suggestions;
         this.aiSuggestions = Array.isArray(j.ai_suggestions) ? j.ai_suggestions.filter(q => typeof q === 'string') : [];
+        // 🤍 เซิร์ฟเวอร์บอกทุกคำตอบว่าห้องอยู่ในโหมดวิกฤตไหม (ไม่มีฟิลด์ = เว็บรุ่นเก่า ไม่แตะ)
+        if (typeof j.crisis_room === 'boolean') this.crisisRoom = j.crisis_room;
+        if (this.crisisRoom) { this.suggestions = []; this.aiSuggestions = []; this.showTopics = false; }
         this.setQa(j.qa, j.server_now);
         this.lastActive = Date.now();
 
@@ -1495,7 +1503,9 @@ document.addEventListener('alpine:init', () => {
         }
 
         // เสียงประโยคประจำตามจังหวะของบทสนทนา (คำตอบจริงเป็นตัวอักษรเสมอ — เสียงแค่ชวน/ย้ำ)
-        if (offers) this.voice('offer_cards', false);
+        // ห้องวิกฤต: ไม่เล่นเสียงประโยคประจำ (เสียงชวน/ร่าเริงทับคำปลอบไม่ได้)
+        if (this.crisisRoom) { /* คำตอบเป็นตัวอักษรอย่างเดียว */ }
+        else if (offers) this.voice('offer_cards', false);
         else if (/(ขอบคุณ|ขอบใจ|บ๊ายบาย|บายบาย|ลาก่อน|ไปก่อนนะ)/.test(text)) this.voice('thanks_bye', false);
         else if (/(วันเดือนปีเกิด|วันเกิด)/.test(j.reply || '') && /(ขอ|บอก|\?|ไหม|มั้ย)/.test(j.reply || '')) this.voice('ask_birth');
 
