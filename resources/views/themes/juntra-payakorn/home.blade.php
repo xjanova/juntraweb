@@ -230,7 +230,7 @@
       <div class="ring-deco"></div>
       <div class="ring-deco r2"></div>
       <div class="moon-frame"></div>
-      <img class="a1" src="{{ asset('images/juntra/ornament.webp') }}" alt="ornament">
+      <img class="a1" src="{{ asset('images/juntra/ornament.webp') }}" alt="" loading="lazy" decoding="async">
     </div>
     <div class="featured-text reveal">
       <div class="section-eyebrow">Why Juntra Payakorn</div>

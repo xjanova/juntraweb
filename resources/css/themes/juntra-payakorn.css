@@ -786,7 +786,7 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
    ภาพเป็นแนวตั้ง 4:5 หน้าแม่หมออยู่กลางภาพช่วงบน → จอคอม: ข้อความชิดซ้าย ไล่มืดซ้าย ให้หน้าแม่หมอโผล่กลาง-ขวา
    จอมือถือ: หน้าแม่หมออยู่บน ข้อความลงล่าง ไล่มืดจากล่าง
    มีผลเฉพาะ .hero.has-slides (มีไฟล์ภาพอย่างน้อยหนึ่งภาพ) — ไม่มีภาพ = hero กลางจอแบบเดิม */
-.hero.has-slides { min-height: calc(100svh - 90px); justify-content: flex-start; text-align: left; }
+.hero.has-slides { min-height: calc(100vh - 90px); min-height: calc(100svh - 90px); justify-content: flex-start; text-align: left; }
 .hero.has-slides .hero-inner {
   width: 100%; max-width: 1600px; margin: 0 auto; padding: 140px clamp(24px, 5vw, 96px) 120px;
   pointer-events: none; /* กล่องข้อความกว้างเต็มแถว — ไม่บังจุดเลือกภาพ */
@@ -803,21 +803,24 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
     linear-gradient(180deg, rgba(10,6,18,.35) 0%, rgba(10,6,18,0) 24%, rgba(10,6,18,0) 78%, var(--bg-0) 100%);
 }
 .hero-slide {
-  position: absolute; inset: 0; opacity: 0;
-  transition: opacity 1.6s ease;
+  position: absolute; inset: 0; opacity: 0; visibility: hidden; background: var(--bg-0);
 }
-.hero-slide.is-active, .hero-slides:not(.is-ready) .hero-slide:first-of-type { opacity: 1; }
+.hero-slide.is-active {
+  z-index: 1; opacity: 1; visibility: visible;
+  transition: opacity 1.2s ease-in-out;
+}
+/* Hold the outgoing image under the incoming fade so the background never flashes. */
+.hero-slide.is-previous {
+  transition: opacity 0s linear 1.2s, visibility 0s linear 1.2s;
+}
 .hero-slide-ambient {
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  filter: blur(24px) brightness(.55); transform: scale(1.1);
 }
 .hero-slide-image {
   position: absolute; top: 0; right: max(0px, calc((100vw - 1800px) / 2));
   width: auto; max-width: 60%; height: 100%; aspect-ratio: 4 / 5; object-fit: contain; object-position: center bottom;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent), linear-gradient(180deg, transparent, #000 8%, #000 88%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent), linear-gradient(180deg, transparent, #000 8%, #000 88%, transparent);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
 }
 .hero-slide-dots { position: absolute; z-index: 3; right: 24px; bottom: 36px; display: flex; gap: 4px; }
 .hero-slide-dots button {
@@ -831,14 +834,20 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
 @media (max-width: 900px) {
   .hero.has-slides { align-items: flex-end; text-align: center; }
   /* ครึ่งบนของจอให้หน้าแม่หมอ ข้อความเริ่มกลางจอ (เลื่อนลงอ่านต่อได้) */
-  .hero.has-slides { --hero-art-height: min(125vw, clamp(380px, 66svh, 720px)); }
+  .hero.has-slides { --hero-art-height: min(125vw, clamp(380px, 66vh, 720px)); }
+  @supports (height: 1svh) {
+    .hero.has-slides { --hero-art-height: min(125vw, clamp(380px, 66svh, 720px)); }
+  }
   .hero.has-slides .hero-inner { padding: calc(var(--hero-art-height) - 32px) 20px 76px; }
   .hero.has-slides .hero-inner > * { max-width: none; }
   .hero.has-slides .hero-eyebrow { max-width: 100%; font-size: 11px; letter-spacing: .12em; margin-bottom: 18px; }
   .hero.has-slides .hero-title { font-size: clamp(32px, 6vw, 48px); padding-top: 0; }
   .hero.has-slides .hero-sub { margin-left: auto; }
   .hero.has-slides .hero-cta { justify-content: center; }
-  .hero-slide-image { right: 50%; transform: translateX(50%); width: auto; max-width: 100%; height: var(--hero-art-height); object-position: center top; }
+  .hero-slide-image {
+    right: 50%; transform: translateX(50%); width: auto; max-width: 100%;
+    height: var(--hero-art-height); object-position: center top;
+  }
   .hero-slides::after {
     background:
       linear-gradient(180deg, rgba(10,6,18,.25), transparent 120px),
@@ -848,6 +857,6 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
   .hero.has-slides .scroll-cue { display: none; } /* จอเล็กที่ด้านล่างให้จุดเลือกภาพ */
 }
 @media (prefers-reduced-motion: reduce) {
-  .hero-slide { transition: none; transform: none !important; }
+  .hero-slide.is-active, .hero-slide.is-previous { transition: none; }
   .hero-caption, .hero-caption.is-active { transition: none; transform: none; }
 }
