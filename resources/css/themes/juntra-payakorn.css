@@ -87,13 +87,16 @@ body.theme-juntra-payakorn button:not(.btn) { font-family: inherit; cursor: poin
 .bg-stars::after  { content: ""; background-size: 1300px 1300px; animation-duration: 200s; opacity: .4; }
 @keyframes jdrift { from { transform: translate3d(0,0,0); } to { transform: translate3d(-300px,-200px,0); } }
 
+/* No filter: blur here. A blurred full-screen layer that moves forever is re-blurred
+   every frame, and every backdrop-filter above it has to follow; on iPhone that is
+   what made the whole site stutter and drop tiles. Wider, later-fading gradients
+   give the same soft edge for free. */
 .bg-smoke {
   position: fixed; inset: -20%; z-index: -2; pointer-events: none;
   background:
-    radial-gradient(40% 30% at 30% 40%, rgba(176,122,255,.18), transparent 70%),
-    radial-gradient(35% 25% at 70% 60%, rgba(210,74,209,.14), transparent 70%),
-    radial-gradient(50% 35% at 50% 80%, rgba(231,201,122,.10), transparent 70%);
-  filter: blur(40px);
+    radial-gradient(48% 38% at 30% 40%, rgba(176,122,255,.16), rgba(176,122,255,.06) 45%, transparent 78%),
+    radial-gradient(43% 33% at 70% 60%, rgba(210,74,209,.12), rgba(210,74,209,.05) 45%, transparent 78%),
+    radial-gradient(58% 43% at 50% 80%, rgba(231,201,122,.09), rgba(231,201,122,.035) 45%, transparent 78%);
   animation: jsmoke 24s ease-in-out infinite alternate;
 }
 @keyframes jsmoke {
@@ -121,6 +124,7 @@ body.theme-juntra-payakorn button:not(.btn) { font-family: inherit; cursor: poin
   0%, 100% { transform: translateY(0) rotate(0); opacity: .3; }
   50%      { transform: translateY(-20px) rotate(8deg); opacity: .7; }
 }
+
 
 /* ============ NAV (theme uses sticky, not fixed) ============ */
 .nav {
@@ -859,4 +863,30 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
 @media (prefers-reduced-motion: reduce) {
   .hero-slide.is-active, .hero-slide.is-previous { transition: none; }
   .hero-caption, .hero-caption.is-active { transition: none; transform: none; }
+}
+
+/* Phones and tablets: the sky stands still.
+   .bg-stars is three layers at 200% of the viewport each; on a 3x iPhone that is
+   ~140 MB of GPU memory scrolling forever, and Safari answers by dropping tiles
+   (pictures that "never finish loading"). One still layer the size of the screen
+   looks the same at arm's length. Cards lose backdrop-filter (each one re-blurs
+   the sky on every scroll frame) and get a denser fill instead. */
+@media (max-width: 880px), (hover: none) and (pointer: coarse) {
+  .bg-stars { inset: 0; animation: none; }
+  .bg-stars::before, .bg-stars::after { display: none; }
+  .bg-smoke { inset: 0; animation: none; }
+  .bg-glyphs span { animation: none; opacity: .45; }
+  .brand-logo { animation: none; }
+  .hero-bg img { animation: none; }
+  .hero-eyebrow { backdrop-filter: none; background: rgba(10,6,18,.62); }
+  .btn-ghost { backdrop-filter: none; background: rgba(10,6,18,.58); }
+  .svc, .service { backdrop-filter: none; background: linear-gradient(180deg, rgba(36,16,56,.82), rgba(15,8,28,.82)); }
+  .t-card, .test { backdrop-filter: none; background: linear-gradient(180deg, rgba(36,16,56,.8), rgba(15,8,28,.8)); }
+  .panel { backdrop-filter: none; background: linear-gradient(180deg, rgba(36,16,56,.84), rgba(15,8,28,.84)); }
+  .nav-links { backdrop-filter: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-stars, .bg-stars::before, .bg-stars::after, .bg-smoke, .bg-glyphs span,
+  .brand-logo, .hero-bg img { animation: none; }
 }

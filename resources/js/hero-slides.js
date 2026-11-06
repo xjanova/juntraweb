@@ -1,9 +1,10 @@
 const slideInterval = 5500;
+const fadeMs = 1200; // matches .hero-slide.is-active transition in juntra-payakorn.css
 
 export default function heroSlides() {
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const pending = new Map();
-    let slides, timer, onMotionChange, revision = 0, loading = false;
+    let slides, timer, onMotionChange, revision = 0, loading = false, switchedAt = -Infinity;
 
     const load = (img) => {
         if (img.dataset.src) {
@@ -67,10 +68,19 @@ export default function heroSlides() {
             ]);
             clearTimeout(timeout);
             if (current !== revision) return; // A newer click wins over a slow request.
+            // A switch during a fade would drop the fully visible slide underneath and
+            // fade the new one in over a half-faded one (the hero dims). Let the running
+            // fade finish first; at most fadeMs, and a newer click still wins.
+            const fadeLeft = motion.matches ? 0 : switchedAt + fadeMs - performance.now();
+            if (loaded && fadeLeft > 0) {
+                await new Promise(resolve => { timer = setTimeout(resolve, fadeLeft); });
+                if (current !== revision) return;
+            }
             loading = false;
             if (loaded && (!automatic || (!motion.matches && !document.hidden))) {
                 this.previous = this.i;
                 this.i = index;
+                switchedAt = performance.now();
                 this.$dispatch('hero-slide', index);
             }
             this.schedule(automatic && !loaded ? (index + 1) % slides.length : undefined);
