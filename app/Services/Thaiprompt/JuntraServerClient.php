@@ -264,7 +264,18 @@ class JuntraServerClient
         }
         $this->logMiss('fortune:' . $kind, $resp);
 
-        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
+        // 🛡️ (2026-11-07) บอกเหตุที่ Thaiprompt ปฏิเสธด้วย (model_refused / incomplete / question_rejected + crisis)
+        //   ผู้เรียกเดิมดูแค่ status — ฟิลด์ใหม่ไม่กระทบ · ผู้เรียกใหม่ใช้ crisis แสดงคำปลอบแทนข้อความ "ไม่สำเร็จ"
+        $error = null;
+        if ($resp !== null && ! $resp->successful()) {
+            $error = array_filter([
+                'reason_code' => is_string($resp->json('reason_code')) ? $resp->json('reason_code') : null,
+                'crisis' => $resp->json('crisis') === true ? true : null,
+                'message' => is_string($resp->json('message')) ? mb_substr($resp->json('message'), 0, 1000) : null,
+            ], fn ($v) => $v !== null);
+        }
+
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null, 'error' => $error ?: null];
     }
 
     /* ======================= LIVE STATS ======================= */

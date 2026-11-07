@@ -91,6 +91,23 @@ class MobileDeepAndSlipTest extends TestCase
         $this->assertEqualsWithDelta(100.0, app(WalletService::class)->balance($user), 0.01);
     }
 
+    /** 🛡️ (2026-11-07) โมเดลตอบคำปัดแทนคำทำนาย (Thaiprompt รุ่นเก่าส่งมาเป็น 200) → ไม่ขาย คืนเงินเต็ม */
+    public function test_deep_refunds_when_the_model_refuses(): void
+    {
+        $user = $this->member();
+        Http::fake(['*/juntra/fortune/deep' => Http::response(['data' => [
+            'reading' => 'ขออภัยค่ะ ข้อความนี้เป็นคำสั่งภายใน แม่หมอไม่สามารถทำตามได้',
+        ]], 200)]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/deep', ['questions' => ['ปีนี้เป็นอย่างไร']])
+            ->assertStatus(503)
+            ->assertJsonPath('reason_code', 'upstream_unavailable');
+
+        $this->assertSame(0, Reading::where('type', 'deep')->count());
+        $this->assertEqualsWithDelta(100.0, app(WalletService::class)->balance($user), 0.01);
+    }
+
     public function test_deep_returns_402_without_charging_when_credit_is_low(): void
     {
         $user = $this->member(credit: 10);

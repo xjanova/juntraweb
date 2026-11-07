@@ -506,6 +506,83 @@ class FortuneBotClient
     }
 
     /**
+     * 🔮 (2026-11-07) ดูดวง 39฿ "ทีละข้อ" — เลนเดียวกับบิลดูดวงในแชท FB/LINE ของ Thaiprompt
+     *   (FortuneConversationService::generateDeepAnswer: พรอมต์ต่อข้อ ผังดวงจริง ดาวจร กราฟชีวิต ฤกษ์
+     *    · เลนบิลจ่ายเงิน prediction_deep · ด่านหลุดบท · ด่านความครบ)
+     *
+     * เรียกจากงานเบื้องหลังเท่านั้น (ข้อละ ≤ ~55 วิ ฝั่ง Thaiprompt) ส่งคำถามทั้งชุด + คำตอบข้อก่อนทุกครั้ง
+     *
+     * Thaiprompt รุ่นเก่ายังไม่รู้จัก question_index → ตอบคำทำนายทั้งบิลในครั้งเดียว (ไม่มี question_index ในคำตอบ)
+     *   ผู้เรียกต้องดู whole = true แล้วใช้เป็นคำทำนายทั้งบิล ไม่ใช่ข้อเดียว
+     *
+     * @param  array<int,string>  $questions
+     * @param  array<int,array{question:string,answer:string}>  $previous
+     * @return array{status:'ok',reading:string,whole:bool,ai_provider:?string,ai_model:?string}|array{status:'failed',crisis:bool,message:?string,reason_code:?string}
+     */
+    public function deepQuestion(User $user, array $questions, int $index, array $previous, ?string $birthDate, ?string $name, int $timeout = 150): array
+    {
+        // Thaiprompt รับคำตอบข้อก่อนได้ข้อละ ≤ 8000 ตัว (เกิน = 422 ทั้งคำขอ → ลูกค้าโดนคืนเงินฟรีๆ)
+        //   คำตอบข้อก่อนใช้แค่ให้ตอบต่อเนื่อง ตัดท้ายได้ไม่เสียความหมาย
+        $previous = array_map(fn (array $p) => [
+            'question' => mb_substr((string) ($p['question'] ?? ''), 0, 500),
+            'answer' => mb_substr((string) ($p['answer'] ?? ''), 0, 6000),
+        ], array_values($previous));
+
+        $payload = array_filter([
+            'questions' => array_values($questions),
+            'question_index' => $index,
+            'previous' => $previous ?: null,
+            'birth_date' => $birthDate,
+            'name' => $name,
+            // งบ Pro + log ของ Thaiprompt แยกต่อลูกค้าเว็บ
+            'user_ref' => 'jw:'.$user->id,
+        ], fn ($v) => $v !== null && $v !== '');
+
+        $res = $this->server()->fortune('deep', $payload, $timeout);
+        $data = $res['status'] === 'ok' ? $res['data'] : null;
+
+        // ทาง token ของลูกค้า (Thaiprompt ฝั่งเดียวกัน) — เฉพาะเมื่อเว็บยังไม่ได้ตั้ง server lane
+        if ($res['status'] === 'unsupported' && $this->isAvailable($user)) {
+            try {
+                $resp = $this->client($user)->timeout(max(10, $timeout))->post($this->fortuneUrl('/deep'), $payload);
+                if ($resp->successful() && is_array($resp->json('data'))) {
+                    $data = $resp->json('data');
+                } else {
+                    if (! in_array($resp->status(), [404, 405], true)) {
+                        $this->handleUnauthorized($user, $resp->status());
+                    }
+                    $res['error'] = array_filter([
+                        'reason_code' => is_string($resp->json('reason_code')) ? $resp->json('reason_code') : null,
+                        'crisis' => $resp->json('crisis') === true ? true : null,
+                        'message' => is_string($resp->json('message')) ? $resp->json('message') : null,
+                    ], fn ($v) => $v !== null) ?: null;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('FortuneBotClient::deepQuestion token lane threw', ['err' => $e->getMessage()]);
+            }
+        }
+
+        if (is_array($data) && trim((string) ($data['reading'] ?? '')) !== '') {
+            return [
+                'status' => 'ok',
+                'reading' => trim((string) $data['reading']),
+                'whole' => ! array_key_exists('question_index', $data),
+                'ai_provider' => $data['ai_provider'] ?? null,
+                'ai_model' => $data['ai_model'] ?? null,
+            ];
+        }
+
+        $error = (array) ($res['error'] ?? []);
+
+        return [
+            'status' => 'failed',
+            'crisis' => ($error['crisis'] ?? false) === true,
+            'message' => $error['message'] ?? null,
+            'reason_code' => $error['reason_code'] ?? null,
+        ];
+    }
+
+    /**
      * ตรวจสลิปโอนเงินผ่าน SlipOK ของ Thaiprompt (บัญชี + โควตา + flood guard
      * ก้อนเดียวกับบอท FB/LINE — ไม่แยกโควตาสองที่ให้แอดมินต้องดูแลซ้ำ)
      *

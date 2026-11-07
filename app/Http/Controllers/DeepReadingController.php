@@ -4,8 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\InsufficientFundsException;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
+use App\Jobs\InterpretDeepReading;
 use App\Models\Reading;
-use App\Services\FortuneBot\FortuneBotClient;
+use App\Services\Tarot\TarotReadingFinisher;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use Illuminate\Http\Request;
@@ -16,8 +17,8 @@ use Illuminate\Support\Str;
  * ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับที่บอทแม่หมอใน Facebook/LINE ขายอยู่
  *
  * เดิมแพ็กนี้มีเฉพาะในแชทบอท ลูกค้าที่เข้าเว็บซื้อไม่ได้เลยทั้งที่เป็นแพ็ก
- * ที่ขายดีที่สุด คำทำนายมาจาก Thaiprompt (prompt + คีย์พูลชุดเดียวกับบอท)
- * ผ่าน FortuneBotClient::deepReading()
+ * ที่ขายดีที่สุด คำทำนายมาจาก Thaiprompt — 🔮 (2026-11-07) ทีละข้อ เลนเดียวกับบิลในแชท
+ * (FortuneBotClient::deepQuestion ผ่าน InterpretDeepReading → DeepReadingFinisher)
  *
  * เส้นทางเงิน: หักเครดิตก่อนเรียก AI (กันคนยิงฟรี) และ **คืนเครดิตทุกกรณี**
  * ที่ไม่ได้คำทำนายจริง — ห้ามส่งข้อความปลอมแทนเพราะนี่คือสินค้าที่จ่ายเงินซื้อ
@@ -29,8 +30,8 @@ class DeepReadingController extends Controller
     private const MAX_QUESTIONS = 3;
 
     public function __construct(
-        private FortuneBotClient $bot,
         private WalletService $wallet,
+        private TarotReadingFinisher $finisher,
     ) {}
 
     public function index(Request $request)
@@ -91,28 +92,9 @@ class DeepReadingController extends Controller
             }
         }
 
-        $reading = $this->bot->deepReading($user, $questions, $data['birth_date'] ?? null, $user->name);
-
-        // ไม่ได้คำทำนายจริง = ไม่มีสินค้าให้ลูกค้า → คืนเงินเสมอ
-        if (! $reading || empty($reading['reading'])) {
-            if ($tx) {
-                try {
-                    $this->wallet->refund($tx, 'ระบบคำทำนายเชิงลึกไม่พร้อม');
-                } catch (\Throwable $e) {
-                    Log::critical('Deep reading refund FAILED — ต้องคืนเงินด้วยมือ', [
-                        'tx_id' => $tx->id, 'err' => $e->getMessage(),
-                    ]);
-                }
-            }
-
-            return redirect()->route('deep.index')->with(
-                'status',
-                'ขออภัยค่ะ ระบบคำทำนายเชิงลึกไม่พร้อมชั่วคราว '
-                .($tx ? 'เครดิตถูกคืนเข้ากระเป๋าเรียบร้อยแล้ว ' : '')
-                .'ลองใหม่อีกครั้งในอีกสักครู่นะคะ',
-            );
-        }
-
+        // 🔮 (2026-11-07) แม่หมออ่าน "หลังส่งหน้า" ทีละข้อ — เลนเดียวกับบิล 39฿ ในแชท FB/LINE
+        //    (ข้อละ ≤ ~55 วิ รวมหลายข้อเกินเพดาน ~60 วิของคำขอหน้าเว็บ) หน้าผลถามสถานะจนคำทำนายขึ้น
+        //    ไม่สำเร็จ/โมเดลปฏิเสธ/คำถามถูกปัด = คืนเงินที่ DeepReadingFinisher
         try {
             $row = Reading::create([
                 'user_id'       => $user->id,
@@ -125,11 +107,18 @@ class DeepReadingController extends Controller
                     'cost'         => $cost,
                     'wallet_tx_id' => $tx?->id,
                 ],
-                'result'      => $reading['reading'],
-                'ai_provider' => $reading['ai_provider'] ?? null,
-                'ai_model'    => $reading['ai_model'] ?? null,
+                'status' => Reading::STATUS_PENDING,
             ]);
+            InterpretDeepReading::dispatchAfterResponse($row->id);
         } catch (\Throwable $e) {
+            // สร้างรายการได้แต่ส่งงานไม่ได้ — ปิดรายการเป็นไม่สำเร็จ + คืนเงินผ่านทางเดียวกับงานเบื้องหลัง
+            if (isset($row)) {
+                Log::error('Deep reading dispatch failed', ['reading' => $row->id, 'err' => $e->getMessage()]);
+                $this->finisher->fail($row, 'ส่งงานดูดวงเชิงลึกไม่สำเร็จ', [Reading::STATUS_PENDING]);
+
+                return redirect()->route('deep.show', $row);
+            }
+
             // จ่ายแล้วแต่บันทึกไม่ได้ = ลูกค้าไม่มีอะไรให้เปิดอ่านย้อน → คืนเงิน
             if ($tx) {
                 try {
@@ -159,5 +148,20 @@ class DeepReadingController extends Controller
         abort_unless($isOwner || $isAdmin || $reading->shared_public, 403);
 
         return view('pages.deep.result', ['reading' => $reading]);
+    }
+
+    /** หน้าผลถามทุก ~3 วิ ระหว่างแม่หมอดูดวงเบื้องหลัง — สิทธิ์เดียวกับหน้าผล */
+    public function status(Request $request, Reading $reading)
+    {
+        abort_unless($reading->type === 'deep', 404);
+
+        $user    = $request->user();
+        $isOwner = $user && $reading->user_id === $user->id;
+        $isAdmin = $user && method_exists($user, 'isAdmin') && $user->isAdmin();
+        abort_unless($isOwner || $isAdmin || $reading->shared_public, 403);
+
+        return response()->json([
+            'status' => $reading->isInProgress() ? 'reading' : ($reading->isFailed() ? 'failed' : 'done'),
+        ])->header('Cache-Control', 'no-store');
     }
 }
