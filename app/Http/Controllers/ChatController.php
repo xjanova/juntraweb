@@ -62,6 +62,9 @@ class ChatController extends Controller
     /** ข้อความที่แสดงในห้อง — ห้องยาวมากไม่ต้องลากทั้งก้อนมาทุกครั้งที่เปิดหน้า */
     private const RENDER_LIMIT = 80;
 
+    /** เสียงคำตอบห้องถามต่อยาวสุดต่อข้อ แม้ตั้งไม่อั้น — /voice/speak ของ Thaiprompt รับไม่เกิน 6,000 ตัว */
+    private const SPEAK_HARD_MAX = 5000;
+
     public function __construct(
         private AiOracle $oracle,
         private WalletService $wallet,
@@ -300,7 +303,9 @@ class ChatController extends Controller
         $text = ReadingTheater::plain($reply);
         $text = (string) preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]/u', '', $text);
         $text = trim((string) preg_replace('/[ \t]+/u', ' ', $text));
-        $max = (int) config('reading_voice.reply_max_chars', 600);
+        // 0 = ไม่อั้น (พูดทั้งคำตอบ) · ยังตัดที่ 5,000 เสมอ — /voice/speak ของ Thaiprompt รับไม่เกิน 6,000
+        $max = (int) config('reading_voice.reply_max_chars', 0);
+        $max = $max > 0 ? min($max, self::SPEAK_HARD_MAX) : self::SPEAK_HARD_MAX;
         if (mb_strlen($text) > $max) {
             $cut = mb_substr($text, 0, $max);
             $space = max((int) mb_strrpos($cut, ' '), (int) mb_strrpos($cut, "\n"));

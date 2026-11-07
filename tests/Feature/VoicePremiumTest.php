@@ -396,6 +396,25 @@ class VoicePremiumTest extends TestCase
         $this->assertSame(1, $speaks);
     }
 
+    /** 🎙️ (2026-11-07, owner) "ตั้งเพดาน เสียงพากย์ พรีเมี่ยมไว้ ไม่อั้น" */
+    public function test_premium_voice_is_unlimited_by_default(): void
+    {
+        $u = $this->member();
+        $reading = $this->premiumReading($u, 'tarot_three');
+
+        // บทเล่า: ขอ Thaiprompt แบบไม่อั้น (budget_chars = 0)
+        $this->assertSame('ready', $this->buildVoice($u, $reading)['status']);
+        $narration = collect(Http::recorded())->first(fn ($p) => str_ends_with($p[0]->url(), '/voice/narration'));
+        $this->assertSame(0, $narration[0]->data()['budget_chars']);
+
+        // ห้องถามต่อ: พูดทุกคำตอบ ไม่มีเพดานรวม
+        $room = $this->enter($u, $reading);
+        foreach (['ข้อแรกค่ะ', 'ข้อสองค่ะ', 'ข้อสามค่ะ'] as $q) {
+            $this->assertNotNull($this->actingAs($u)->postJson('/chat/send', ['message' => $q, 'room' => $room->persona])->assertOk()->json('voice_url'), $q);
+        }
+        $this->assertSame(3 * mb_strlen('ไพ่บอกว่าไปต่อได้จ้ะ'), data_get($reading->fresh()->payload, 'premium.chat_chars'));
+    }
+
     public function test_a_plain_reading_never_gets_voice_in_chat(): void
     {
         $u = $this->member();
