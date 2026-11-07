@@ -64,7 +64,8 @@
   .wn-card { position: relative; width: min(520px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 24px 24px 22px;
              border: 1px solid rgba(244,207,106,.4); border-radius: 22px; text-align: center;
              background: radial-gradient(120% 90% at 50% 0%, rgba(244,207,106,.10), transparent 60%), linear-gradient(170deg, #1a1036, #0a0620); box-shadow: 0 30px 80px rgba(0,0,0,.6); }
-  .wn-x { position: absolute; top: 10px; right: 12px; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(255,255,255,.06); color: var(--ink); font-size: 22px; cursor: pointer; z-index: 1; }
+  /* .wn-x.wn-x (0,3,0) ชนะ body.theme-… button:not(.btn) ที่ล้างพื้นหลังปุ่ม */
+  .wn-card .wn-x.wn-x { position: absolute; top: 10px; right: 12px; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(255,255,255,.06); color: var(--ink); font-size: 22px; cursor: pointer; z-index: 1; }
   .wn-art { width: calc(100% + 48px); margin: -24px -24px 16px; height: auto; aspect-ratio: 1600/686; object-fit: cover; border-radius: 22px 22px 0 0; display: block; }
   .wn-title { font-family: var(--serif); font-weight: 400; font-size: 22px; margin: 8px 0 14px; }
   .wn-list { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 12px; text-align: left; }
