@@ -330,7 +330,7 @@ class FortuneBotClient
         if ($res['status'] === 'ok' && ! empty($res['data']['reading'])) {
             return ['status' => 'ok', 'data' => $res['data']];
         }
-        if (($res['reason'] ?? null) === 'not_palm') {
+        if (($res['error']['reason_code'] ?? null) === 'not_palm') {
             return ['status' => 'not_palm', 'data' => null];
         }
 

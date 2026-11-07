@@ -171,7 +171,7 @@ class JuntraServerClient
      * @param  string|null  $handoff  🌙 (2026-11-03) nonce (uuid) จากลิงก์ /chat/continue/{handoff} — Thaiprompt ใช้ได้ครั้งเดียว
      * @param  string|null  $persona  🔮 (2026-11-03) ผู้พยากรณ์ของห้อง maemor|busaba|kunsai — ผูกกับห้องตั้งแต่เปิด
      *                                null = ไม่ส่งฟิลด์ (คำขอหน้าตาเดิมทุกไบต์ = แม่หมอ) · ChatRooms::upstreamPersona()
-     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array,reason?:?string}
+     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
     public function chatStart(int|string $userRef, ?string $context = null, ?int $thaipromptUserId = null, ?string $handoff = null, ?string $persona = null): array
     {
@@ -201,7 +201,7 @@ class JuntraServerClient
      *                                แล้วเปิดใหม่เงียบ ๆ ก็ยังได้บุคลิกเดิม) · null = ไม่ส่ง
      * @param  int  $timeout  วินาทีที่รอ AI — ผู้เรียกที่มีงบเวลาคุมอยู่ (ChatController) ส่งที่เหลือมา
      *                        ให้คำขอทั้งก้อนจบก่อน Apache ตัดที่ ~60 วิ
-     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array,reason?:?string}
+     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
     public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45): array
     {
@@ -250,7 +250,7 @@ class JuntraServerClient
      * รอได้นานกว่า — แพ็กเกจยาวบนเลนทำนายใช้ ~36-55 วิ ชนเพดานของคำขอหน้าเว็บพอดี
      *
      * @param  'tarot/interpret'|'tarot/free'|'deep'|'horoscope/daily'|'auspicious'|'palm'  $kind
-     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array,reason?:?string}
+     * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
     public function fortune(string $kind, array $payload, int $timeout = 55): array
     {
@@ -264,12 +264,18 @@ class JuntraServerClient
         }
         $this->logMiss('fortune:' . $kind, $resp);
 
-        // reason = reason_code ของฝั่งนั้น (เช่น palm → not_palm) ให้ผู้เรียกแยกข้อความถึงลูกค้าได้
-        return [
-            'status' => $this->missing($resp) ? 'unsupported' : 'unavailable',
-            'data' => null,
-            'reason' => $resp?->json('reason_code'),
-        ];
+        // 🛡️ (2026-11-07) บอกเหตุที่ Thaiprompt ปฏิเสธด้วย (model_refused / incomplete / question_rejected + crisis)
+        //   ผู้เรียกเดิมดูแค่ status — ฟิลด์ใหม่ไม่กระทบ · ผู้เรียกใหม่ใช้ crisis แสดงคำปลอบแทนข้อความ "ไม่สำเร็จ"
+        $error = null;
+        if ($resp !== null && ! $resp->successful()) {
+            $error = array_filter([
+                'reason_code' => is_string($resp->json('reason_code')) ? $resp->json('reason_code') : null,
+                'crisis' => $resp->json('crisis') === true ? true : null,
+                'message' => is_string($resp->json('message')) ? mb_substr($resp->json('message'), 0, 1000) : null,
+            ], fn ($v) => $v !== null);
+        }
+
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null, 'error' => $error ?: null];
     }
 
     /* ======================= LIVE STATS ======================= */
