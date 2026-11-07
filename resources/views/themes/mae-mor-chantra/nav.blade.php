@@ -12,15 +12,8 @@
   <div class="nav-collapse" :class="{ open: open }" x-on:click="open = false">
     <div class="nav-links">
       {{-- บริการที่แอดมินปิดไว้ (ServiceGate) หายจากเมนูเอง --}}
-      <a href="{{ route('tarot.index') }}">ไพ่ยิปซี</a>
-      <a href="{{ route('tarot.free') }}">ดูดวงฟรี</a>
-      @serviceopen('deep')<a href="{{ route('deep.index') }}">ดูดวงเชิงลึก</a>@endserviceopen
-      @serviceopen('horoscope')<a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>@endserviceopen
-      @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
-      @serviceopen('palmistry')<a href="{{ route('palmistry.index') }}">ลายมือ</a>@endserviceopen
-      @serviceopen('auspicious')<a href="{{ route('auspicious.index') }}">ฤกษ์ยาม</a>@endserviceopen
-      <a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a>
-      <a href="{{ route('download') }}">แอพมือถือ</a>
+      {{-- 🔮 (2026-11-06 เจ้าของสั่ง) เมนูบนเหลือทางเดียว: เข้าห้องพยากรณ์ → เลือกผู้พยากรณ์ก่อน --}}
+      <a href="{{ route('chat.index', ['pick' => 1]) }}">🔮 เข้าห้องพยากรณ์</a>
     </div>
     @auth
       <div class="nav-auth">

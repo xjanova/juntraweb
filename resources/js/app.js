@@ -1,6 +1,7 @@
 import './bootstrap';
 import Alpine from 'alpinejs';
 import heroSlides from './hero-slides';
+import './hscroll';
 
 window.Alpine = Alpine;
 Alpine.data('heroSlides', heroSlides);

@@ -84,11 +84,17 @@ class FreeTarotReadingTest extends TestCase
         }
     }
 
-    private function member(): User
+    /** 🎂 (2026-11-06) ไพ่ฟรีต้องมีวันเกิดในโปรไฟล์ก่อน — ลูกค้าในเทสต์ส่วนใหญ่กรอกไว้แล้ว */
+    private function member(bool $withBirth = true): User
     {
-        return User::factory()->create([
+        $user = User::factory()->create([
             'thaiprompt_token' => 'tok-'.Str::random(8),
         ]);
+        if ($withBirth) {
+            $user->profile()->updateOrCreate([], ['birth_date' => '1987-11-06']);
+        }
+
+        return $user->fresh();
     }
 
     public function test_ได้คำทำนายฟรีและไม่หักวอลเลต(): void
@@ -237,6 +243,60 @@ class FreeTarotReadingTest extends TestCase
         $this->assertSame(2, FreeReadingClaim::count());
     }
 
+    /** 📅 (2026-11-06 เจ้าของสั่ง) ฟรีวันละใบ — พรุ่งนี้ได้ใบใหม่ (ไม่ใช่ครั้งเดียวตลอดชีพ) */
+    public function test_ฟรีวันละใบ_พรุ่งนี้ได้ใบใหม่(): void
+    {
+        $user = $this->member();
+        $this->actingAs($user)->post(route('tarot.free.cast'));
+        $this->assertSame(1, Reading::count());
+
+        // วันเดียวกันกดซ้ำ = ผลเดิม
+        $this->actingAs($user)->post(route('tarot.free.cast'));
+        $this->assertSame(1, Reading::count());
+
+        $this->travelTo(now('Asia/Bangkok')->addDay()->setTime(9, 0));
+        Cache::flush();
+        $this->actingAs($user)->post(route('tarot.free.cast'));
+        $this->assertSame(2, Reading::count(), 'วันใหม่ต้องได้ไพ่ฟรีใบใหม่');
+        $this->assertSame(2, FreeReadingClaim::where('user_id', $user->id)->count());
+    }
+
+    /** 📱 เครื่องเดียวกัน สมัครบัญชีใหม่มากดอีก = วันนี้ไม่แจกซ้ำ (กันคนเดียวหลายบัญชี) */
+    public function test_เครื่องเดียวกันคนละบัญชี_วันเดียวกันไม่แจกซ้ำ(): void
+    {
+        $device = str_repeat('a1', 16);
+
+        $this->withCookie(FreeReadingPolicy::DEVICE_COOKIE, $device)
+            ->actingAs($this->member())->post(route('tarot.free.cast'));
+        $this->assertSame(1, Reading::count());
+        $this->assertSame($device, FreeReadingClaim::first()->device);
+
+        $res = $this->withCookie(FreeReadingPolicy::DEVICE_COOKIE, $device)
+            ->actingAs($this->member())->post(route('tarot.free.cast'));
+        $res->assertRedirect(route('tarot.free'));
+        $this->assertSame(1, Reading::count(), 'บัญชีที่สองบนเครื่องเดิมต้องไม่ได้ไพ่ฟรีวันนี้');
+
+        // เครื่องอื่นได้ตามปกติ
+        $this->withCookie(FreeReadingPolicy::DEVICE_COOKIE, str_repeat('b2', 16))
+            ->actingAs($this->member())->post(route('tarot.free.cast'));
+        $this->assertSame(2, Reading::count());
+    }
+
+    /** 🎂 ยังไม่มีวันเกิด → พาไปกรอกในแชทของห้องไพ่ฟรี (บุษบา) ไม่เปิดไพ่ ไม่กินสิทธิ์ */
+    public function test_ยังไม่มีวันเกิด_พาไปกรอกในแชทก่อน(): void
+    {
+        $user = $this->member(false);
+        $room = \App\Support\ChatRooms::freeRoom();
+
+        $this->actingAs($user)->get(route('tarot.free'))
+            ->assertRedirect(route('chat.index', ['room' => $room, 'free' => 1]));
+        $this->actingAs($user)->post(route('tarot.free.cast'))
+            ->assertRedirect(route('chat.index', ['room' => $room, 'free' => 1]));
+        $this->assertSame(0, Reading::count());
+        $this->assertSame(0, FreeReadingClaim::count());
+        Http::assertNotSent(fn ($req) => str_contains($req->url(), '/fortune/tarot/free'));
+    }
+
     public function test_ปิดระบบแล้วไม่แจก(): void
     {
         Setting::put('free_reading_enabled', '0', 'free_reading');
@@ -255,7 +315,7 @@ class FreeTarotReadingTest extends TestCase
         // จำลองโปรเซสตายกลางคัน: จองสิทธิ์ไว้แต่ไม่มีผล และเก่าเกิน 10 นาที
         FreeReadingClaim::create([
             'user_id' => $user->id,
-            'batch' => 'v1',
+            'batch' => FreeReadingPolicy::periodKey(),
         ])->forceFill(['created_at' => now()->subMinutes(30)])->save();
 
         $this->actingAs($user)->post(route('tarot.free.cast'));

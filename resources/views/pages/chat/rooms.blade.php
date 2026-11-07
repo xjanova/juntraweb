@@ -70,12 +70,24 @@
               </div>
             @endif
 
-            {{-- แพ็กเกจเดียวของห้อง — บอกราคาตรงนี้เลย ลูกค้าไม่ต้องเดาว่าห้องไหนแพง --}}
-            <div class="room-product">
-              <span class="room-product-cards" aria-hidden="true">{{ $r['product']['cards'] ?: '★' }}</span>
-              <span class="room-product-name">{{ $r['product']['name'] }}</span>
-              <span class="room-product-price">{{ $priceLabel }}</span>
-            </div>
+            {{-- 🃏 (2026-11-06) ไพ่ทุกแบบที่ผู้พยากรณ์คนนี้ดู พร้อมราคา — ลูกค้าไม่ต้องเดาว่าห้องไหนดูอะไร แพงแค่ไหน --}}
+            <ul class="room-products">
+              @if ($r['free'] ?? false)
+                <li class="room-product is-free">
+                  <span class="room-product-cards" aria-hidden="true">1</span>
+                  <span class="room-product-name">ไพ่ 1 ใบ ฟรีทุกวัน</span>
+                  <span class="room-product-price">ฟรี</span>
+                </li>
+              @endif
+              @foreach (($r['products'] ?? [$r['product']]) as $p)
+                @php $pp = (float) $p['price']; @endphp
+                <li class="room-product">
+                  <span class="room-product-cards" aria-hidden="true">{{ $p['cards'] ?: '★' }}</span>
+                  <span class="room-product-name">{{ $p['name'] }}</span>
+                  <span class="room-product-price">฿{{ number_format($pp, $pp == intval($pp) ? 0 : 2) }}</span>
+                </li>
+              @endforeach
+            </ul>
 
             @if ($open)
               <a href="{{ route('chat.index', ['room' => $r['key']]) }}" class="btn btn-primary room-go">

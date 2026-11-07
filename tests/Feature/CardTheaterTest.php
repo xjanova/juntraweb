@@ -123,6 +123,8 @@ class CardTheaterTest extends TestCase
         $this->actingAs($u)->post('/tarot/begin', ['spread' => 'celtic']);
         $this->get('/tarot/pick')->assertSee('name="birth_date"', false);
 
+        // 🌸 (2026-11-06) ไพ่ 3 ใบอยู่ห้องบุษบาแล้ว — จบพิธีของแม่หมอก่อน (ล็อกห้องไม่ให้สลับกลางพิธี)
+        $this->post(route('tarot.abandon'));
         $this->post('/tarot/begin', ['spread' => 'three']);
         $this->get('/tarot/pick')->assertDontSee('name="birth_date"', false);
     }

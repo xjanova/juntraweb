@@ -4,6 +4,7 @@ namespace App\Services\Chat;
 
 use App\Models\User;
 use App\Support\ChatRooms;
+use App\Support\FreeReadingPolicy;
 use App\Support\Pricing;
 use App\Support\ReadingCooldown;
 use App\Support\TarotSpreads;
@@ -112,12 +113,17 @@ final class ChatOffers
             }
         }
 
-        $card = self::roomCard($room, $user);
-        if ($card !== null) {
-            return [$card];
+        // 🃏 (2026-11-06) ผู้พยากรณ์ยื่นเฉพาะไพ่ที่ตัวเองดู — ห้องแม่หมอเรียงตามเรื่องที่ถามก่อน
+        $menu = array_values(array_filter(self::roomMenu($room, $user), fn ($o) => $o['locked_until'] === null));
+        if ($room === ChatRooms::DEFAULT) {
+            $own = array_column($menu, null, 'key');
+            $byTopic = array_values(array_filter(self::for($topic, $user), fn ($o) => isset($own[$o['key']])));
+            if ($byTopic !== []) {
+                return $byTopic;
+            }
         }
 
-        return $room === ChatRooms::DEFAULT ? self::for($topic, $user) : [];
+        return array_slice($menu, 0, 3);
     }
 
     /** การ์ดแพ็กเกจของห้อง — null เมื่อซื้อไม่ได้ตอนนี้ */
@@ -172,26 +178,68 @@ final class ChatOffers
      */
     public static function roomMenu(string $room, ?User $user = null): array
     {
-        $room    = ChatRooms::normalize($room);
-        $primary = ChatRooms::spread($room);
-        $first   = [];
-        $rest    = [];
+        $room  = ChatRooms::normalize($room);
+        $order = array_flip(ChatRooms::spreads($room));
+        $rows  = [];
         foreach (TarotSpreads::all() as $key => $meta) {
             if (self::menuRoomOf($key) !== $room) {
                 continue;
             }
             $blocking = ReadingCooldown::blockingReading($user, $key);
-            $card = self::tarotCard($key, $meta) + [
+            // แบบที่ไม่อยู่ในรายการของห้อง (ห้องเจ้าของปิด → ตกมาห้องแม่หมอ) ต่อท้ายตามลำดับทะเบียน
+            $rows[] = [$order[$key] ?? 1000 + count($rows), self::tarotCard($key, $meta) + [
                 'locked_until' => $blocking ? ReadingCooldown::thaiDate(ReadingCooldown::availableAt($blocking, $key)) : null,
-            ];
-            $key === $primary ? $first[] = $card : $rest[] = $card;
+            ]];
         }
-        $out = array_merge($first, $rest);
+        usort($rows, fn ($a, $b) => $a[0] <=> $b[0]);
+        $out = array_column($rows, 1);
         if ($room === ChatRooms::DEFAULT && ! \App\Support\ServiceGate::isClosed('deep')) {
             $out[] = self::deepCard() + ['locked_until' => null];
         }
+        $free = self::freeCard($room, $user);
+        if ($free !== null) {
+            array_unshift($out, $free);
+        }
 
         return $out;
+    }
+
+    /**
+     * 🎁 (2026-11-06) ไพ่ 1 ใบฟรีวันละใบ — การ์ดแรกบนโต๊ะของห้องที่ดูแลไพ่ฟรี (บุษบา)
+     *
+     * ใช้สิทธิ์วันนี้แล้ว / เครื่องนี้รับแล้ว / ครบเพดานรวม → การ์ดยังอยู่ แต่ล็อก "พรุ่งนี้" (ลูกค้ารู้ว่ามีของฟรีทุกวัน)
+     * ยังไม่มีวันเกิด = กดได้ (needs_birth) หน้าแชทขอวันเกิดในแชทก่อนแล้วค่อยพาไปเปิดไพ่
+     */
+    public static function freeCard(string $room, ?User $user): ?array
+    {
+        if ($user === null || ChatRooms::freeRoom() !== ChatRooms::normalize($room) || ! FreeReadingPolicy::enabled()) {
+            return null;
+        }
+        $gate = FreeReadingPolicy::gate($user, FreeReadingPolicy::deviceId(request()));
+        $locked = match ($gate['code']) {
+            null, 'need_birth' => null,
+            'in_flight' => 'อีกสักครู่',
+            'used', 'device', 'daily_cap' => 'พรุ่งนี้',
+            default => false,   // ปิด/ไปถึงฝั่งทำนายไม่ได้ → ไม่วางการ์ด
+        };
+        if ($locked === false) {
+            return null;
+        }
+        $self = ChatRooms::selfName($room);
+
+        return [
+            'key'          => 'free',
+            'kind'         => 'free',
+            'spread'       => 'single',
+            'label'        => 'ไพ่ 1 ใบ ฟรีวันนี้',
+            'cards'        => 1,
+            'price'        => 0.0,
+            'blurb'        => "{$self}เปิดให้ฟรีวันละใบ ตอบไว ตรงประเด็น",
+            'url'          => route('tarot.free'),
+            'needs_birth'  => $gate['code'] === 'need_birth',
+            'locked_until' => $locked,
+            'reading_url'  => $gate['code'] === 'used' && ! empty($gate['reading_id']) ? route('tarot.show', $gate['reading_id']) : null,
+        ];
     }
 
     /**

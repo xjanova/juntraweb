@@ -306,13 +306,16 @@ class ChatTopupTest extends TestCase
         $user = $this->member();
 
         $first  = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 50])->json('id');
-        $second = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 50])->json('id');
-
-        $this->fakeSlipOk(['trans_ref' => 'TR-SAME-0001', 'amount' => 999]);
+        // บิล QR ยอดเฉพาะ: สลิปต้องตรงยอดเป๊ะ (2026-11-06)
+        $this->fakeSlipOk(['trans_ref' => 'TR-SAME-0001', 'amount' => (float) WalletTransaction::find($first)->amount]);
 
         $this->actingAs($user)
             ->postJson("/chat/topup/{$first}/slip", ['slip' => UploadedFile::fake()->image('a.jpg', 40, 40)])
             ->assertOk()->assertJsonPath('paid', true);
+
+        // บิลแรกจ่ายแล้ว → ออกบิลใหม่ได้ (บิลค้างใบเดียวต่อคน)
+        $second = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 50])->json('id');
+        $this->assertNotSame($first, $second);
 
         // ถ่าย/ครอปสลิปใบเดิมใหม่ → ขนาดต่าง = hash ต่าง = ด่าน hash ไม่จับ
         // แต่เป็นการโอนครั้งเดียวกัน (trans_ref เดิม) จึงต้องถูกด่านนี้จับแทน
@@ -350,10 +353,13 @@ class ChatTopupTest extends TestCase
         $user = $this->member();
 
         $first  = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 50])->json('id');
-        $second = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 50])->json('id');
 
         $slip = UploadedFile::fake()->image('slip.jpg');
         $this->actingAs($user)->postJson("/chat/topup/{$first}/slip", ['slip' => $slip])->assertOk();
+
+        // บิลแรกแนบสลิปแล้ว (รอแอดมิน) = ไม่ใช่บิลรอจ่าย → ออกบิลใหม่ได้
+        $second = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 50])->json('id');
+        $this->assertNotSame($first, $second);
 
         // ไฟล์เนื้อหาเดียวกัน → hash เดียวกัน → ต้องถูกปฏิเสธ
         $again = UploadedFile::fake()->image('slip.jpg');

@@ -19,7 +19,7 @@
         <li><a href="{{ route('tarot.index') }}">ไพ่ยิปซี AI</a></li>
         <li><a href="{{ route('tarot.free') }}">ดูดวงฟรี 1 ใบ</a></li>
         @serviceopen('numerology')<li><a href="{{ route('numerology.index') }}">เลขศาสตร์</a></li>@endserviceopen
-        <li><a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a></li>
+        <li><a href="{{ route('chat.index', ['pick' => 1]) }}">เข้าห้องพยากรณ์</a></li>
         <li><a href="{{ route('download') }}"><x-glyph name="sparkle" :size="14" style="margin-right:6px" />ดาวน์โหลดแอพมือถือ</a></li>
       </ul>
     </div>

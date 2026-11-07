@@ -205,14 +205,18 @@ class OracleMediaTest extends TestCase
     public function test_spread_voice_belongs_to_the_right_room(): void
     {
         $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
-        $this->assertSame('maemor', OracleMedia::personaFor('three'));
-
-        session(['chat_room' => 'busaba']);
+        // 🌸 (2026-11-06) ไพ่ 1 ใบ / 3 ใบเป็นของบุษบา — เสียงตามคนอ่านเสมอ ไม่ว่าลูกค้าอยู่ห้องไหน
         $this->assertSame('busaba', OracleMedia::personaFor('three'));
+        $this->assertSame('busaba', OracleMedia::personaFor('single'));
+        $this->assertSame('maemor', OracleMedia::personaFor('love'));
+
+        // แบบที่ไม่มีเจ้าของประจำ (null) = เสียงของห้องที่ลูกค้าอยู่
+        session(['chat_room' => 'busaba']);
+        $this->assertSame('busaba', OracleMedia::personaFor(null));
         $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
 
         session(['chat_room' => 'ไม่มีห้องนี้']);
-        $this->assertSame('maemor', OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', OracleMedia::personaFor(null));
     }
 
     /** ปุ่มลำโพงลอยบนหน้าเลือกไพ่/ผล: ไม่มีไฟล์ = ไม่มีปุ่ม · ส่งเฉพาะประโยคที่มีไฟล์ · ไม่เล่นเอง */

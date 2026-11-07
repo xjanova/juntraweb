@@ -168,6 +168,10 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
         ->name('continue.invalid');
 });
 
+// 🎂 (2026-11-06) วันเกิดกรอกในแชท → โปรไฟล์ (ไพ่ฟรีของบุษบาต้องมีวันเกิดก่อน · กรอกผิดแก้ในแชทได้)
+Route::post('/chat/birth', [\App\Http\Controllers\ChatBirthController::class, 'store'])
+    ->middleware(['auth', 'throttle:10,1'])->name('chat.birth');
+
 // เติมเงินจบในห้องแชท (สแกน QR แล้วเครดิตเข้าเอง) — ให้ลูกค้าไม่ต้องเดินออก
 // จากบทสนทนาเหมือนบอท FB/LINE. throttle:topup ใช้ตัวเดียวกับหน้าเติมเงินปกติ
 Route::middleware('auth')->prefix('chat/topup')->name('chat.topup.')
@@ -176,6 +180,7 @@ Route::middleware('auth')->prefix('chat/topup')->name('chat.topup.')
         Route::get('/{tx}', 'status')->name('status');
         Route::get('/{tx}/resume', 'resume')->name('resume');
         Route::post('/{tx}/slip', 'slip')->middleware('throttle:topup')->name('slip');
+        Route::post('/{tx}/cancel', 'cancel')->middleware('throttle:topup')->name('cancel');
     });
 
 // เปิดดูผลย้อนหลังของทุกบริการผ่านประตูเดียว (ดู App\Http\Controllers\ReadingController)

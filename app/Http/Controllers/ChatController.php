@@ -15,6 +15,7 @@ use App\Services\Chat\ChatOffers;
 use App\Services\Chat\ChatReadingIntent;
 use App\Services\Chat\MaeMorUpstream;
 use App\Services\Chat\ReadingChatContext;
+use App\Services\Chat\RoomStatus;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\ChatCrisis;
@@ -156,9 +157,11 @@ class ChatController extends Controller
         $crisisRoom = ChatCrisis::active($user);
         $hideOffers = $hideOffers || $crisisRoom;
         // 🔮 (2026-11-06) ทุกแบบการเปิดไพ่ของห้อง — หน้ารวมแพ็กเกจ /tarot ปิดแล้ว ลูกค้าเลือกบนโต๊ะในห้องแทน
-        //    โต๊ะวางไม่เกิน 3 แบบที่เปิดได้ตอนนี้ (ผู้สูงอายุ ตัวเลือกมากไปคือไม่เลือก) ที่เหลืออยู่ใน "ไพ่แบบอื่น"
         $menu  = $gate['allowed'] && ! $hideOffers ? ChatOffers::roomMenu((string) $conversation->persona, $user) : [];
-        $table = array_slice(array_values(array_filter($menu, fn ($o) => $o['locked_until'] === null)), 0, 3);
+        // 🃏 (2026-11-06 เจ้าของสั่ง) เมนูกราฟิก "ไพ่ที่ผู้พยากรณ์คนนี้ดู" วางครบทุกแบบบนโต๊ะ — ล้นจอเลื่อนสไลด์ได้
+        //    (แบบที่ติดข้อห้ามเปิดซ้ำ/ไพ่ฟรีที่รับไปแล้ว ยังวาง แต่ล็อกพร้อมบอกว่าเปิดได้เมื่อไร)
+        $table = $menu;
+        $birth = $user?->profile?->birth_date;
 
         return view('pages.chat.index', [
             'qa'           => $qa,
@@ -169,9 +172,14 @@ class ChatController extends Controller
             // 🔮 (2026-11-05) แพ็กเกจของห้องวางบนโต๊ะในห้องพยากรณ์ — กดเปิดไพ่ได้ตลอด ไม่ต้องรอแม่หมอยื่นการ์ด
             //    ยกเว้นตอนกำลังทำนายอยู่ หรือมีบิลเติมเงินค้าง (โชว์บิล/การทำนายที่ค้างแทน)
             'tableOffers'  => $table,
-            'tableMenu'    => count($menu) > count($table) ? $menu : [],
+            // แผ่นรายละเอียดไพ่ทุกแบบ (คำอธิบายเต็ม) — มีเมื่อเกิน 3 แบบ
+            'tableMenu'    => count($menu) > 3 ? $menu : [],
             // /tarot (ลิงก์เดิมทั่วเว็บ) พามาที่นี่พร้อม ?menu=1 = เปิดรายการไพ่ทุกแบบให้ทันที
-            'menuOpen'     => $request->boolean('menu') && count($menu) > count($table),
+            'menuOpen'     => $request->boolean('menu') && count($menu) > 3,
+            // 🎂 วันเกิดในโปรไฟล์ — ไม่มี = ขอในแชทก่อนเปิดไพ่ (ไพ่ฟรีของบุษบาบังคับ) · ?free=1 = มาจาก /tarot/free ที่ยังไม่มีวันเกิด
+            'birthDate'    => $birth?->toDateString(),
+            'birthLabel'   => ChatBirthController::label($birth),
+            'freeIntent'   => $gate['allowed'] && $request->boolean('free') && ChatRooms::freeRoom() === $conversation->persona,
             'roomLock'     => $lock !== null ? ReadingRoomLock::view($lock) : null,
             'pendingBill'  => $bill !== null ? ChatTopupController::billView($bill) : null,
             'aiSuggestions' => $crisisRoom ? [] : ($hideOffers ? ChatSuggestions::withoutReadingStarters((array) Cache::get(self::askKey($conversation->id), []))
@@ -259,15 +267,13 @@ class ChatController extends Controller
         if (is_string($asked) && ChatRooms::get($asked) !== null) {
             return $asked;
         }
-        // ห้องล่าสุดที่ปิดไปแล้ว (เจ้าของปิดแพ็กเกจ/ปิด flag) ไม่พาไปหน้า "เร็ว ๆ นี้" — ให้เลือกใหม่/เข้าห้องที่เปิดอยู่แทน
-        $last = $request->session()->get('chat_room');
-        if (is_string($last) && ChatRooms::isOpen($last)) {
-            return $last;
-        }
 
-        // เคยคุยห้องแม่หมอไว้แล้ว (ก่อนมีห้อง) หรือมีคำถามที่ติดมาจากหน้าผลไพ่ — พากลับห้องเดิม
-        if ($request->session()->has('chat_token') || $request->session()->has('chat_autosend')) {
-            return ChatRooms::DEFAULT;
+        // 🔮 (2026-11-06 เจ้าของสั่ง) "เข้าห้องพยากรณ์ ต้องเริ่มที่เลือกผู้พยากรณ์ก่อน" — /chat เปล่า ๆ = หน้าเลือกผู้พยากรณ์
+        //    (เดิมพากลับห้องล่าสุดเอง) · ยกเว้นคำถามที่ติดมาจากหน้าผลไพ่ ต้องไปถึงห้องเพื่อยิงคำถามนั้น
+        if ($request->session()->has('chat_autosend')) {
+            $last = $request->session()->get('chat_room');
+
+            return is_string($last) && ChatRooms::isOpen($last) ? $last : ChatRooms::DEFAULT;
         }
 
         // เปิดอยู่ห้องเดียว (ยังไม่เปิด CHAT_PERSONA_UPSTREAM) — ไม่มีอะไรให้เลือก เข้าห้องแม่หมอเลยเหมือนเดิม
@@ -915,6 +921,8 @@ class ChatController extends Controller
             ? trim(($timeLine !== null ? $timeLine . "\n\n" : '') . ReadingChatContext::for($reading, $timeLine !== null ? mb_strlen($timeLine) + 2 : 0))
             : null;
         $grounded = $reading !== null;
+        // 🧭 (2026-11-06) สถานะห้องทุกข้อความ: บทบาท ห้อง เมนู+ราคา เครดิต บิลค้าง การดูที่ค้าง เวลาเหลือ (App\Services\Chat\RoomStatus)
+        $status   = RoomStatus::safe($user, $conversation, $reading, $reading ? ReadingQaClock::state($conversation, $reading) : null);
 
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย
         //    ไม่ส่งไปให้ AI ทำนายฟรี · ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว (ถามเรื่องไพ่ชุดนั้น = คุยได้)
@@ -928,7 +936,7 @@ class ChatController extends Controller
             ?? $this->openUpstreamSession($user, $conversation, $context);
 
         $out = $sessionId && $left() >= 8
-            ? $this->upstream->send($user, $sessionId, $message, $grounded, $context, $persona, $left() - 3)
+            ? $this->upstream->send($user, $sessionId, $message, $grounded, $context, $persona, $left() - 3, $status)
             : null;
 
         // ลองห้องใหม่อีกรอบเฉพาะตอน "ได้คำตอบว่าง" (ห้องค้าง) และยังมีเวลาพอ — ต่อไม่ติด/หมดเวลา/เซิร์ฟเวอร์แน่น
@@ -937,7 +945,7 @@ class ChatController extends Controller
             Log::info('ผู้พยากรณ์ตอบว่าง — เปิดห้องใหม่แล้วลองอีกครั้ง', ['user_id' => $user->id, 'room' => $room]);
             $this->upstream->forgetSession($conversation->id);
             $newSession = $this->openUpstreamSession($user, $conversation, $context);
-            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context, $persona, $left() - 3) : null;
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context, $persona, $left() - 3, $status) : null;
         }
 
         if ($out === null) {

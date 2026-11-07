@@ -22,6 +22,7 @@ class FreeReadingClaim extends Model
         'reading_id',
         'failed_at',
         'ip',
+        'device',
     ];
 
     protected $casts = [

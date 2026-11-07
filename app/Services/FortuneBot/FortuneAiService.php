@@ -144,6 +144,8 @@ class FortuneAiService
             'position_name' => (string) ($card->position_label ?? 'คำตอบของไพ่'),
             'max_chars' => $maxChars,
             'customer_name' => $this->addressableName($user?->name),
+            // 🎁 (2026-11-06) ไพ่ 1 ใบฟรีเป็นของน้องบุษบา — Thaiprompt รุ่นที่ยังไม่รู้จักฟิลด์นี้ข้ามไปเอง (ตอบเป็นแม่หมอ)
+            'persona' => ChatRooms::upstreamPersona(ChatRooms::freeRoom()),
         ]);
 
         if (! $remote || empty($remote['interpretation'])) {

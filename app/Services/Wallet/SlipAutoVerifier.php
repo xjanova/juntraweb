@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\Storage;
  *      และในระบบแม่หมอ (ทะเบียน slip_verifications + บิลที่ SMS ตัดไปแล้ว)
  *   3. ปลายทางเป็นบัญชีของร้านเรา — ไม่งั้นสลิปที่โอนให้คนอื่นก็ผ่านได้
  *   4. สลิปอายุไม่เกิน 3 วัน (เท่ากับบอท)
- *   5. ยอดในสลิป ≥ ยอดที่ต้องโอน (เผื่อคลาด 1 สตางค์จากการปัดเศษ)
+ *   5. ยอดในสลิป ≥ ยอดที่ต้องโอน (เผื่อคลาด 1 สตางค์จากการปัดเศษ) — บิล QR ยอดเฉพาะต้องตรงเป๊ะ (เกินก็ไม่ผ่าน)
  *   6. จองเลขอ้างอิงในทะเบียนกลางสำเร็จ (ใครจองก่อนได้ใช้ก่อน — กันส่งพร้อมกันสองระบบ)
  *
  * ผลลัพธ์มี 3 แบบ (เจ้าของกำหนด: "ถ้าเป็นสลิปที่ไม่รู้จัก ก็ให้รอแอดมินอนุมัติ เหมือนเดิม
@@ -112,6 +112,15 @@ class SlipAutoVerifier
         if (! $this->recentEnough($verify)) {
             return $this->review($tx, ['สลิปเก่าเกิน ' . self::MAX_SLIP_AGE_DAYS . ' วัน', 'สลิปนี้เก่าเกินกว่าที่ระบบตรวจอัตโนมัติได้ค่ะ แอดมินจะตรวจสอบให้นะคะ'], $slip);
         }
+        // 💸 (2026-11-06) บิล QR ยอดเฉพาะ (เศษสตางค์ไม่ซ้ำ) ต้องตรงเป๊ะ ไม่ใช่แค่ "ไม่น้อยกว่า"
+        // สลิปยอดเกินอาจเป็นเงินของบิลอื่นที่ยอดเท่ากันพอดี — ถ้าปล่อยผ่าน SMS ของเงินก้อนนี้มาถึงทีหลัง
+        // จะไปจับคู่บิลนั้นแล้วเครดิตซ้ำเป็นสองเท่า (เส้นทาง SMS ไม่รู้ว่าสลิปใช้เงินก้อนนี้ไปแล้ว) → ให้แอดมินดู
+        if ($this->exactAmountBill($tx) && $slip['amount'] !== null && (float) $slip['amount'] - 0.01 > $payable) {
+            return $this->review($tx, [
+                sprintf('ยอดในสลิป %s มากกว่ายอดบิล %s (บิล QR ยอดเฉพาะต้องตรงเป๊ะ — กันเครดิตซ้ำกับ SMS)', Pricing::format((float) $slip['amount']), Pricing::format($payable)),
+                sprintf('ยอดในสลิป %s ไม่ตรงกับยอดบิล %s ค่ะ แอดมินจะตรวจสอบและเติมให้ตามยอดจริงนะคะ', Pricing::format((float) $slip['amount']), Pricing::format($payable)),
+            ], $slip);
+        }
         if ((float) $slip['amount'] + 0.01 < $payable) {
             return $this->review($tx, [
                 sprintf('ยอดในสลิป %s น้อยกว่ายอดที่ต้องโอน %s', Pricing::format((float) $slip['amount']), Pricing::format($payable)),
@@ -149,6 +158,12 @@ class SlipAutoVerifier
         }
 
         return ['paid' => true, 'decision' => self::APPROVE, 'message' => 'ตรวจสลิปผ่านแล้วค่ะ เติมเครดิตให้เรียบร้อย ✨'];
+    }
+
+    /** บิล QR ที่ระบบออกยอดเศษสตางค์ไม่ซ้ำให้ (ตัวจับ SMS เปิดอยู่) — สลิปต้องตรงยอดเป๊ะ */
+    private function exactAmountBill(WalletTransaction $tx): bool
+    {
+        return $tx->method === 'promptpay' && (bool) config('smschecker.enabled');
     }
 
     /**

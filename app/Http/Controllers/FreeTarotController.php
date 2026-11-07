@@ -6,6 +6,7 @@ use App\Models\FreeReadingClaim;
 use App\Models\Reading;
 use App\Models\TarotCard;
 use App\Services\FortuneBot\FortuneAiService;
+use App\Support\ChatRooms;
 use App\Support\FreeReadingPolicy;
 use App\Support\TarotSpreads;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -40,12 +41,17 @@ class FreeTarotController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $gate = FreeReadingPolicy::gate($user);
+        $gate = FreeReadingPolicy::gate($user, FreeReadingPolicy::deviceId($request));
 
         // เคยรับไปแล้วและมีผลอยู่ → พาไปดูผลเดิม ไม่ใช่ขึ้นข้อความปฏิเสธ
         if ($gate['code'] === 'used' && ! empty($gate['reading_id'])) {
             return redirect()->route('tarot.show', $gate['reading_id'])
-                ->with('status', 'นี่คือคำทำนายฟรีที่แม่หมอเปิดให้คุณไว้ค่ะ ✨');
+                ->with('status', 'นี่คือไพ่ฟรีของวันนี้ที่' . FreeReadingPolicy::oracleSelf() . 'เปิดให้ไว้ค่ะ ✨ พรุ่งนี้มาเปิดใบใหม่ได้นะคะ');
+        }
+
+        // 🎂 (2026-11-06) ยังไม่มีวันเกิด → กรอกในห้องผู้พยากรณ์ที่ดูแลไพ่ฟรี (บุษบา) แล้วกลับมาเปิดไพ่ต่อเอง
+        if ($gate['code'] === 'need_birth') {
+            return redirect()->route('chat.index', ['room' => ChatRooms::freeRoom(), 'free' => 1]);
         }
 
         return view('pages.tarot.free', [
@@ -75,7 +81,8 @@ class FreeTarotController extends Controller
 
         try {
             // เช็คสิทธิ์ใน lock อีกครั้ง — ตัวที่ตัดสินจริงคือรอบนี้
-            $gate = FreeReadingPolicy::gate($user);
+            $device = FreeReadingPolicy::deviceId($request);
+            $gate = FreeReadingPolicy::gate($user, $device);
             if (! $gate['allowed']) {
                 if (! empty($gate['reading_id'])) {
                     return redirect()->route('tarot.show', $gate['reading_id']);
@@ -83,14 +90,16 @@ class FreeTarotController extends Controller
 
                 // ไม่ต้องแนบ status — หน้าปลายทางแสดง reason ให้อยู่แล้ว
                 // (ไม่งั้นข้อความเดียวกันขึ้นสองรอบบนจอเดียว)
-                return redirect()->route('tarot.free');
+                return $gate['code'] === 'need_birth'
+                    ? redirect()->route('chat.index', ['room' => ChatRooms::freeRoom(), 'free' => 1])
+                    : redirect()->route('tarot.free');
             }
 
             $card = TarotCard::where('active', true)->inRandomOrder()->first();
             if (! $card) {
                 Log::error('FreeTarot: ไม่มีไพ่ที่ active ในสำรับ');
 
-                return redirect()->route('tarot.index')
+                return redirect()->route('chat.index', ['room' => ChatRooms::freeRoom()])
                     ->with('status', 'ขออภัย สำรับไพ่ยังไม่พร้อมค่ะ');
             }
 
@@ -106,8 +115,12 @@ class FreeTarotController extends Controller
                 if (FreeReadingPolicy::capReached()) {
                     return redirect()->route('tarot.free');
                 }
+                // เครื่องเดียวกันอีกบัญชีกดพร้อมกัน — เช็คซ้ำใต้ล็อกร่วม (gate ด้านบนอ่านก่อนจองสลอต)
+                if (FreeReadingPolicy::deviceUsedToday($user, $device)) {
+                    return redirect()->route('tarot.free');
+                }
 
-                $claim = $this->reserveClaim($user, $request->ip());
+                $claim = $this->reserveClaim($user, $request->ip(), $device);
             } catch (LockTimeoutException $e) {
                 return redirect()->route('tarot.free')
                     ->with('status', 'ตอนนี้มีคนขอดูดวงพร้อมกันเยอะค่ะ 🙏 รอสักครู่แล้วลองใหม่นะคะ');
@@ -127,7 +140,7 @@ class FreeTarotController extends Controller
 
                     return redirect()->route('tarot.free')
                         ->with('free_retry', true)
-                        ->with('status', 'ตอนนี้แม่หมอยังเปิดไพ่ให้ไม่ได้ค่ะ 🙏 สิทธิ์ดูฟรียังอยู่ครบ ลองใหม่อีกครั้งนะคะ');
+                        ->with('status', 'ตอนนี้' . FreeReadingPolicy::oracleSelf() . 'ยังเปิดไพ่ให้ไม่ได้ค่ะ 🙏 สิทธิ์ดูฟรียังอยู่ครบ ลองใหม่อีกครั้งนะคะ');
                 }
 
                 $payload = $reading->payload ?? [];
@@ -163,7 +176,7 @@ class FreeTarotController extends Controller
      * ถ้ามีแถวค้างจากรอบที่โปรเซสตายกลางคัน (reading_id ว่าง + เก่าเกินกำหนด)
      * ให้ใช้แถวเดิมซ้ำ ไม่ใช่ insert ใหม่ (จะชน unique)
      */
-    private function reserveClaim($user, ?string $ip): FreeReadingClaim
+    private function reserveClaim($user, ?string $ip, ?string $device = null): FreeReadingClaim
     {
         $claim = FreeReadingPolicy::claimOf($user);
 
@@ -172,6 +185,7 @@ class FreeTarotController extends Controller
             // และเลื่อน created_at เพื่อให้หน้าต่าง in-flight เริ่มนับใหม่
             $claim->forceFill([
                 'ip' => $ip,
+                'device' => $device,
                 'failed_at' => null,
                 'reading_id' => null,
                 'created_at' => now(),
@@ -182,8 +196,9 @@ class FreeTarotController extends Controller
 
         return FreeReadingClaim::create([
             'user_id' => $user->id,
-            'batch' => FreeReadingPolicy::batch(),
+            'batch' => FreeReadingPolicy::periodKey(),
             'ip' => $ip,
+            'device' => $device,
         ]);
     }
 
@@ -248,7 +263,9 @@ class FreeTarotController extends Controller
                 // ธงนี้คือตัวแยก "ของฟรี" ออกจากไพ่ใบเดียวที่ขาย 9฿
                 // (ห้ามใช้ราคาเป็นตัวแยก — แอดมินปรับราคา/ปิด billing ได้ตลอด)
                 'free' => true,
-                'free_batch' => FreeReadingPolicy::batch(),
+                'free_batch' => FreeReadingPolicy::periodKey(),
+                // ผู้พยากรณ์ที่เปิดไพ่ฟรีใบนี้ (หน้าผล/ห้องคุยต่อ/เสียงพากย์อ่านจากแบบ single → บุษบา)
+                'persona' => ChatRooms::freeRoom(),
             ],
         ]);
 
