@@ -172,10 +172,26 @@ class VoicePremiumTest extends TestCase
         Bus::fake();
         $this->card();
         $u = $this->member();
-        $this->health = null;
+        $this->actingAs($u)->post('/tarot/begin', ['spread' => 'single']);
+        $this->get('/tarot/pick')->assertSee('data-ct-premium', false);   // ตอนเปิดหน้า เสียงยังพร้อม
 
-        $this->cast($u, true, (string) Str::uuid())->assertRedirect();
+        // เสียงล่มระหว่างลูกค้าเลือกไพ่ — ลูกค้าเลือกแพ็กเสียงไว้ ต้องไม่ได้ของน้อยกว่าที่เลือกโดยไม่รู้ตัว
+        foreach ([null, ['tts' => ['available' => false, 'reason' => 'no_credits', 'chars_left' => 0]]] as $h) {
+            $this->health = $h;
+            Cache::flush();
 
+            $this->from('/tarot/pick')->cast($u, true, (string) Str::uuid())
+                ->assertRedirect('/tarot/pick')
+                ->assertSessionHas('status', fn ($s) => str_contains($s, 'ยังไม่มีการหักเครดิต'));
+
+            $this->assertSame(500.0, $this->balance($u), 'ไม่ตัดอะไรเลย');
+            $this->assertSame(0, Reading::count());
+            $this->get('/tarot/pick')->assertOk()->assertDontSee('data-ct-premium', false)
+                ->assertSee('ระบบเสียงพรีเมียมเพิ่งปิดชั่วคราว', false);
+        }
+
+        // เลือกเปิดแบบปกติต่อได้ทันที
+        $this->cast($u, false, (string) Str::uuid())->assertRedirect();
         $this->assertSame(500 - $this->singlePrice(), $this->balance($u), 'ตัดแค่ค่าไพ่');
         $this->assertNull(data_get(Reading::sole()->payload, 'premium'));
     }

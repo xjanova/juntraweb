@@ -268,10 +268,21 @@ class EngagementPackTest extends TestCase
     public function test_the_whats_new_popup_is_for_members_and_stays_off_the_ritual_pages(): void
     {
         $u = User::factory()->create();
-        $this->actingAs($u)->get(route('account.dashboard'))->assertSee('jw-whats-new-2026-11-07');
-        $this->actingAs($u)->get(route('tarot.show', $this->reading($u)))->assertDontSee('jw-whats-new-2026-11-07');
+        $this->actingAs($u)->get(route('account.dashboard'))->assertSee('jw-whats-new-2026-11-07b');
+        $this->actingAs($u)->get(route('tarot.show', $this->reading($u)))->assertDontSee('jw-whats-new-2026-11-07b');
 
         auth()->logout();
-        $this->get('/')->assertDontSee('jw-whats-new-2026-11-07');
+        $this->get('/')->assertDontSee('jw-whats-new-2026-11-07b');
+    }
+
+    /** 💬 (2026-11-07) ลูกค้าอยู่ในห้องแชทเกือบตลอด — เด้งในห้องได้ แต่ห้ามบังตอนกำลังทำนาย */
+    public function test_the_whats_new_popup_reaches_the_chat_room_but_never_during_a_reading(): void
+    {
+        $this->withoutVite();
+        $u = User::factory()->create();
+        $this->actingAs($u)->get('/chat?room=maemor')->assertOk()->assertSee('jw-whats-new-2026-11-07b')->assertSee('กดไมค์พูดแทนพิมพ์');
+
+        $this->actingAs($u)->post('/tarot/begin', ['spread' => 'celtic']);
+        $this->actingAs($u)->get('/chat?room=maemor')->assertOk()->assertDontSee('jw-whats-new-2026-11-07b');
     }
 }

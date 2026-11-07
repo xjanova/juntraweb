@@ -157,6 +157,8 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
     Route::post('/send', 'send')->middleware('throttle:chat-send')->name('send');
     // ⏳ "พอแล้ว" — จบเวลาถามต่อของไพ่ก่อนกำหนด
     Route::post('/qa/end', 'endQa')->middleware(['auth', 'throttle:chat-send'])->name('qa.end');
+    // 🎙️ (2026-11-07) ปุ่มไมค์ — ถอดเสียงที่ Thaiprompt เมื่อเบราว์เซอร์ถอดเองไม่ได้ (FB/LINE ในแอป ฯลฯ)
+    Route::post('/transcribe', 'transcribe')->middleware(['auth', 'throttle:12,1'])->name('transcribe');
     // Enter the live chat pre-grounded on a tarot reading — แม่หมอ is primed
     // with the exact cards drawn so follow-up questions read those cards.
     Route::post('/from-reading/{reading}', 'fromReading')

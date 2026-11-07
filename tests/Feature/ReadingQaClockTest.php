@@ -76,6 +76,19 @@ class ReadingQaClockTest extends TestCase
         return ChatConversation::where('reading_id', $reading->id)->firstOrFail();
     }
 
+    /** เปิดทุกห้อง แล้วคืนห้องที่ไม่ใช่ห้องนี้ (เหมือน ReadingRoomLockTest) */
+    private function otherOpenRoom(string $room): string
+    {
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Setting::put('tarot_kunsai_visible', '1', 'pricing', false);
+        Cache::forget('settings.all');
+        $other = collect(['maemor', 'busaba', 'kunsai'])->first(fn ($r) => $r !== $room && \App\Support\ChatRooms::isOpen($r));
+        $this->assertNotNull($other, 'ต้องมีห้องอื่นที่เปิดอยู่ให้ลองสลับ');
+
+        return $other;
+    }
+
     private function contexts(): array
     {
         return collect(Http::recorded())
@@ -188,6 +201,97 @@ class ReadingQaClockTest extends TestCase
         $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อแรกอีกครั้งค่ะ', 'room' => $room->persona])->assertOk();
         $this->assertTrue($res->json('qa.started'));
         $this->assertSame(now()->addMinutes(15)->getTimestamp(), $res->json('qa.ends_at'), 'นับเต็ม 15 นาทีจากคำถามที่ได้คำตอบจริง');
+    }
+
+    /**
+     * 🔒 (2026-11-07) เจ้าของ: "มันยังเปลี่ยนห้องทำนายได้ระหว่างทำนาย ซึ่งต้องเปลี่ยนไม่ได้นะ"
+     * เคสจริงบน prod: ถามต่อจากไพ่ห้องแม่หมออยู่ แล้วกดสลับไปห้องบุษบาได้ (ห้อง 273 → busaba)
+     */
+    public function test_rooms_stay_locked_while_asking_about_the_cards_until_enough(): void
+    {
+        $user = $this->member();
+        $room = $this->enter($user, $this->reading($user));
+        $other = $this->otherOpenRoom($room->persona);
+
+        // เปิดห้องแล้วแต่ยังไม่ถาม — ยังไม่นับเวลา จึงยังไม่ล็อก
+        $this->actingAs($user)->get('/chat?room=' . $other)->assertOk();
+
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'งานจะไปต่อไหมคะ', 'room' => $room->persona])->assertOk();
+
+        // ระหว่างถามต่อ: ห้องอื่น / หน้าเลือกผู้พยากรณ์ / เปิดไพ่ห้องอื่น — ถูกพากลับห้องเดิม
+        $this->actingAs($user)->get('/chat?room=' . $other)
+            ->assertRedirect(route('chat.index', ['room' => $room->persona]))
+            ->assertSessionHas('status', fn ($s) => str_contains($s, 'พอแล้ว'));
+        $this->actingAs($user)->get('/chat?pick=1')->assertRedirect(route('chat.index', ['room' => $room->persona]));
+
+        // ห้องเดิมเข้าได้ ไม่มีปุ่มสลับห้อง และไม่มีป้ายล็อกซ้อนในห้องตัวเอง
+        $page = $this->actingAs($user)->get('/chat?room=' . $room->persona)->assertOk();
+        $page->assertViewHas('roomLock', fn ($l) => $l['reason'] === 'qa' && $l['room'] === $room->persona);
+        $page->assertDontSee('กลับไปถามต่อ');
+
+        // กด "พอแล้ว" → ปลดล็อกทันที
+        $this->actingAs($user)->postJson(route('chat.qa.end'), ['room' => $room->persona])->assertOk();
+        $this->actingAs($user)->get('/chat?room=' . $other)->assertOk();
+    }
+
+    public function test_the_follow_up_lock_ends_by_itself_when_time_is_up(): void
+    {
+        $user = $this->member();
+        $room = $this->enter($user, $this->reading($user, 'tarot_three'));   // ชุดเล็ก = 7 นาที
+        $other = $this->otherOpenRoom($room->persona);
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อแรกค่ะ', 'room' => $room->persona])->assertOk();
+
+        $this->actingAs($user)->get('/chat?room=' . $other)->assertRedirect();
+        $this->travel(8)->minutes();
+        $this->actingAs($user)->get('/chat?room=' . $other)->assertOk();
+    }
+
+    /**
+     * 🌙 (2026-11-07) เจ้าของ: "เมื่อเวลาหมดให้ แนะนำ และให้รีวิว อธิบายว่าทำไงได้บ้าง ฟังย้อนได้ที่ไหน
+     *    มีปุ่มให้เลือก … ภายใน 1 นาที ถ้าไม่ทำอะไรก็ปิดห้องและรีเซ็ต"
+     */
+    public function test_time_up_shows_the_wrap_card_with_review_replay_and_a_one_minute_close(): void
+    {
+        $user = $this->member();
+        $reading = $this->reading($user, 'tarot_three');
+        $room = $this->enter($user, $reading);
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อแรกค่ะ', 'room' => $room->persona])->assertOk();
+        $this->travel(8)->minutes();
+
+        $page = $this->actingAs($user)->get('/chat?room=' . $room->persona)->assertOk();
+        $page->assertViewHas('qaWrap', fn ($w) => $w['review_url'] === route('tarot.review', $reading)
+            && $w['result_url'] === route('tarot.show', $reading)
+            && $w['history_url'] === route('account.history')
+            && $w['reviewed'] === false
+            && $w['close_seconds'] === 60);
+        $page->assertSee('จบการถามต่อของไพ่ชุดนี้แล้วค่ะ', false)
+            ->assertSee('ประวัติการดูดวง', false)
+            ->assertSee('ปิดห้องเลย', false);
+
+        // ให้ดาวในห้องแชท (fetch) → ได้ JSON ไม่โดนพาออกไปหน้าผล
+        $this->actingAs($user)->postJson(route('tarot.review', $reading), ['rating' => 5, 'message' => 'ตรงมากค่ะ'])
+            ->assertOk()->assertJson(['ok' => true, 'rating' => 5]);
+        $this->assertSame(5, (int) $reading->fresh()->review->rating);
+        $this->actingAs($user)->postJson(route('tarot.review', $reading), ['rating' => 9])
+            ->assertStatus(422)->assertJsonPath('errors.rating.0', 'ให้ดาวได้ 1 ถึง 5 ดวงค่ะ');
+
+        $this->actingAs($user)->get('/chat?room=' . $room->persona)
+            ->assertViewHas('qaWrap', fn ($w) => $w['reviewed'] === true && $w['rating'] === 5);
+
+        // "ปิดห้อง/รีเซ็ต" = ห้องเดิมแบบเริ่มใหม่ ไม่มีนาฬิกา ไม่มีการ์ดปิดท้าย · ไพ่ชุดเดิมยังอยู่ในประวัติ
+        $this->actingAs($user)->get('/chat?room=' . $room->persona . '&fresh=1')->assertOk()
+            ->assertViewHas('qa', null)->assertViewHas('qaWrap', null);
+        $this->assertNotNull(ChatConversation::find($room->id));
+    }
+
+    public function test_someone_elses_reading_gets_no_review_button(): void
+    {
+        $owner = $this->member();
+        $reading = $this->reading($owner);
+        $wrap = (new \ReflectionMethod(\App\Http\Controllers\ChatController::class, 'qaWrap'))
+            ->invoke(app(\App\Http\Controllers\ChatController::class), $reading, $this->member());
+        $this->assertNull($wrap['review_url']);
+        $this->assertFalse($wrap['listen']);
     }
 
     public function test_a_plain_room_has_no_clock_and_enough_is_refused(): void

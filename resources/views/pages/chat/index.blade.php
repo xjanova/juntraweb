@@ -27,7 +27,8 @@
   ];
   $offerCards = $offerCards ?? ['id' => null, 'offers' => []];
   // ปุ่มเปลี่ยนผู้พยากรณ์ — มีให้เมื่อเปิดมากกว่าห้องเดียว
-  $canSwitch  = ! $readonly && collect($rooms ?? [])->where('open', true)->count() > 1;
+  // 🔒 (2026-11-07) กำลังทำนาย/ถามต่อจากไพ่อยู่ = ไม่มีปุ่มเปลี่ยนห้องเลย (เซิร์ฟเวอร์บังคับอยู่แล้ว ปุ่มที่กดแล้วเด้งกลับทำให้งง)
+  $canSwitch  = ! $readonly && empty($roomLock) && collect($rooms ?? [])->where('open', true)->count() > 1;
 
   // 🏛️ (2026-11-05) ห้องพยากรณ์เต็มจอ — เจ้าของสั่ง: "เลือกผู้พยากรณ์แล้วต้องเข้าห้องพยากรณ์ ไม่ใช่ห้องแชท
   //    เพราะเราเอาช่องแชทย้ายมาในห้องพยากรณ์" → ห้องสด = ฉากโต๊ะของห้อง ผู้พยากรณ์ยืนหลังโต๊ะ แชทอยู่ในฉาก
@@ -90,6 +91,7 @@
          qa: @js($qa ?? null),
          qaEndUrl: @js(route('chat.qa.end')),
          qaOverText: @js(\App\Support\ReadingQaClock::overMessage($room)),
+         qaWrap: @js($qaWrap ?? null),
          freshUrl: @js(route('chat.index', ['room' => $room, 'fresh' => 1])),
          idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
          topics: @js($topics),
@@ -101,6 +103,7 @@
          blocked: @js((bool) $exhausted),
          autosend: @js($autosend ?? null),
          sendUrl: @js(route('chat.send')),
+         transcribeUrl: @js(route('chat.transcribe')),
          tarotBeginUrl: @js(route('tarot.begin')),
          topupUrl: @js(route('wallet.topup')),
          canTopupInChat: @js((bool) ($gate['allowed'] ?? false) && !($readonly ?? false)),
@@ -261,7 +264,7 @@
       {{-- 🔒 (2026-11-05) กำลังทำนายอยู่ / 🧾 บิลเติมเงินค้าง — วางบนโต๊ะแทนแพ็กเกจ
            เจ้าของสั่ง "ป้ายเปิดไพ่ในห้องต้องไม่ขึ้นให้เลือกถ้ายังค้างบิลอยู่ ควรแสดงเลขบิลด้วยว่าบิลไหน ได้รับเงินหรือยัง"
            เวลาที่เหลือนับจากนาฬิกาเซิร์ฟเวอร์ (serverNow) ไม่ใช่นาฬิกาเครื่องลูกค้า --}}
-      @if (! empty($roomLock))
+      @if (! empty($roomLock) && ! ($roomLock['reason'] === 'qa' && $roomLock['room'] === $room))
         <div class="or-table" role="status" aria-live="polite">
           <div class="or-offer is-hold">
             <span class="or-offer-icon" aria-hidden="true">{{ $roomLock['reason'] === 'reading' ? '📜' : '🔮' }}</span>
@@ -662,8 +665,59 @@
                เพื่อไม่ให้เลย์เอาต์กระโดดและผู้ใช้ไม่งงว่าปุ่มหายไปไหน --}}
           <div class="chat-suggest">
 
+            {{-- 0. 🌙 (2026-11-07) หมดเวลาถามต่อ → การ์ดปิดท้าย: คำแนะนำ · รีวิว · ฟัง/อ่านย้อนที่ไหน · ไปต่อทางไหน
+                 ไม่ได้แตะอะไรเลยภายใน 1 นาที = ปิดห้องนี้แล้วเริ่มห้องใหม่ให้ (เจ้าของสั่ง) --}}
+            <template x-if="blocked && qa && qa.over && cfg.qaWrap">
+              <div class="qa-wrap" role="region" aria-label="จบการถามต่อของไพ่ชุดนี้"
+                   @pointerdown="wrapTouch()" @keydown="wrapTouch()" @input="wrapTouch()">
+                <div class="qa-wrap-head">
+                  <b>🌙 จบการถามต่อของไพ่ชุดนี้แล้วค่ะ</b>
+                  <p>ลองทำตามที่ไพ่แนะนำทีละขั้นนะคะ — คำทำนายฉบับเต็ม<span x-text="cfg.qaWrap.listen ? 'และเสียงเล่า' : ''"></span>เก็บไว้ให้แล้ว
+                     กลับมา<span x-text="cfg.qaWrap.listen ? 'ฟัง' : 'อ่าน'"></span>ย้อนได้ทุกเมื่อที่ <a :href="cfg.qaWrap.history_url">ประวัติการดูดวง</a></p>
+                </div>
+
+                {{-- ⭐ รีวิว — แตะดาวได้ในห้องเลย ไม่ต้องออกไปหน้าอื่น --}}
+                <div class="qa-wrap-review" x-show="cfg.qaWrap.review_url">
+                  <template x-if="!wrap.reviewed">
+                    <div>
+                      <div class="qa-wrap-label" x-text="'คำทำนายครั้งนี้ตรงใจไหมคะ ให้ดาวบอก' + persona.self + 'หน่อยนะคะ'"></div>
+                      <div class="aftercare-stars" role="radiogroup" aria-label="ให้ดาวคำทำนายนี้" @mouseleave="wrap.hover = 0">
+                        <template x-for="i in 5" :key="i">
+                          <button type="button" role="radio" :aria-checked="wrap.rating === i" :aria-label="i + ' ดาว'"
+                                  :class="(wrap.hover || wrap.rating) >= i ? 'on' : ''"
+                                  @mouseenter="wrap.hover = i" @click="wrap.rating = i">★</button>
+                        </template>
+                      </div>
+                      <div class="qa-wrap-more" x-show="wrap.rating" x-cloak>
+                        <textarea x-model="wrap.message" maxlength="500" rows="2" placeholder="อยากบอกอะไรเพิ่มไหมคะ (ไม่บังคับ)" aria-label="ข้อความรีวิว"></textarea>
+                        <button type="button" class="btn btn-primary" :disabled="wrap.sending" @click="wrapReview()"
+                                x-text="wrap.sending ? 'กำลังส่ง...' : 'ส่งรีวิว'">ส่งรีวิว</button>
+                      </div>
+                      <p class="qa-wrap-err" x-show="wrap.error" x-cloak x-text="wrap.error" role="alert"></p>
+                    </div>
+                  </template>
+                  <template x-if="wrap.reviewed">
+                    <p class="aftercare-ok" role="status" x-text="'ขอบคุณที่บอก' + persona.self + 'นะคะ 💜 ' + '★'.repeat(wrap.rating || 0)"></p>
+                  </template>
+                </div>
+
+                {{-- ไปต่อทางไหน --}}
+                <div class="chip-row qa-wrap-go">
+                  <a :href="cfg.qaWrap.result_url" class="chip chip-strong"><span class="chip-icon" x-text="cfg.qaWrap.listen ? '🎧' : '📜'"></span> <span x-text="cfg.qaWrap.listen ? 'ฟังคำทำนายย้อน' : 'อ่านคำทำนายย้อน'"></span></a>
+                  <a :href="cfg.freshUrl" class="chip chip-strong"><span class="chip-icon">💬</span> คุยเรื่องอื่นต่อ</a>
+                  <a href="{{ route('tarot.index') }}" class="chip"><span class="chip-icon">🔮</span> เปิดไพ่ชุดใหม่</a>
+                  <a href="{{ route('home') }}" class="chip"><span class="chip-icon">🏠</span> ไปดูอย่างอื่น</a>
+                </div>
+
+                <p class="qa-wrap-close" x-show="wrap.left > 0" aria-live="off">
+                  ถ้าไม่ได้เลือกอะไร ห้องนี้จะปิดแล้วเริ่มใหม่ให้ในอีก <b x-text="wrap.left">60</b> วินาที
+                  <button type="button" class="qa-wrap-now" @click="wrapClose()">ปิดห้องเลย</button>
+                </p>
+              </div>
+            </template>
+
             {{-- 1. ทางออกเมื่อคุยต่อไม่ได้ --}}
-            <template x-if="blocked">
+            <template x-if="blocked && !(qa && qa.over && cfg.qaWrap)">
               <div>
                 <div class="chat-suggest-label">
                   <span x-text="blockedReason || 'วันนี้คุยครบแล้ว — ลองทางนี้ต่อได้เลยค่ะ'"></span>
@@ -783,6 +837,17 @@
                 autocomplete="off"
                 aria-label="ข้อความถึง{{ $P['short'] }}"></textarea>
 
+              {{-- 🎙️ (2026-11-07) กดพูดแทนพิมพ์ — ได้ข้อความลงช่องพิมพ์ ลูกค้าตรวจแล้วกดส่งเอง · ซ่อนถ้าเครื่องนี้ใช้ไมค์ไม่ได้ --}}
+              <button type="button" class="chat-mic" x-show="mic.supported" x-cloak
+                      :class="{ 'is-on': mic.state === 'listening', 'is-busy': mic.state === 'working' }"
+                      :disabled="thinking || blocked || mic.state === 'working'"
+                      @click="micToggle()"
+                      :title="mic.state === 'listening' ? 'แตะอีกครั้งเพื่อหยุดฟัง' : (mic.state === 'working' ? 'กำลังแปลงเสียงเป็นข้อความ...' : 'กดแล้วพูดได้เลย')"
+                      :aria-label="mic.state === 'listening' ? 'หยุดฟัง' : 'พูดแทนพิมพ์'"
+                      :aria-pressed="mic.state === 'listening' ? 'true' : 'false'">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+              </button>
+
               <button type="submit" class="btn btn-primary chat-send"
                       :disabled="thinking || blocked || !draft.trim()"
                       :title="blocked ? (blockedReason || 'วันนี้คุยครบโควตาแล้ว')
@@ -792,6 +857,7 @@
                 <svg x-show="thinking" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="animation:morPulse 1.2s infinite"><circle cx="12" cy="12" r="9"/></svg>
               </button>
             </div>
+            <div class="chat-mic-note" x-show="mic.note" x-cloak x-text="mic.note" role="status" aria-live="polite"></div>
             <div class="chat-counter" x-show="draft.length > 1700" x-cloak>
               <span x-text="draft.length"></span> / 2000
             </div>
@@ -881,6 +947,12 @@ document.addEventListener('alpine:init', () => {
     qaBusy: false,
     qaConfirm: false,
     qaWarned: false,
+    // 🌙 การ์ดปิดท้ายหลังหมดเวลาถามต่อ — นับถอยหลังปิดห้อง (แตะอะไรในการ์ด = เริ่มนับใหม่)
+    wrap: {
+      left: 0, timer: null, hover: 0, message: '', sending: false, error: '',
+      rating: (cfg.qaWrap && cfg.qaWrap.rating) || 0,
+      reviewed: !!(cfg.qaWrap && cfg.qaWrap.reviewed),
+    },
     // 💤 ลูกค้าเงียบนาน → ผู้พยากรณ์ทักตาม (ข้อความในหน้าเว็บ ไม่ถาม AI ไม่คิดเงิน)
     lastActive: Date.now(),
     nudges: 0,
@@ -911,7 +983,160 @@ document.addEventListener('alpine:init', () => {
     table: { offerBusy: false, question: '', menu: !!cfg.menuOpen },
     sheet: false,
 
+    // 🎙️ ไมค์: เบราว์เซอร์ถอดเองก่อน (ฟรี) · ถอดเองไม่ได้ → อัดเสียง ≤ 25 วิ ส่งให้เซิร์ฟเวอร์ถอด
+    mic: { supported: false, mode: null, state: 'idle', note: '', rec: null, media: null, chunks: [], stopTimer: null, base: '' },
+
+    canRecord() {
+      return !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && this.cfg.transcribeUrl);
+    },
+    micSetup() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      this.mic.mode = SR ? 'speech' : (this.canRecord() ? 'record' : null);
+      this.mic.supported = !!this.mic.mode;
+    },
+    micToggle() {
+      if (this.mic.state === 'listening') { this.micStop(); return; }
+      if (this.mic.state !== 'idle' || this.thinking || this.blocked) return;
+      this.mic.note = '';
+      this.mic.base = this.draft.trim() ? this.draft.trim() + ' ' : '';
+      this.mic.mode === 'speech' ? this.micSpeech() : this.micRecord();
+    },
+    micDone() {
+      this.$nextTick(() => {
+        this.autoGrow(); if (this.$refs.input) this.$refs.input.focus();
+      });
+    },
+    micSpeech() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let r;
+      try { r = new SR(); } catch (e) { this.micFallback(); return; }
+      r.lang = 'th-TH'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+      let finalText = '';
+      let fellBack = false;
+      r.onresult = (ev) => {
+        let interim = '';
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const t = ev.results[i][0].transcript;
+          if (ev.results[i].isFinal) finalText += t; else interim += t;
+        }
+        this.draft = (this.mic.base + finalText + interim).slice(0, 2000);
+      };
+      r.onerror = (ev) => {
+        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+          // service-not-allowed = เบราว์เซอร์ในแอป (FB/LINE) มี API แต่ไม่ให้ใช้ → ลองอัดเสียงส่งเซิร์ฟเวอร์แทน
+          if (ev.error === 'service-not-allowed' && this.canRecord()) { fellBack = true; return; }
+          this.mic.note = 'ยังไม่ได้อนุญาตให้ใช้ไมค์ค่ะ — กดอนุญาตในเบราว์เซอร์ หรือพิมพ์แทนได้เลยนะคะ';
+        } else if (ev.error === 'network' || ev.error === 'audio-capture' || ev.error === 'language-not-supported') {
+          if (this.canRecord()) { fellBack = true; return; }
+          this.mic.note = 'เครื่องนี้ฟังเสียงไม่ได้ตอนนี้ค่ะ พิมพ์แทนได้เลยนะคะ';
+        } else if (ev.error === 'no-speech') {
+          this.mic.note = 'ยังไม่ได้ยินเสียงเลยค่ะ ลองกดแล้วพูดใหม่นะคะ';
+        }
+      };
+      r.onend = () => {
+        if (this.mic.rec !== r) return;   // ออกจากหน้าไปแล้ว
+        this.mic.rec = null;
+        this.mic.state = 'idle';
+        if (fellBack) { this.micFallback(); return; }
+        this.micDone();
+      };
+      this.mic.rec = r;
+      this.mic.state = 'listening';
+      try { r.start(); } catch (e) { this.mic.rec = null; this.mic.state = 'idle'; this.micFallback(); }
+    },
+    micFallback() {
+      this.mic.rec = null;
+      this.mic.state = 'idle';
+      if (this.canRecord()) {
+        this.mic.mode = 'record';   // ครั้งต่อไปอัดเสียงเลย ไม่ลองถอดในเครื่องซ้ำ
+        this.micRecord();
+      } else {
+        this.mic.note = 'เครื่องนี้ใช้ไมค์กับหน้านี้ไม่ได้ค่ะ พิมพ์คุยได้เลยนะคะ';
+        this.mic.supported = false;
+      }
+    },
+    async micRecord() {
+      this.mic.state = 'working';   // กันแตะซ้ำระหว่างรอถามสิทธิ์ไมค์
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        this.mic.state = 'idle';
+        this.mic.note = 'ยังไม่ได้อนุญาตให้ใช้ไมค์ค่ะ — กดอนุญาตในเบราว์เซอร์ หรือพิมพ์แทนได้เลยนะคะ';
+        return;
+      }
+      const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+      const type = types.find((t) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+      let rec;
+      try { rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : undefined); }
+      catch (e) {
+        stream.getTracks().forEach((t) => t.stop());
+        this.mic.state = 'idle';
+        this.mic.note = 'เครื่องนี้อัดเสียงไม่ได้ค่ะ พิมพ์แทนได้เลยนะคะ';
+        return;
+      }
+      this.mic.chunks = [];
+      this.mic.media = stream;
+      rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) this.mic.chunks.push(ev.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        this.mic.media = null;
+        clearTimeout(this.mic.stopTimer);
+        if (this.mic.rec !== rec) return;   // ออกจากหน้าไปแล้ว
+        this.mic.rec = null;
+        this.micUpload(new Blob(this.mic.chunks, { type: rec.mimeType || type || 'audio/webm' }));
+      };
+      this.mic.rec = rec;
+      this.mic.state = 'listening';
+      this.mic.note = 'กำลังฟังอยู่ค่ะ… พูดจบแล้วแตะไมค์อีกครั้ง';
+      rec.start();
+      this.mic.stopTimer = setTimeout(() => this.micStop(), 25000);   // ไม่เกิน 25 วิ (เพดานไฟล์ของเซิร์ฟเวอร์)
+    },
+    micStop() {
+      const r = this.mic.rec;
+      if (!r) { this.mic.state = 'idle'; return; }
+      clearTimeout(this.mic.stopTimer);
+      if (this.mic.mode === 'record') { this.mic.state = 'working'; this.mic.note = 'กำลังแปลงเสียงเป็นข้อความ…'; }
+      try { r.stop(); } catch (e) { this.mic.rec = null; this.mic.state = 'idle'; }
+    },
+    async micUpload(blob) {
+      if (!blob || blob.size < 1500) { this.mic.state = 'idle'; this.mic.note = 'สั้นไปนิดค่ะ ลองกดแล้วพูดใหม่นะคะ'; return; }
+      if (blob.size > 700 * 1024) { this.mic.state = 'idle'; this.mic.note = 'ยาวเกินไปค่ะ ลองพูดสั้น ๆ ทีละเรื่องนะคะ'; return; }
+      const fd = new FormData();
+      fd.append('audio', blob, 'mic.' + (blob.type.includes('mp4') ? 'm4a' : (blob.type.includes('ogg') ? 'ogg' : 'webm')));
+      fd.append('room', this.room);
+      this.mic.state = 'working';
+      try {
+        const res = await fetch(this.cfg.transcribeUrl, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+          body: fd,
+        });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.text) {
+          this.draft = (this.mic.base + j.text).slice(0, 2000);
+          this.mic.note = 'ตรวจข้อความแล้วกดส่งได้เลยค่ะ';
+          this.micDone();
+        } else {
+          this.mic.note = res.status === 419 ? 'หน้านี้เปิดค้างนานไปค่ะ รีเฟรชหน้าแล้วลองใหม่นะคะ'
+            : (j.message && res.status !== 429 ? j.message
+            : (res.status === 429 ? (j.message && !/Too Many/i.test(j.message) ? j.message : 'ใช้ไมค์ถี่ไปนิดค่ะ รอสักครู่แล้วลองใหม่นะคะ')
+            : 'ถอดเสียงไม่สำเร็จ ลองพูดใหม่หรือพิมพ์แทนนะคะ'));
+        }
+      } catch (e) {
+        this.mic.note = 'เน็ตสะดุดค่ะ ลองใหม่อีกครั้งหรือพิมพ์แทนนะคะ';
+      } finally {
+        this.mic.state = 'idle';
+      }
+    },
+
     destroy() {
+      // ปิดไมค์ทุกครั้งที่ออกจากหน้า — ไม่งั้นไฟแดงไมค์ค้าง
+      const r = this.mic.rec; this.mic.rec = null;
+      clearTimeout(this.mic.stopTimer);
+      try { r && (r.abort ? r.abort() : r.stop()); } catch (e) {}
+      if (this.mic.media) this.mic.media.getTracks().forEach((t) => t.stop());
+      clearInterval(this.wrap.timer);
       clearInterval(this.clockTimer);
       clearInterval(this.billTimer);
       clearInterval(this.payTimer);   // ออกจากหน้าแล้วต้องเลิก poll
@@ -947,12 +1172,63 @@ document.addEventListener('alpine:init', () => {
       if (!this.qa) return;
       const was = this.qa.over;
       this.qa.over = true;
+      this.wrapOpen();
       this.blocked = true;
       this.blockedReason = 'หมดเวลาถามต่อของไพ่ชุดนี้แล้วค่ะ — ไปต่อทางไหนดี เลือกได้เลยนะคะ';
       if (announce && !was) {
         this.push('assistant', this.escape(cfg.qaOverText), 'ok');
         this.voice('thanks_bye', false);
         this.scrollToBottom(true);
+      }
+    },
+    wrapOpen() {
+      const w = cfg.qaWrap;
+      if (!w || this.wrap.timer) return;
+      this.wrap.left = w.close_seconds || 60;
+      this.wrap.timer = setInterval(() => {
+        if (this.wrap.sending) return;   // กำลังส่งรีวิว — อย่าปิดห้องทับ
+        this.wrap.left = Math.max(0, this.wrap.left - 1);
+        if (this.wrap.left === 0) this.wrapClose();
+      }, 1000);
+    },
+    /** ลูกค้ายังอยู่ (แตะดาว/พิมพ์/เลื่อนในการ์ด) → นับใหม่ ไม่ปิดห้องต่อหน้า */
+    wrapTouch() {
+      if (this.wrap.timer) this.wrap.left = (cfg.qaWrap && cfg.qaWrap.close_seconds) || 60;
+    },
+    /** ปิดห้องของไพ่ชุดนี้ → ห้องเดิมแบบเริ่มใหม่ (ไพ่ชุดนี้ยังอยู่ในประวัติ) */
+    wrapClose() {
+      clearInterval(this.wrap.timer);
+      this.wrap.timer = null;
+      this.wrap.left = 0;
+      window.location.href = cfg.freshUrl;
+    },
+    async wrapReview() {
+      const w = cfg.qaWrap;
+      if (!w || !w.review_url || !this.wrap.rating || this.wrap.sending) return;
+      this.wrap.sending = true;
+      this.wrap.error = '';
+      try {
+        const r = await fetch(w.review_url, {
+          method: 'POST', credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ rating: this.wrap.rating, message: this.wrap.message.trim() }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) {
+          this.wrap.reviewed = true;
+        } else {
+          const first = j.errors ? Object.values(j.errors)[0] : null;
+          this.wrap.error = r.status === 419 ? 'หน้านี้เปิดค้างนานไปค่ะ รีเฟรชหน้าแล้วลองใหม่นะคะ'
+            : (Array.isArray(first) ? first[0] : 'ส่งรีวิวไม่สำเร็จ ลองใหม่อีกครั้งนะคะ');
+        }
+      } catch (_) {
+        this.wrap.error = 'เน็ตสะดุดค่ะ ลองใหม่อีกครั้งนะคะ';
+      } finally {
+        this.wrap.sending = false;
+        this.wrapTouch();
       }
     },
     setQa(q, serverNow) {
@@ -1087,6 +1363,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     init() {
+      this.micSetup();
       // ให้ทุกข้อความมี id คงที่ เพื่อให้ x-for :key ไม่วาดใหม่ทั้งกองตอน
       // ลบ/เพิ่มข้อความ (ปุ่มคัดลอกจะไม่กระพริบและ scroll ไม่กระตุก)
       this.messages.forEach((m) => { m.id = ++this.seq; });

@@ -363,6 +363,24 @@ class JuntraServerClient
         return $this->clipResult($resp, 'voiceSpeak');
     }
 
+    /**
+     * 🎙️ (2026-11-07) ถอดเสียงไมค์ของลูกค้า (ElevenLabs Scribe ฝั่ง Thaiprompt) — ทางสำรองเมื่อเบราว์เซอร์ถอดเองไม่ได้
+     *
+     * @return array{text:?string,code:int} code = HTTP ของ Thaiprompt (0 = ติดต่อไม่ได้) · 429 ครบเพดานวันนี้
+     */
+    public function voiceTranscribe(string $path, string $mime, string $userRef, ?string $persona = null): array
+    {
+        $resp = $this->send(fn (PendingRequest $http) => $http->timeout(40)
+            ->attach('audio', (string) file_get_contents($path), 'mic.' . (str_contains($mime, 'mp4') || str_contains($mime, 'm4a') ? 'm4a' : (str_contains($mime, 'ogg') ? 'ogg' : 'webm')), ['Content-Type' => $mime])
+            ->post($this->url('/voice/transcribe'), array_filter(['user_ref' => $userRef, 'persona' => $persona])));
+        if ($resp?->successful()) {
+            return ['text' => trim((string) $resp->json('data.text')), 'code' => 200];
+        }
+        $this->logMiss('voiceTranscribe', $resp);
+
+        return ['text' => null, 'code' => $resp?->status() ?? 0];
+    }
+
     /** คลิปที่ยังสร้างไม่เสร็จ (202) — ถามซ้ำได้ รอสูงสุด $wait วิ */
     public function voiceClip(int $clipId, int $wait = 12): array
     {
