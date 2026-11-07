@@ -7,12 +7,17 @@
 --}}
 @php
   // แสดงเฉพาะสมาชิกที่ล็อกอิน (ฟีเจอร์ใหม่ทั้งหมดอยู่ในบัญชี) — คนเพิ่งมาจากโฆษณาไม่โดนเด้งทับ
-  $skip = ! auth()->check() || request()->routeIs('tarot.pick', 'tarot.show', 'tarot.free', 'chat.*', 'install.*', 'filament.*')
+  // 💬 (2026-11-07) เจ้าของหาไม่เจอ "ฟีเจอร์ที่คุณทำเพิ่มอยู่ไหน" — ลูกค้าอยู่ในห้องแชทเกือบตลอด (หน้ารวมไพ่ปิดแล้ว)
+  //    ห้องแชทจึงเด้งได้ ยกเว้นช่วงกำลังทำนาย/ถามต่อ (มีล็อกห้อง) ที่ห้ามมีอะไรมาบัง
+  $inReading = request()->routeIs('chat.index') && auth()->check() && \App\Support\ReadingRoomLock::active(request()) !== null;
+  $skip = ! auth()->check() || request()->routeIs('tarot.pick', 'tarot.show', 'tarot.free', 'install.*', 'filament.*')
+       || (request()->routeIs('chat.*') && (! request()->routeIs('chat.index') || $inReading || request()->boolean('readonly')))
        || request()->has('theater');
   $art  = file_exists(public_path('images/juntra/art/whats-new.webp')) ? asset('images/juntra/art/whats-new.webp') : null;
   $items = [
     ['ico' => '🌙', 'title' => 'ดวงประจำวัน', 'text' => 'เช็กอินทุกวันรับสีเสริมดวง เลขนำโชค ทิศมงคล และคำอวยพร มาต่อเนื่องได้ป้ายสะสม', 'href' => route('account.dashboard').'#daily-luck', 'cta' => 'รับดวงวันนี้'],
     ['ico' => '🃏', 'title' => 'สมุดสะสมไพ่ 78 ใบ', 'text' => 'ไพ่ทุกใบที่เคยเปิดได้จะหงายหน้าในสมุด ลองสะสมให้ครบสำรับ', 'href' => route('account.collection'), 'cta' => 'เปิดสมุด'],
+    ['ico' => '🎙️', 'title' => 'กดไมค์พูดแทนพิมพ์', 'text' => 'ในห้องพยากรณ์ แตะปุ่มไมค์ข้างช่องพิมพ์แล้วพูดได้เลย ข้อความขึ้นให้ตรวจก่อนกดส่ง', 'href' => route('chat.index'), 'cta' => 'ไปห้องพยากรณ์'],
     ['ico' => '⭐', 'title' => 'ให้ดาวคำทำนาย', 'text' => 'อ่านจบแล้วบอกแม่หมอได้ว่าตรงใจแค่ไหน ช่วยให้คำทำนายครั้งต่อไปดีขึ้น', 'href' => null, 'cta' => null],
     ['ico' => '🔗', 'title' => 'แชร์ไพ่ให้เพื่อน', 'text' => 'เปิดลิงก์แชร์คำทำนายส่งทาง LINE หรือ Facebook ได้ ปิดกลับเป็นส่วนตัวได้ทุกเมื่อ', 'href' => null, 'cta' => null],
   ];
@@ -21,7 +26,7 @@
 @unless ($skip)
 <div x-data="{
        open: false,
-       key: 'jw-whats-new-2026-11-07',
+       key: 'jw-whats-new-2026-11-07b',
        init() {
          let seen = true;
          try { seen = localStorage.getItem(this.key) === '1'; } catch (e) {}

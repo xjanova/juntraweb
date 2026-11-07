@@ -165,6 +165,7 @@ class ChatController extends Controller
 
         return view('pages.chat.index', [
             'qa'           => $qa,
+            'qaWrap'       => $qa !== null && $user ? $this->qaWrap($reading, $user) : null,
             'conversation' => $conversation,
             'room'         => $conversation->persona,
             'rooms'        => ChatRooms::cards(),
@@ -324,6 +325,68 @@ class ChatController extends Controller
         return $r['url'];
     }
 
+    /**
+     * 🌙 (2026-11-07) การ์ดปิดท้ายเมื่อหมดเวลาถามต่อ — เจ้าของ: "เมื่อเวลาหมดให้ แนะนำ และให้รีวิว อธิบายว่าทำไงได้บ้าง
+     *    ฟังย้อนได้ที่ไหน มีปุ่มให้เลือกหรือจะไปดูไปทำอย่างอื่น ได้ ภายใน 1 นาที ถ้าไม่ทำอะไรก็ปิดห้องและรีเซ็ต"
+     *
+     * @return array{review_url:?string,result_url:string,history_url:string,listen:bool,reviewed:bool,rating:int,close_seconds:int}
+     */
+    private function qaWrap(Reading $reading, $user): array
+    {
+        $own    = $reading->user_id === $user->id;
+        $review = $own ? $reading->review : null;
+
+        return [
+            // รีวิวได้เฉพาะเจ้าของคำทำนายที่อ่านเสร็จแล้ว (กติกาเดียวกับหน้าผล)
+            'review_url'    => $own && TarotSpreads::isTarotType($reading->type) && ! $reading->isInProgress() && ! $reading->isFailed()
+                ? route('tarot.review', $reading) : null,
+            'result_url'    => route('tarot.show', $reading),
+            'history_url'   => route('account.history'),
+            // หน้าผลมีโรงละครเล่าซ้ำพร้อมเสียง → ปุ่มเขียนว่า "ฟังย้อน" แทน "อ่านย้อน"
+            'listen'        => $own && (ReadingTheater::available($reading) || VoicePremium::active($reading)),
+            'reviewed'      => $review !== null,
+            'rating'        => (int) ($review->rating ?? 0),
+            'close_seconds' => max(15, (int) config('reading_qa.wrap_close_seconds', 60)),
+        ];
+    }
+
+    /**
+     * 🎙️ (2026-11-07) ปุ่มไมค์ในห้องพยากรณ์ — เจ้าของถาม "ปุ่มให้ลูกค้ากดพูดไมค์อยู่ไหน"
+     *
+     * ทางหลักคือเบราว์เซอร์ถอดเอง (ฟรี ไม่ผ่านที่นี่) · ที่นี่ = ทางสำรองสำหรับเครื่องที่ถอดเองไม่ได้
+     * ได้ข้อความกลับไปใส่ช่องพิมพ์ ลูกค้าตรวจ/แก้ก่อนกดส่งเอง (ถอดผิดแล้วส่งเลย = เสียค่าข้อความฟรี ๆ)
+     */
+    public function transcribe(Request $request)
+    {
+        $request->validate([
+            // ≤ 700 KB ≈ 25 วิของ opus ที่เบราว์เซอร์อัด (Thaiprompt รับไม่เกิน 768 KB)
+            'audio' => 'required|file|max:700|mimetypes:audio/webm,video/webm,audio/ogg,application/ogg,audio/mp4,video/mp4,audio/x-m4a,audio/aac,audio/mpeg,audio/wav,audio/x-wav',
+            'room'  => 'nullable|string|max:20',
+        ], [
+            'audio.required'  => 'ไม่ได้รับเสียงเลยค่ะ ลองกดไมค์แล้วพูดใหม่นะคะ',
+            'audio.max'       => 'ยาวเกินไปค่ะ ลองพูดสั้น ๆ ทีละเรื่องนะคะ',
+            'audio.*'         => 'ไฟล์เสียงนี้ใช้ไม่ได้ค่ะ ลองพูดใหม่หรือพิมพ์แทนนะคะ',
+        ]);
+        $file = $request->file('audio');
+        $room = ChatRooms::normalize((string) $request->input('room', ''));
+        $r = app(JuntraServerClient::class)->voiceTranscribe(
+            (string) $file->getRealPath(),
+            (string) ($file->getMimeType() ?: 'audio/webm'),
+            (string) $request->user()->id,
+            $room,
+        );
+
+        if ($r['code'] === 200 && $r['text'] !== '') {
+            return response()->json(['text' => mb_substr((string) $r['text'], 0, 2000)]);
+        }
+
+        return response()->json(['message' => match (true) {
+            $r['code'] === 200 => 'ไม่ได้ยินเสียงพูดเลยค่ะ ลองพูดใกล้ไมค์อีกครั้งนะคะ',
+            $r['code'] === 429 => 'วันนี้ใช้ไมค์ครบแล้วค่ะ พิมพ์คุยต่อได้เลยนะคะ',
+            default            => 'ถอดเสียงไม่สำเร็จ ลองพูดใหม่หรือพิมพ์แทนนะคะ',
+        }], $r['code'] === 429 ? 429 : 422);
+    }
+
     private function forgetRoomToken(Request $request, string $room): void
     {
         $tokens = (array) $request->session()->get('chat_tokens', []);
@@ -462,9 +525,12 @@ class ChatController extends Controller
                 . "ถ้าอยากเปิดไพ่ชุดใหม่ กดปุ่ม \"พอแล้ว\" ด้านบนก่อน แล้ว{$self}เปิดให้ได้เลยค่ะ 🌙";
         }
         if (($lock = ReadingRoomLock::active($request)) !== null) {
-            return $lock['reason'] === 'reading'
-                ? "{$self}กำลังอ่านไพ่ชุดที่เปิดไว้ให้อยู่นะคะ อีกสักครู่คำทำนายจะเสร็จ แล้วถามต่อจากไพ่ชุดนั้นได้เลยค่ะ 🌙"
-                : "ตอนนี้เรากำลังอยู่ในพิธีเปิดไพ่กันอยู่นะคะ กลับไปเลือกไพ่ให้ครบก่อน แล้วค่อยถามต่อจากไพ่ได้เลยค่ะ 🌙";
+            return match ($lock['reason']) {
+                'reading' => "{$self}กำลังอ่านไพ่ชุดที่เปิดไว้ให้อยู่นะคะ อีกสักครู่คำทำนายจะเสร็จ แล้วถามต่อจากไพ่ชุดนั้นได้เลยค่ะ 🌙",
+                // ห้องใหม่ระหว่างที่นาฬิกาถามต่อของไพ่ชุดก่อนยังเดินอยู่
+                'qa' => "ตอนนี้ยังอยู่ในช่วงถามต่อจากไพ่ชุดที่เปิดไว้นะคะ กลับไปถามต่อ หรือกด \"พอแล้ว\" ในห้องนั้นก่อน แล้ว{$self}เปิดไพ่ชุดใหม่ให้ได้เลยค่ะ 🌙",
+                default => "ตอนนี้เรากำลังอยู่ในพิธีเปิดไพ่กันอยู่นะคะ กลับไปเลือกไพ่ให้ครบก่อน แล้วค่อยถามต่อจากไพ่ได้เลยค่ะ 🌙",
+            };
         }
         if ($user && ($bill = ChatTopupController::pendingBill($user)) !== null) {
             return "ยังมีบิลเติมเงินเลขที่ {$bill->reference_code} รอชำระอยู่นะคะ จ่ายบิลนี้ให้เรียบร้อยก่อน แล้ว{$self}เปิดไพ่ให้ต่อได้เลยค่ะ";

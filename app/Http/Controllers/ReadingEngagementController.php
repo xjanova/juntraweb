@@ -18,7 +18,7 @@ use Illuminate\Http\Request;
  */
 class ReadingEngagementController extends Controller
 {
-    public function review(Request $request, Reading $reading): RedirectResponse
+    public function review(Request $request, Reading $reading): RedirectResponse|\Illuminate\Http\JsonResponse
     {
         $this->ownFinished($request, $reading);
 
@@ -43,6 +43,11 @@ class ReadingEngagementController extends Controller
             'allow_public' => (bool) ($data['allow_public'] ?? false),
             'approved' => false,
         ]);
+
+        // 🌙 การ์ดปิดท้ายในห้องแชทส่งแบบ fetch — ตอบ JSON ให้ขึ้นขอบคุณในห้องเดิม ไม่พาออกไปหน้าอื่น
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true, 'rating' => (int) $data['rating']]);
+        }
 
         return redirect()->to(route('tarot.show', $reading).'#review')
             ->with('review_saved', true);

@@ -15,6 +15,8 @@ use Illuminate\Support\Carbon;
  *   1) ช่วงสับ/เลือกไพ่ (session tarot_pick) — ล็อกจนจ่ายเงินเปิดไพ่ หรือครบ pick_lock_minutes
  *   2) ช่วงแม่หมออ่านไพ่ (reading pending/working) — ล็อกจนเสร็จ/ล้มเหลว หรือครบ reading_lock_minutes
  *      (รายการค้างถูก readings:sweep-stuck คืนเงินที่ 5 นาที — เวลาล็อกจึงไม่ค้างลูกค้าตลอดไป)
+ *   3) (2026-11-07) ช่วงถามต่อจากไพ่ (นาฬิกา ReadingQaClock เดินอยู่) — ล็อกจนกด "พอแล้ว" หรือหมดเวลา
+ *      เจ้าของสั่ง "มันยังเปลี่ยนห้องทำนายได้ระหว่างทำนาย ซึ่งต้องเปลี่ยนไม่ได้นะ"
  *
  * ห้องของการทำนาย = ห้องของผู้พยากรณ์ที่อ่านไพ่ชุดนั้น (OracleMedia::personaFor ตอนเริ่ม)
  * บังคับที่ฝั่งเซิร์ฟเวอร์ (ห้องแชท ?room= และการเริ่มดูไพ่ชุดของห้องอื่น) — ไม่ใช่แค่ซ่อนปุ่ม
@@ -24,11 +26,11 @@ final class ReadingRoomLock
     /**
      * ล็อกที่มีผลอยู่ตอนนี้ หรือ null
      *
-     * @return array{room: string, until: Carbon, reason: 'pick'|'reading', reading_id: int|null}|null
+     * @return array{room: string, until: Carbon, reason: 'pick'|'reading'|'qa', reading_id: int|null}|null
      */
     public static function active(Request $request): ?array
     {
-        $locks = array_filter([self::fromReading($request), self::fromPick($request)]);
+        $locks = array_filter([self::fromReading($request), self::fromPick($request), self::fromQa($request)]);
         if ($locks === []) {
             return null;
         }
@@ -55,9 +57,11 @@ final class ReadingRoomLock
         $mins = max(1, (int) ceil(now()->diffInSeconds($lock['until'], false) / 60));
         $who = ChatRooms::name($lock['room']);
 
-        return $lock['reason'] === 'reading'
-            ? "{$who}กำลังอ่านไพ่ให้อยู่ — เปลี่ยนห้องได้เมื่อคำทำนายเสร็จ (หรืออีกราว {$mins} นาที)"
-            : "เริ่มพิธีเปิดไพ่กับ{$who}แล้ว — เปลี่ยนห้องได้เมื่อเปิดไพ่เสร็จ หรืออีกราว {$mins} นาที";
+        return match ($lock['reason']) {
+            'reading' => "{$who}กำลังอ่านไพ่ให้อยู่ — เปลี่ยนห้องได้เมื่อคำทำนายเสร็จ (หรืออีกราว {$mins} นาที)",
+            'qa'      => "กำลังถามต่อจากไพ่กับ{$who}อยู่ — เปลี่ยนห้องได้เมื่อกด \"พอแล้ว\" หรือหมดเวลาถามต่อ (อีกราว {$mins} นาที)",
+            default   => "เริ่มพิธีเปิดไพ่กับ{$who}แล้ว — เปลี่ยนห้องได้เมื่อเปิดไพ่เสร็จ หรืออีกราว {$mins} นาที",
+        };
     }
 
     /**
@@ -68,6 +72,15 @@ final class ReadingRoomLock
      */
     public static function view(array $lock): array
     {
+        if ($lock['reason'] === 'qa') {
+            // ห้องถามต่อมีนาฬิกา + ปุ่ม "พอแล้ว" ของตัวเองอยู่แล้ว — แถบนี้ใช้แค่บอกเวลา/พากลับห้องเดิม
+            return [
+                'reason' => 'qa', 'room' => $lock['room'], 'name' => ChatRooms::name($lock['room']),
+                'ends_at' => $lock['until']->getTimestamp(), 'message' => 'กำลังถามต่อจากไพ่',
+                'resume_url' => route('chat.index', ['room' => $lock['room']]), 'resume_label' => 'กลับไปถามต่อ',
+                'can_end' => false,
+            ];
+        }
         $isReading = $lock['reason'] === 'reading';
 
         return [
@@ -127,6 +140,36 @@ final class ReadingRoomLock
             'room'       => ChatRooms::normalize((string) $room),
             'until'      => $reading->created_at->copy()->addMinutes($mins),
             'reason'     => 'reading',
+            'reading_id' => $reading->id,
+        ];
+    }
+
+    /** ช่วงถามต่อจากไพ่ — ห้องที่นาฬิกาถามต่อเดินอยู่ (เริ่มนับแล้ว ยังไม่กด "พอแล้ว" ยังไม่หมดเวลา) */
+    private static function fromQa(Request $request): ?array
+    {
+        $user = $request->user();
+        if (! $user) {
+            return null;
+        }
+        // นาทีถามต่อยาวสุดที่ตั้งได้ (พรีเมียม 20) + เผื่อ — ห้องที่เริ่มนับก่อนนี้หมดเวลาไปแล้วแน่นอน
+        $maxMinutes = max(60, (int) config('reading_voice.qa_minutes', 20), ...array_map('intval', array_values((array) config('reading_qa.minutes', []))));
+        $conversation = \App\Models\ChatConversation::query()
+            ->where('user_id', $user->id)
+            ->whereNotNull('reading_id')
+            ->whereNull('qa_ended_at')
+            ->where('qa_started_at', '>', now()->subMinutes($maxMinutes))
+            ->latest('qa_started_at')
+            ->first();
+        $reading = $conversation ? Reading::find($conversation->reading_id) : null;
+        $state = $conversation && $reading ? ReadingQaClock::state($conversation, $reading) : null;
+        if ($state === null || $state['over'] || ! $state['ends_at']) {
+            return null;
+        }
+
+        return [
+            'room'       => ChatRooms::normalize((string) ($conversation->persona ?: data_get($reading->payload, 'room'))),
+            'until'      => Carbon::createFromTimestamp($state['ends_at']),
+            'reason'     => 'qa',
             'reading_id' => $reading->id,
         ];
     }
