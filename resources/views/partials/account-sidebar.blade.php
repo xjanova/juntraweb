@@ -18,6 +18,7 @@
     ['key'=>'wallet',   'label'=>'วอลเลต',            'icon'=>'M3 7h18v10H3zM3 10h18 M16 13h2','route'=>'wallet.index'],
     ['key'=>'topups',   'label'=>'แจ้งเติมเงิน',       'icon'=>'M12 5v14M5 12h14',              'route'=>'wallet.topups'],
     ['key'=>'history',  'label'=>'ประวัติดูดวง',      'icon'=>'M12 8v4l3 2 M21 12a9 9 0 1 1-9-9c2.5 0 4.8 1 6.5 2.6L21 8 M21 3v5h-5','route'=>'account.history'],
+    ['key'=>'collection','label'=>'สมุดสะสมไพ่',      'icon'=>'M6 3h9l3 3v15H6z M9 8h6 M9 12h6 M9 16h4','route'=>'account.collection'],
     ['key'=>'chats',    'label'=>'บทสนทนา',           'icon'=>'M21 12c0 5-4 9-9 9-1.5 0-3-.4-4.2-1L3 21l1-3.8A8.9 8.9 0 0 1 3 12a9 9 0 1 1 18 0z','route'=>'account.chats'],
     ['key'=>'security', 'label'=>'ความปลอดภัย',       'icon'=>'M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z','route'=>'account.security'],
     ['key'=>'profile',  'label'=>'โปรไฟล์ & รหัสผ่าน','icon'=>'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 20c0-4 4-6 8-6s8 2 8 6','route'=>'profile.edit'],

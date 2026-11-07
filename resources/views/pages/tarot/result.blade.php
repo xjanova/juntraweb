@@ -301,6 +301,11 @@
       </div>
     @endif
 
+    {{-- 🌟 (2026-11-07) ให้ดาว/รีวิว + แชร์ลิงก์ — เจ้าของคำทำนายที่อ่านเสร็จแล้วเท่านั้น --}}
+    @if ($isOwner && ! $reading->isInProgress() && ! $reading->isFailed())
+      <x-reading-aftercare :reading="$reading" :oracle="$oracleShort" />
+    @endif
+
     {{-- 🎁 ไพ่ฟรี: คำถามที่ควรถามต่อ + ชวนเปิดไพ่ชุดเต็ม
          คำทำนายฟรีตอบครบแล้ว ตรงนี้คือ "ปลายเปิด" — ประเด็นที่ไพ่ใบเดียวตอบไม่ได้ --}}
     @if ($isFreeReading)

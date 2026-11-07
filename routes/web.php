@@ -93,6 +93,12 @@ Route::prefix('tarot')->name('tarot.voice.')->middleware('auth')->controller(\Ap
     Route::get('/result/{reading}/voice.mp3', 'file')->name('file');
 });
 
+// 🌟 (2026-11-07) หลังจบคำทำนาย — รีวิว + เปิด/ปิดลิงก์แชร์ (เจ้าของคำทำนายเท่านั้น)
+Route::prefix('tarot')->name('tarot.')->middleware(['auth', 'throttle:20,1'])->controller(\App\Http\Controllers\ReadingEngagementController::class)->group(function () {
+    Route::post('/result/{reading}/review', 'review')->name('review');
+    Route::post('/result/{reading}/share', 'share')->name('share');
+});
+
 // 🎁 ดูดวงฟรี 1 ใบ — ปลายทางของปุ่ม "ดูดวงฟรี" จากบอท FB/LINE (magic link ?to=/tarot/free)
 // GET เรนเดอร์หน้ารอเท่านั้น (ห้ามให้ GET ยิง AI — รีเฟรช/prefetch จะยิงซ้ำ)
 // POST เป็นตัวเปิดไพ่จริง + throttle เดียวกับรายการที่ตัดเงิน
@@ -188,6 +194,10 @@ Route::middleware('auth')->prefix('account')->name('account.')->group(function (
     Route::get('/dashboard', [AccountController::class, 'dashboard'])->name('dashboard');
     Route::get('/history', [AccountController::class, 'history'])->name('history');
     Route::get('/chats', [AccountController::class, 'chats'])->name('chats');
+
+    // 🌙 (2026-11-07) เช็กอินรับดวงประจำวัน + สมุดสะสมไพ่
+    Route::post('/checkin', [\App\Http\Controllers\AccountEngagementController::class, 'checkin'])->middleware('throttle:20,1')->name('checkin');
+    Route::get('/collection', [\App\Http\Controllers\AccountEngagementController::class, 'collection'])->name('collection');
 
     // Astrology profile (DOB / birth time / zodiacs) — feeds horoscope/numerology etc.
     Route::get('/astrology', [AccountController::class, 'astrology'])->name('astrology');

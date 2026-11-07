@@ -80,6 +80,9 @@
 
 @include('themes.' . $activeTheme . '.footer')
 
+{{-- ✨ (2026-11-07) แนะนำฟีเจอร์ใหม่ ครั้งเดียวต่อเครื่อง --}}
+<x-whats-new />
+
 @stack('scripts')
 </body>
 </html>
