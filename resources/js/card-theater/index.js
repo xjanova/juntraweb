@@ -934,6 +934,14 @@ function createTheater(root, cfg, useGL) {
         const fail = () => {
             if (run !== state.run || state.phase !== 'story') return;
             tale.voiced = false; music.lower(false); clearInterval(tale.tick); taleNext();
+            // (2026-11-07) ยังไม่ได้แตะหน้า เบราว์เซอร์เลยไม่ให้เล่น — แตะตรงไหนก็ได้ (ที่ไม่ใช่ปุ่ม) = เล่นเสียงต่อจากบทที่ค้าง
+            //    ลูกค้าพรีเมียมจ่ายค่าเสียงแล้ว ต้องไม่ติดอยู่ในโหมดตัวหนังสือจนจบ
+            const unlock = (e) => {
+                if (e.target && e.target.closest && e.target.closest('button, a')) { document.addEventListener('pointerdown', unlock, { once: true, capture: true }); return; }
+                if (run !== state.run || state.phase !== 'story' || tale.voiced || !tale.playing || !soundOn()) return;
+                voiceFrom(Math.max(0, tale.i));
+            };
+            document.addEventListener('pointerdown', unlock, { once: true, capture: true });
         };
         if (p && p.catch) p.catch(fail);
         clearInterval(tale.tick);
@@ -1009,6 +1017,8 @@ function createTheater(root, cfg, useGL) {
         tale.playing = !tale.playing;
         const b = action('tplay'); if (b) b.textContent = tale.playing ? '⏸' : '▶';
         if (tale.voiced && tale.audio) { if (tale.playing) tale.audio.play().catch(() => {}); else tale.audio.pause(); }
+        // (2026-11-07) เบราว์เซอร์บล็อกเสียงตอนเริ่มเล่า (ยังไม่ได้แตะหน้า) → เล่าเป็นตัวหนังสืออยู่ · กด ▶ = แตะแล้ว เล่นเสียงต่อจากบทนี้เลย
+        else if (tale.playing && STORY.voice && soundOn()) voiceFrom(Math.max(0, tale.i));
         else if (tale.playing) taleNext(); else clearTimeout(tale.timer);
     }
     function taleEnd() {
