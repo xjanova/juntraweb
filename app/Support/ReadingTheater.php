@@ -377,7 +377,7 @@ final class ReadingTheater
      * ราศีของลูกค้าสำหรับกลุ่มดาวในบทพื้นดวง
      *
      * ยึดราศีที่หัวข้อ 🌠 พูดถึงก่อน (ภาพต้องตรงกับที่เล่า) · ไม่เอ่ยชื่อราศี = คำนวณจากวันเกิดที่เก็บไว้
-     * (Astrology::westernZodiacSlug) · ไม่มีหัวข้อ 🌠 = ไม่มีบทพื้นดวง → null
+     * (Astrology::thaiZodiacSlug — ราศีแบบไทย ชุดเดียวกับผังดวงของบอท) · ไม่มีหัวข้อ 🌠 = ไม่มีบทพื้นดวง → null
      *
      * @return array{slug:string, name:string, glyph:string}|null
      */
@@ -391,7 +391,7 @@ final class ReadingTheater
         if (preg_match('/ราศี\s*('.implode('|', array_map('preg_quote', array_keys(self::ZODIAC))).')/u', $text, $m)) {
             $slug = self::ZODIAC[$m[1]];
         } elseif (is_string($birthDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $birthDate)) {
-            $slug = Astrology::westernZodiacSlug(Carbon::parse($birthDate));
+            $slug = Astrology::thaiZodiacSlug(Carbon::parse($birthDate));
         }
         if ($slug === null) {
             return null;

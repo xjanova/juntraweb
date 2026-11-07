@@ -253,7 +253,7 @@ class JuntraServerClient
      * ทั้งที่ PHP ยังทำงานต่อและเงินถูกหักไปแล้ว) · งานเบื้องหลังหลังส่งหน้าแล้ว (InterpretTarotReading)
      * รอได้นานกว่า — แพ็กเกจยาวบนเลนทำนายใช้ ~36-55 วิ ชนเพดานของคำขอหน้าเว็บพอดี
      *
-     * @param  'tarot/interpret'|'tarot/free'|'deep'  $kind
+     * @param  'tarot/interpret'|'tarot/free'|'deep'|'horoscope/daily'|'auspicious'|'palm'  $kind
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
     public function fortune(string $kind, array $payload, int $timeout = 55): array

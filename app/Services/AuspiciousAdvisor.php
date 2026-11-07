@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\FortuneBot\FortuneBotClient;
 use App\Support\AuspiciousOccasions;
 use App\Support\ThaiAstro;
+use Illuminate\Support\Carbon;
 
 /**
  * แปลงผลคำนวณฤกษ์เป็นคำแนะนำที่อ่านรู้เรื่อง
@@ -27,11 +28,18 @@ class AuspiciousAdvisor
      */
     public function advise(?User $user, string $occasionKey, string $occasionText, array $days): array
     {
-        $remote = $this->bot->auspiciousAdvice($user, [
-            'prompt'   => $this->prompt($occasionKey, $occasionText, $days),
-            'occasion' => $occasionText,
-            'category' => $occasionKey,
-        ]);
+        // 🗓️ (2026-11-07) ส่งวันที่คัดไว้ + วันเกิดเจ้าของงานไปด้วย — แม่หมอฝั่ง Thaiprompt ตรวจทุกวันซ้ำ
+        // ด้วยปฏิทินโหรไทย (ThaiRuekYam) และตัดวันกาลกิณีของเจ้าของงานตามทักษา ก่อนเขียนคำแนะนำ
+        // วันเกิด = วันนี้/อนาคต (กรอกผิด) ไม่ส่ง — ฝั่งนั้นตอบ 422 แล้วลูกค้าจะได้แค่คำแนะนำที่เขียนเอง
+        $birth = $user?->profile?->birth_date;
+        $birth = $birth && Carbon::parse($birth)->lt(Carbon::today()) ? $birth : null;
+        $remote = $this->bot->auspiciousAdvice($user, array_filter([
+            'prompt'     => $this->prompt($occasionKey, $occasionText, $days),
+            'occasion'   => $occasionText,
+            'category'   => $occasionKey,
+            'days'       => array_values(array_unique(array_map(fn (array $d) => $d['date']->format('Y-m-d'), array_slice($days, 0, 12)))),
+            'birth_date' => $birth ? Carbon::parse($birth)->format('Y-m-d') : null,
+        ], fn ($v) => $v !== null && $v !== []));
 
         if ($remote && ! empty($remote['advice'])) {
             return [

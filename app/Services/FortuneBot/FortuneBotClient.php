@@ -220,7 +220,18 @@ class FortuneBotClient
      */
     public function auspiciousAdvice(?User $user, array $payload): ?array
     {
-        if (! $this->isAvailable($user) || empty($payload['prompt'])) {
+        if (empty($payload['prompt'])) {
+            return null;
+        }
+
+        // 🗓️ (2026-11-07) เลนของเว็บก่อน — ไม่ต้องมี token ลูกค้า (ลูกค้าเบอร์/อีเมลก็ได้คำแนะนำจากแม่หมอ)
+        // ฝั่งนั้นตรวจทุกวันซ้ำด้วยปฏิทินโหรไทย (ThaiRuekYam) + วันกาลกิณีของเจ้าของงาน ก่อนให้ AI เขียน
+        // ไม่ได้ (ล่ม/ปฏิเสธ) = คืน null ให้ผู้เรียกเขียนเองจากผลคำนวณ — ไม่ไหลไปท่อแชทต่อ เพราะเส้นแชทไม่ได้ตรวจวันซ้ำ
+        [$data, $fallback] = $this->viaServer('auspicious', $payload, 'advice', 40);
+        if ($data !== null || ! $fallback) {
+            return $data;
+        }
+        if (! $this->isAvailable($user)) {
             return null;
         }
 
@@ -269,10 +280,13 @@ class FortuneBotClient
      * @param  array{zodiac:string,zodiac_th:string,date:string}  $payload
      * @return array<string,mixed>|null
      */
-    public function dailyHoroscope(?User $user, array $payload): ?array
+    public function dailyHoroscope(?User $user, array $payload, int $timeout = 45): ?array
     {
-        if (! $this->isAvailable($user)) {
-            return null;
+        // 🪐 (2026-11-07) เลนของเว็บก่อน — ฝั่งนั้นเขียนจากตำแหน่งดาวจริงของวันนั้น (PlanetEphemeris)
+        // ราศีละหนึ่งฉบับต่อวัน แคชไว้ฝั่งนั้น · ไม่ต้องยืม token ใคร
+        [$data, $fallback] = $this->viaServer('horoscope/daily', $payload, 'summary', $timeout);
+        if ($data !== null || ! $fallback || ! $this->isAvailable($user)) {
+            return $data;
         }
 
         try {
@@ -293,6 +307,34 @@ class FortuneBotClient
         }
 
         return null;
+    }
+
+    /**
+     * ✋ (2026-11-07) อ่านลายมือผ่านด่าน vision ของบอท (Thaiprompt fortune/palm)
+     *
+     * เดิมเว็บใช้ Gemini ของตัวเอง ซึ่งบน prod ไม่มีคีย์ ⇒ บริการดูลายมือเปิดใช้ไม่ได้เลย
+     * มีแต่เลนของเว็บ (ไม่มีเลน token) — รูปลูกค้าไม่ต้องผ่านบัญชีใคร
+     *
+     * @param  string  $dataUrl  data:image/jpeg;base64,... (ผู้เรียกย่อรูปมาแล้ว)
+     * @return array{status:'ok'|'not_palm'|'unavailable'|'unsupported', data:?array}
+     *   not_palm = รูปไม่เห็นฝ่ามือ (ให้ถ่ายใหม่) · unsupported = Thaiprompt ยังไม่มีเส้นนี้ / ไม่ได้ตั้งค่า
+     */
+    public function palmReading(string $dataUrl, ?string $question, ?string $name = null): array
+    {
+        $res = $this->server()->fortune('palm', array_filter([
+            'image' => $dataUrl,
+            'question' => $question,
+            'customer_name' => $name,
+        ], fn ($v) => $v !== null && $v !== ''), 50);
+
+        if ($res['status'] === 'ok' && ! empty($res['data']['reading'])) {
+            return ['status' => 'ok', 'data' => $res['data']];
+        }
+        if (($res['error']['reason_code'] ?? null) === 'not_palm') {
+            return ['status' => 'not_palm', 'data' => null];
+        }
+
+        return ['status' => $res['status'] === 'unsupported' ? 'unsupported' : 'unavailable', 'data' => null];
     }
 
     /** True if the upstream Thaiprompt endpoints are configured + reachable. */

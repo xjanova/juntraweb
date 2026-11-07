@@ -15,6 +15,8 @@ Schedule::command('wallet:cleanup-expired-topups')->hourly();
 Schedule::command('wallet:reconcile')->dailyAt('00:30');
 // คำทำนายไพ่ที่อ่านเบื้องหลังแล้วค้าง (PHP ตายกลางงาน) → คืนเงินภายใน ~5-10 นาที
 Schedule::command('readings:sweep-stuck')->everyFiveMinutes()->withoutOverlapping();
+// 🌅 ดวงรายวัน 12 ราศีจากดาวจริง — เขียนไว้ก่อนคนแรกของวันเปิด (หน้าเว็บรอ AI ได้ไม่ถึง 60 วิ)
+Schedule::command('horoscope:warm')->dailyAt('00:05')->timezone('Asia/Bangkok')->withoutOverlapping(30)->runInBackground();
 
 // 🌙 บิลคำทำนายเว็บ+แอพ → ผังแม่หมอแจกค่าแนะนำ (คืนเงินลูกค้า = ดึงค่าแนะนำคืน)
 //   ส่งบิลที่เกิน 15 นาที = พ้นรอบ sweep-stuck (5 นาที) ที่คืนเงินไพ่ที่อ่านไม่สำเร็จ

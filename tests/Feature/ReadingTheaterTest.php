@@ -112,8 +112,9 @@ class ReadingTheaterTest extends TestCase
     {
         $t = ReadingTheater::build($this->threeCards(['birth_date' => '1990-01-25'], "## 🌠 พื้นดวง\nลูกเป็นคนคิดไกล\n\n"));
 
-        $this->assertSame('aquarius', $t['zodiac']['slug']);
-        $this->assertSame('ราศีกุมภ์', $t['zodiac']['name']);
+        // ราศีแบบไทย (นิรายนะ) ชุดเดียวกับผังดวงของบอท — 25 ม.ค. สากลเป็นกุมภ์ แต่แบบไทยยังเป็นมังกร
+        $this->assertSame('capricorn', $t['zodiac']['slug']);
+        $this->assertSame('ราศีมังกร', $t['zodiac']['name']);
     }
 
     public function test_year_graph_uses_month_labels_only(): void
