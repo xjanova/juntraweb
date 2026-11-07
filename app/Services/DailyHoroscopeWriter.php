@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\DailyHoroscope;
 use App\Models\Zodiac;
 use App\Services\FortuneBot\FortuneBotClient;
 use App\Support\ThaiAstro;
 use App\Support\ThaipromptServiceAccount;
 use Carbon\CarbonInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 
 /**
@@ -24,6 +26,11 @@ use Illuminate\Support\Carbon;
  *
  * fallback จึงต้องดีพอด้วยตัวเอง — ประกอบจากธาตุ/ดาวเจ้าเรือนของราศีนั้น
  * บวกกับดิถีและวารจริงของวันนั้น จึงต่างกันทั้งรายราศีและรายวันโดยไม่ต้องใช้ AI
+ *
+ * 🪐 (2026-11-07) ฝั่ง Thaiprompt มีเส้น fortune/horoscope/daily แล้ว (เดิม 404 ตลอด) — เขียนจาก
+ *    ตำแหน่งดาวจริงของวันนั้น (เครื่องเดียวกับบอทแม่หมอ) ผ่านเลนของเว็บ ไม่ต้องยืม token ใคร
+ *    กฎเจ้าของ (2026-08-02) ใช้ทั้งสองทาง: สีมงคลและไพ่ประจำวัน **งดถาวร** (ไม่ได้คำนวณจากอะไรจริง)
+ *    เลขนำโชคมีเฉพาะที่ Thaiprompt ให้มา (วันที่ 15/29) — ทางที่เขียนเองไม่มีเลข เลิกสุ่มจาก crc32
  */
 class DailyHoroscopeWriter
 {
@@ -60,15 +67,35 @@ class DailyHoroscopeWriter
         ],
     ];
 
-    private const COLORS = ['ทองอ่อน', 'ม่วงเข้ม', 'ฟ้าคราม', 'เขียวมรกต', 'ขาวงาช้าง', 'ชมพูกุหลาบ', 'แดงทับทิม', 'ส้มอิฐ', 'น้ำเงินหมึก'];
-    private const CARDS = ['The Magician', 'The Sun', 'The Star', 'The World', 'The Empress', 'The Lovers', 'Wheel of Fortune', 'The Chariot', 'Temperance'];
+    /**
+     * ดวงของวันนั้น — มีในตารางแล้วอ่านของเดิม ไม่มีค่อยเขียนแล้วเก็บ (วันละครั้งต่อราศี)
+     * หน้าเว็บ แอพ และคำสั่งอุ่นตอนเที่ยงคืน ใช้ตัวนี้ตัวเดียว — ทุกช่องทางเห็นดวงฉบับเดียวกัน
+     *
+     * @param  int  $timeout  วินาทีที่รอ Thaiprompt — หน้าเว็บต้องจบก่อน Apache ตัด 60 วิ · คำสั่งเบื้องหลังรอได้นานกว่า
+     */
+    public function today(Zodiac $zodiac, CarbonInterface $date, int $timeout = 45): DailyHoroscope
+    {
+        // whereDate — คอลัมน์อาจถูกเก็บเป็น date หรือ datetime แล้วแต่ไดรเวอร์
+        $row = DailyHoroscope::where('zodiac_id', $zodiac->id)->whereDate('date', $date)->first();
+        if ($row) {
+            return $row;
+        }
+
+        $payload = $this->write($zodiac, $date, $timeout);
+        try {
+            return DailyHoroscope::create($payload + ['zodiac_id' => $zodiac->id, 'date' => $date]);
+        } catch (QueryException) {
+            // คนเปิดพร้อมกันเขียนก่อนเรา (unique [zodiac_id, date]) — ใช้ของเขา ไม่ปล่อย 500
+            return DailyHoroscope::where('zodiac_id', $zodiac->id)->whereDate('date', $date)->firstOrFail();
+        }
+    }
 
     /**
      * @return array<string,mixed> คีย์ตรงกับคอลัมน์ของตาราง daily_horoscopes
      */
-    public function write(Zodiac $zodiac, CarbonInterface $date): array
+    public function write(Zodiac $zodiac, CarbonInterface $date, int $timeout = 45): array
     {
-        $remote = $this->fromPool($zodiac, $date);
+        $remote = $this->fromPool($zodiac, $date, $timeout);
         if ($remote) {
             return $remote;
         }
@@ -78,18 +105,14 @@ class DailyHoroscopeWriter
 
     /* ============================================================ */
 
-    private function fromPool(Zodiac $zodiac, CarbonInterface $date): ?array
+    private function fromPool(Zodiac $zodiac, CarbonInterface $date, int $timeout): ?array
     {
-        $user = ThaipromptServiceAccount::resolve();
-        if (! $user) {
-            return null;
-        }
-
-        $data = $this->bot->dailyHoroscope($user, [
+        // บัญชียืม token ใช้แค่ตอน Thaiprompt ยังไม่มีเลนของเว็บ — เลนของเว็บไม่ต้องใช้ใครเลย
+        $data = $this->bot->dailyHoroscope(ThaipromptServiceAccount::resolve(), [
             'zodiac'    => $zodiac->slug,
             'zodiac_th' => $zodiac->name_th,
             'date'      => $date->format('Y-m-d'),
-        ]);
+        ], $timeout);
 
         if (! $data || empty($data['summary'])) {
             return null;
@@ -102,9 +125,7 @@ class DailyHoroscopeWriter
             'money'        => (string) ($data['money'] ?? ''),
             'health'       => (string) ($data['health'] ?? ''),
             'lucky_number' => (string) ($data['lucky_number'] ?? ''),
-            'lucky_color'  => (string) ($data['lucky_color'] ?? ''),
-            'lucky_card'   => (string) ($data['lucky_card'] ?? ''),
-            'ai_generated' => true,
+            'ai_generated' => (bool) ($data['ai_generated'] ?? true),
         ]);
     }
 
@@ -118,7 +139,6 @@ class DailyHoroscopeWriter
         $tithi   = ThaiAstro::tithi($day);
         $weekday = ThaiAstro::WEEKDAY[$day->dayOfWeek];
         $el      = self::ELEMENTS[$zodiac->element] ?? self::ELEMENTS['Fire'];
-        $seed    = crc32($zodiac->slug.$day->toDateString());
 
         $waxing = $tithi['side'] === 'waxing';
         $phase = match (true) {
@@ -183,9 +203,6 @@ class DailyHoroscopeWriter
             'career'       => $career,
             'money'        => $money,
             'health'       => $health,
-            'lucky_number' => (string) (($seed % 99) + 1),
-            'lucky_color'  => self::COLORS[$seed % count(self::COLORS)],
-            'lucky_card'   => self::CARDS[($seed >> 3) % count(self::CARDS)],
             'ai_generated' => false,
         ]);
     }
@@ -260,12 +277,16 @@ class DailyHoroscopeWriter
         };
     }
 
-    /** ตัดตามความกว้างคอลัมน์ (8/32/64) — ค่าที่ยาวเกินเคยทำหน้าราศี 500 มาแล้ว */
+    /**
+     * ตัดตามความกว้างคอลัมน์ (8) — ค่าที่ยาวเกินเคยทำหน้าราศี 500 มาแล้ว
+     * ว่าง = null (หน้าเว็บซ่อนกล่อง) · ห้ามเติมค่าเดาเอง — สีกับไพ่เป็น null เสมอตามกฎเจ้าของ
+     */
     private function clamp(array $row): array
     {
-        $row['lucky_number'] = mb_substr($row['lucky_number'] !== '' ? $row['lucky_number'] : (string) random_int(1, 99), 0, 8);
-        $row['lucky_color']  = mb_substr($row['lucky_color'] !== '' ? $row['lucky_color'] : 'ทองอ่อน', 0, 32);
-        $row['lucky_card']   = mb_substr($row['lucky_card'] !== '' ? $row['lucky_card'] : 'The Star', 0, 64);
+        $num = trim((string) ($row['lucky_number'] ?? ''));
+        $row['lucky_number'] = $num !== '' ? mb_substr($num, 0, 8) : null;
+        $row['lucky_color'] = null;
+        $row['lucky_card'] = null;
 
         return $row;
     }

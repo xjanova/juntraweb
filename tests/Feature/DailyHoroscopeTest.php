@@ -270,17 +270,21 @@ class DailyHoroscopeTest extends TestCase
         $this->assertNotSame($rows[0], $rows[1]);
     }
 
-    /** ค่าที่ยาวเกินความกว้างคอลัมน์เคยทำหน้าราศี 500 มาแล้ว — ต้องถูกตัดเสมอ */
-    public function test_lucky_fields_stay_within_column_widths(): void
+    /**
+     * ทางที่เขียนเองไม่มีของ "นำโชค" เลย — กฎเจ้าของ (2026-08-02): ทำนายจากดาวจริงเท่านั้น
+     * สีมงคลกับไพ่ประจำวันงดถาวร เลขนำโชคมีเฉพาะที่ Thaiprompt คำนวณให้ (วันที่ 15/29)
+     * (เดิมสุ่มจาก crc32 ของชื่อราศี + วันที่)
+     */
+    public function test_local_writing_has_no_lucky_items(): void
     {
         $this->seedZodiacs();
         $writer = app(DailyHoroscopeWriter::class);
 
         foreach (Zodiac::all() as $z) {
             $row = $writer->write($z, Carbon::today());
-            $this->assertLessThanOrEqual(8, mb_strlen($row['lucky_number']));
-            $this->assertLessThanOrEqual(32, mb_strlen($row['lucky_color']));
-            $this->assertLessThanOrEqual(64, mb_strlen($row['lucky_card']));
+            $this->assertNull($row['lucky_number']);
+            $this->assertNull($row['lucky_color']);
+            $this->assertNull($row['lucky_card']);
         }
     }
 }

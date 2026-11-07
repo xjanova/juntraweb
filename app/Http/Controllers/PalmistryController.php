@@ -3,9 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\InsufficientFundsException;
+use App\Exceptions\PalmNotVisibleException;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Models\Reading;
-use App\Services\AiOracle;
+use App\Services\PalmReader;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use Illuminate\Http\Request;
@@ -25,10 +26,11 @@ class PalmistryController extends Controller
         ]);
     }
 
-    public function analyze(Request $request, AiOracle $oracle)
+    public function analyze(Request $request, PalmReader $palm)
     {
         $request->validate([
-            'image'    => 'required|image|max:4096',
+            // jpg/png/webp เท่านั้น — ด่าน vision รับแค่นี้ และกัน SVG (สคริปต์ฝังได้) ไปนอนใน storage สาธารณะ
+            'image'    => 'required|image|mimes:jpg,jpeg,png,webp|max:4096',
             'question' => 'nullable|string|max:500',
         ]);
 
@@ -36,11 +38,9 @@ class PalmistryController extends Controller
             return redirect()->route('login')->with('status', 'กรุณาเข้าสู่ระบบเพื่อใช้บริการดูลายมือ');
         }
 
-        // Palmistry needs a vision model and has NO heuristic fallback. If the
-        // AI isn't configured, refuse BEFORE charging — never debit for a
-        // reading we cannot produce. (A configured-but-failed call is handled
-        // by the refund path below, since analyzePalmImage() now throws.)
-        if (!$oracle->isConfigured()) {
+        // ดูลายมือไม่มีทางสำรองที่เขียนเอง — ไม่มีทางอ่านเลย (ไม่ได้ต่อ Thaiprompt และไม่มีคีย์ Gemini)
+        // ต้องปฏิเสธก่อนหักเงิน · อ่านแล้วพลาด = คืนเงินในบล็อก catch ด้านล่าง
+        if (!$palm->isAvailable()) {
             return redirect()->route('palmistry.index')
                 ->with('status', 'ขออภัย บริการดูลายมือ AI ยังไม่พร้อมให้บริการในขณะนี้ — ยังไม่มีการหักเครดิต กรุณาลองบริการอื่นก่อนนะคะ');
         }
@@ -65,7 +65,7 @@ class PalmistryController extends Controller
             $path     = $request->file('image')->store('palmistry', 'public');
             $absolute = storage_path('app/public/' . $path);
 
-            $analysis = $oracle->analyzePalmImage($absolute, $request->input('question'));
+            $analysis = $palm->read($absolute, $request->input('question'));
 
             $reading = Reading::create([
                 'user_id'       => $request->user()->id,
@@ -73,9 +73,9 @@ class PalmistryController extends Controller
                 'type'          => 'palmistry',
                 'question'      => $request->input('question'),
                 'payload'       => ['image_path' => $path, 'cost' => $cost],
-                'result'        => $analysis,
-                'ai_provider'   => $oracle->provider(),
-                'ai_model'      => $oracle->model(),
+                'result'        => $analysis['reading'],
+                'ai_provider'   => $analysis['ai_provider'],
+                'ai_model'      => $analysis['ai_model'],
             ]);
 
             if ($tx) {
@@ -92,7 +92,9 @@ class PalmistryController extends Controller
                 }
             }
             return redirect()->route('palmistry.index')
-                ->with('status', 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนแล้ว กรุณาลองใหม่');
+                ->with('status', $e instanceof PalmNotVisibleException
+                    ? PalmNotVisibleException::MESSAGE
+                    : 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนแล้ว กรุณาลองใหม่');
         }
 
         return view('pages.palmistry.result', [

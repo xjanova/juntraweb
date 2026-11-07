@@ -3,12 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Models\DailyHoroscope;
 use App\Models\ChineseZodiac;
 use App\Models\Zodiac;
 use App\Services\DailyHoroscopeWriter;
 use Carbon\Carbon;
-use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -90,26 +88,8 @@ class HoroscopeController extends Controller
     public function show(Zodiac $zodiac, DailyHoroscopeWriter $writer): JsonResponse
     {
         $today = Carbon::today();
-
-        $h = DailyHoroscope::where('zodiac_id', $zodiac->id)
-            ->whereDate('date', $today)
-            ->first();
-
-        if (!$h) {
-            // เครื่องเขียนตัวเดียวกับเว็บ — แอพกับเว็บต้องเห็นดวงวันเดียวกัน
-            $payload = $writer->write($zodiac, $today);
-            try {
-                $h = DailyHoroscope::create(array_merge($payload, [
-                    'zodiac_id' => $zodiac->id,
-                    'date'      => $today,
-                ]));
-            } catch (QueryException) {
-                // Concurrent first-view created it — use theirs.
-                $h = DailyHoroscope::where('zodiac_id', $zodiac->id)
-                    ->whereDate('date', $today)
-                    ->firstOrFail();
-            }
-        }
+        // อ่านของวันนี้ ไม่มีค่อยเขียนแล้วเก็บ — ตัวเดียวกับเว็บ และคำสั่ง horoscope:warm
+        $h = $writer->today($zodiac, $today);
 
         return response()->json([
             'data' => [
@@ -129,8 +109,9 @@ class HoroscopeController extends Controller
                 'money'        => $h->money,
                 'health'       => $h->health,
                 'lucky_number' => $h->lucky_number,
-                'lucky_color'  => $h->lucky_color,
-                'lucky_card'   => $h->lucky_card,
+                // งดถาวรตามกฎเจ้าของ (2026-08-02) — คงคีย์ไว้ให้แอพเวอร์ชันเก่าไม่พัง · แถวเก่าใน DB ก็ไม่ส่งออก
+                'lucky_color'  => null,
+                'lucky_card'   => null,
             ],
         ]);
     }

@@ -3,14 +3,15 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Exceptions\InsufficientFundsException;
+use App\Exceptions\PalmNotVisibleException;
 use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Http\Controllers\AuspiciousController as WebAuspiciousController;
 use App\Http\Controllers\Controller;
 use App\Models\Reading;
-use App\Services\AiOracle;
 use App\Services\AuspiciousAdvisor;
 use App\Services\AuspiciousScorer;
 use App\Services\Numerology;
+use App\Services\PalmReader;
 use App\Services\Wallet\WalletService;
 use App\Support\AuspiciousOccasions;
 use App\Support\Pricing;
@@ -158,35 +159,35 @@ class FortuneController extends Controller
         });
     }
 
-    public function palmistry(Request $request, AiOracle $oracle): JsonResponse
+    public function palmistry(Request $request, PalmReader $palm): JsonResponse
     {
         $request->validate([
-            'image'    => 'required|image|max:4096',
+            'image'    => 'required|image|mimes:jpg,jpeg,png,webp|max:4096',
             'question' => 'nullable|string|max:500',
         ]);
 
-        // Vision-only feature — refuse before charging if the AI isn't set up.
-        if (!$oracle->isConfigured()) {
+        // ไม่มีทางอ่านเลย (ไม่ได้ต่อ Thaiprompt และไม่มีคีย์ Gemini) — ปฏิเสธก่อนหักเงิน
+        if (!$palm->isAvailable()) {
             return response()->json([
                 'message'     => 'บริการดูลายมือ AI ยังไม่พร้อมให้บริการในขณะนี้ — ยังไม่มีการหักเครดิต',
                 'reason_code' => 'palmistry_unavailable',
             ], 503);
         }
 
-        return $this->withCharge($request, 'palmistry', 'ดูลายมือ AI', function () use ($oracle, $request) {
+        return $this->withCharge($request, 'palmistry', 'ดูลายมือ AI', function () use ($palm, $request) {
             // Store AFTER debit so a balance/lock failure leaves no orphan file.
             $path     = $request->file('image')->store('palmistry', 'public');
             $absolute = storage_path('app/public/' . $path);
-            $analysis = $oracle->analyzePalmImage($absolute, $request->input('question'));
+            $analysis = $palm->read($absolute, $request->input('question'));
             return Reading::create([
                 'user_id'       => $request->user()->id,
                 'session_token' => Str::uuid()->toString(),
                 'type'          => 'palmistry',
                 'question'      => $request->input('question'),
                 'payload'       => ['image_path' => $path, 'source' => 'mobile'],
-                'result'        => $analysis,
-                'ai_provider'   => $oracle->provider(),
-                'ai_model'      => $oracle->model(),
+                'result'        => $analysis['reading'],
+                'ai_provider'   => $analysis['ai_provider'],
+                'ai_model'      => $analysis['ai_model'],
             ]);
         });
     }
@@ -256,6 +257,10 @@ class FortuneController extends Controller
                 } catch (\Throwable $refundErr) {
                     Log::critical("Refund FAILED after mobile {$feature} failure", ['tx_id' => $tx->id, 'err' => $refundErr->getMessage()]);
                 }
+            }
+            // รูปไม่เห็นฝ่ามือ = ลูกค้าแก้เองได้ (ถ่ายใหม่) ไม่ใช่ระบบล่ม — แอพแสดงข้อความนี้ตรง ๆ
+            if ($e instanceof PalmNotVisibleException) {
+                return response()->json(['message' => PalmNotVisibleException::MESSAGE, 'reason_code' => 'not_palm'], 422);
             }
             return response()->json(['message' => 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนแล้ว กรุณาลองใหม่อีกครั้ง', 'reason_code' => 'reading_failed'], 503);
         }

@@ -54,20 +54,13 @@
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px;padding-top:32px;border-top:1px solid var(--line-soft)">
-        <div style="text-align:center">
+      {{-- 🔢 เลขนำโชคมีเฉพาะวันที่ Thaiprompt ให้มา (15/29) · สีมงคลกับไพ่ประจำวันงดถาวร (ไม่ได้คำนวณจากดาวจริง) --}}
+      @if (filled($horoscope->lucky_number))
+        <div style="text-align:center;margin-top:32px;padding-top:32px;border-top:1px solid var(--line-soft)">
           <div style="font-family:var(--display);font-size:11px;letter-spacing:.22em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">เลขนำโชค</div>
           <div style="font-family:var(--display);font-size:42px;color:var(--moon);font-weight:500">{{ $horoscope->lucky_number }}</div>
         </div>
-        <div style="text-align:center">
-          <div style="font-family:var(--display);font-size:11px;letter-spacing:.22em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">สีมงคล</div>
-          <div style="font-family:var(--serif);font-size:24px;color:var(--moon)">{{ $horoscope->lucky_color }}</div>
-        </div>
-        <div style="text-align:center">
-          <div style="font-family:var(--display);font-size:11px;letter-spacing:.22em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">ไพ่ประจำวัน</div>
-          <div style="font-family:var(--display);font-size:18px;color:var(--moon);letter-spacing:.1em">{{ $horoscope->lucky_card }}</div>
-        </div>
-      </div>
+      @endif
     </div>
 
     {{-- หน้านี้เคยเป็นทางตัน — อ่านดวงจบแล้วไม่มีปุ่มไปไหนต่อเลยแม้แต่ปุ่มเดียว
