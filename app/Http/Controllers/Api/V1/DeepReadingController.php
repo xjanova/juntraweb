@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\PreventsDuplicateCharges;
 use App\Http\Controllers\Controller;
 use App\Models\Reading;
 use App\Services\FortuneBot\FortuneBotClient;
+use App\Services\Tarot\TarotReadingFinisher;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use Illuminate\Http\JsonResponse;
@@ -54,6 +55,8 @@ class DeepReadingController extends Controller
             'questions'   => 'required|array|min:1|max:'.self::MAX_QUESTIONS,
             'questions.*' => 'nullable|string|max:500',
         ]);
+        // 🪐 (2026-11-07) เว้นช่องวันเกิด = ใช้วันเกิดในโปรไฟล์ — คำทำนายผูกดวงจริงได้เหมือนบิลของบอทแชทเพจ
+        $data['birth_date'] = ($data['birth_date'] ?? null) ?: \App\Support\ProfileBirth::date($user);
 
         $questions = array_values(array_filter(array_map(
             fn ($q) => trim((string) $q),
@@ -100,8 +103,19 @@ class DeepReadingController extends Controller
 
         $reading = $this->bot->deepReading($user, $questions, $data['birth_date'] ?? null, $user->name);
 
-        if (! $reading || empty($reading['reading'])) {
-            $this->refundQuietly($tx, 'ระบบคำทำนายเชิงลึกไม่พร้อม');
+        // 🛡️ (2026-11-07) โมเดลตอบคำปฏิเสธ ("ขออภัยค่ะ…ไม่สามารถ…") แทนคำทำนาย = ไม่มีสินค้า → คืนเงิน
+        //   Thaiprompt ตีกลับเป็น 503 ให้แล้ว นี่คือด่านสุดท้ายเผื่อ Thaiprompt รุ่นเก่าส่งคำปัดมาเป็น 200
+        $refused = $reading && ! empty($reading['reading'])
+            && TarotReadingFinisher::looksLikeRefusal((string) $reading['reading']);
+        if ($refused) {
+            Log::warning('Mobile deep reading: model refused — refunding', [
+                'user_id' => $user->id, 'model' => $reading['ai_model'] ?? null,
+                'text' => mb_substr((string) $reading['reading'], 0, 120),
+            ]);
+        }
+
+        if (! $reading || empty($reading['reading']) || $refused) {
+            $this->refundQuietly($tx, $refused ? 'แม่หมอดูดวงไม่สำเร็จ (ระบบทำนายปฏิเสธ)' : 'ระบบคำทำนายเชิงลึกไม่พร้อม');
 
             return response()->json([
                 'message'     => 'ระบบคำทำนายเชิงลึกไม่พร้อมชั่วคราว'

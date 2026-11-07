@@ -116,6 +116,8 @@ Route::prefix('deep')->name('deep.')->controller(DeepReadingController::class)->
     Route::post('/', 'store')->middleware(['service.open:deep', 'auth', 'throttle:reading'])->name('store');
     // คำทำนายที่ซื้อไปแล้วต้องเปิดอ่านได้เสมอ แม้บริการปิด
     Route::get('/{reading}', 'show')->name('show');
+    // หน้าผลถามทุก ~3 วิ ระหว่างแม่หมอดูดวงเบื้องหลังทีละข้อ
+    Route::get('/{reading}/status', 'status')->middleware('throttle:60,1')->name('status');
 });
 
 // Horoscope
