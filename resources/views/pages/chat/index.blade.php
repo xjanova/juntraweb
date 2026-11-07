@@ -51,10 +51,15 @@
           ? $offerCards['offers']
           : [];
 
+      // 🧹 (2026-11-07) "[]" ที่ตัวลอกแท็กของ Thaiprompt เคยทิ้งท้ายคำตอบ (แก้ต้นทางแล้ว) — ข้อความเก่าในห้องไม่ต้องโชว์
+      $content = $m->role === 'assistant'
+          ? trim((string) preg_replace('/\h*(?:\[+\h*\]+|\{+\h*\}+)\h*/u', ' ', (string) $m->content))
+          : $m->content;
+
       return [
           'role'     => $m->role === 'assistant' ? 'assistant' : 'user',
-          'html'     => \App\Support\Markdown::safe($m->content),
-          'text'     => $m->content,
+          'html'     => \App\Support\Markdown::safe($content),
+          'text'     => $content,
           'time'     => optional($m->created_at)->format('H:i'),
           'state'    => 'ok',
           'offers'   => $offers,

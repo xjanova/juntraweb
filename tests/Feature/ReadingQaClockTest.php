@@ -264,6 +264,7 @@ class ReadingQaClockTest extends TestCase
             && $w['history_url'] === route('account.history')
             && $w['reviewed'] === false
             && $w['close_seconds'] === 60);
+        $page->assertDontSee('jw-whats-new-', false);   // ป๊อปอัปห้ามเด้งทับการ์ดที่นับถอยหลังปิดห้อง
         $page->assertSee('จบการถามต่อของไพ่ชุดนี้แล้วค่ะ', false)
             ->assertSee('ประวัติการดูดวง', false)
             ->assertSee('ปิดห้องเลย', false);

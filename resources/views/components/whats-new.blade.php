@@ -12,6 +12,7 @@
   $inReading = request()->routeIs('chat.index') && auth()->check() && \App\Support\ReadingRoomLock::active(request()) !== null;
   $skip = ! auth()->check() || request()->routeIs('tarot.pick', 'tarot.show', 'tarot.free', 'install.*', 'filament.*')
        || (request()->routeIs('chat.*') && (! request()->routeIs('chat.index') || $inReading || request()->boolean('readonly')))
+       || request()->attributes->get('hide_whats_new')
        || request()->has('theater');
   $art  = file_exists(public_path('images/juntra/art/whats-new.webp')) ? asset('images/juntra/art/whats-new.webp') : null;
   $items = [

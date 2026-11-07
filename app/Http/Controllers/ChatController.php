@@ -163,6 +163,12 @@ class ChatController extends Controller
         $menu  = $gate['allowed'] && ! $hideOffers ? ChatOffers::roomMenu((string) $conversation->persona, $user) : [];
         $table = array_slice(array_values(array_filter($menu, fn ($o) => $o['locked_until'] === null)), 0, 3);
 
+        // ห้องของไพ่ (มีนาฬิกาถามต่อ/การ์ดปิดท้ายนับถอยหลัง) — ป๊อปอัป "มีอะไรใหม่" ห้ามบัง
+        //    เคสจริงบน prod: ป๊อปอัปเด้งทับการ์ดหมดเวลา ระหว่างอ่านป๊อปอัป ห้องนับถอยหลังปิดเอง
+        if ($qa !== null) {
+            $request->attributes->set('hide_whats_new', true);
+        }
+
         return view('pages.chat.index', [
             'qa'           => $qa,
             'qaWrap'       => $qa !== null && $user ? $this->qaWrap($reading, $user) : null,
