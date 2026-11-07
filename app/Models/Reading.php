@@ -43,6 +43,12 @@ class Reading extends Model
         'shared_public' => 'boolean',
     ];
 
+    /** ⭐ รีวิวของลูกค้าหลังจบคำทำนายนี้ (1 คำทำนาย = 1 รีวิว) */
+    public function review(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Testimonial::class);
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

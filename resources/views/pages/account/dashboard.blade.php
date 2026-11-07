@@ -26,6 +26,9 @@
         สวัสดี <em style="color:var(--gold)">{{ $user->name }}</em>
       </h2>
 
+      {{-- 🌙 (2026-11-07) เช็กอินรับดวงประจำวัน --}}
+      <x-daily-luck :checkin="$checkin ?? null" :streak="$streak ?? 0" :luck="$luck ?? []" />
+
       {{-- Astrology setup nudge — encourages new users to fill DOB once --}}
       @if (!$hasAstro)
         <div class="panel" style="padding:18px 22px;margin-bottom:24px;border-color:var(--gold);background:linear-gradient(135deg,rgba(244,207,106,.08),rgba(176,122,255,.04));display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">

@@ -31,6 +31,10 @@ class AccountController extends Controller
                 ->get(),
             'balance' => $this->wallet->balance($user),
             'profile' => $user->profile,
+            // 🌙 (2026-11-07) เช็กอินรับดวงประจำวัน — ดวงคำนวณล้วน ไม่เรียก AI
+            'checkin' => \App\Support\DailyLuck::checkinToday($user),
+            'streak'  => \App\Support\DailyLuck::currentStreak($user),
+            'luck'    => \App\Support\DailyLuck::reading($user),
         ]);
     }
 
