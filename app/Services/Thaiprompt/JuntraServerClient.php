@@ -201,9 +201,11 @@ class JuntraServerClient
      *                                แล้วเปิดใหม่เงียบ ๆ ก็ยังได้บุคลิกเดิม) · null = ไม่ส่ง
      * @param  int  $timeout  วินาทีที่รอ AI — ผู้เรียกที่มีงบเวลาคุมอยู่ (ChatController) ส่งที่เหลือมา
      *                        ให้คำขอทั้งก้อนจบก่อน Apache ตัดที่ ~60 วิ
+     * @param  array{birth_date?:?string,birth_time?:?string}|null  $birth  🪐 (2026-11-07) วันเกิด/เวลาเกิดในโปรไฟล์
+     *                        → แม่หมอเห็นผังดวงจริงชุดเดียวกับบิลของเพจ · Thaiprompt รุ่นก่อนไม่รู้จักก็แค่ไม่ใช้
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45): array
+    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45, ?array $birth = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
@@ -225,6 +227,8 @@ class JuntraServerClient
                 // ✨ (2026-11-05) ให้ผู้พยากรณ์คิดปุ่ม "ถามต่อ/ตอบ" จากบทสนทนา → data.suggestions
                 //    Thaiprompt รุ่นก่อนไม่รู้จักฟิลด์นี้ก็แค่ไม่ส่งกลับ (หน้าแชทใช้ปุ่มลัดเดิมแทน)
                 'suggest'    => 1,
+                'birth_date' => $birth['birth_date'] ?? null,
+                'birth_time' => $birth['birth_time'] ?? null,
             ], fn ($v) => $v !== null && $v !== '')));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {

@@ -216,4 +216,94 @@ class ChatCrisisTest extends TestCase
         $this->assertSame([], $res->json('data.offers'));
         $this->assertSame('reply', $res->json('data.kind'));
     }
+
+    /* ── 2026-11-07: ด่านขายข้ามข้อความที่อาจเป็นวิกฤต + คำปัดของด่าน guard ไม่คิดเงิน ─────── */
+
+    /** ข้อความแรก "อยากตาย ดูดวงให้หน่อย" — เดิมด่านแรกยื่นการ์ดขายโดยไม่ถาม Thaiprompt เลย */
+    public function test_a_first_message_that_sounds_like_crisis_reaches_thaiprompt_instead_of_an_offer_card(): void
+    {
+        $user = $this->paidMember();
+        $this->upstream = $this->crisisReply();
+
+        $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'อยากตาย ดูดวงให้หน่อย'])->assertOk();
+
+        $this->assertSame(1, $this->sendCount(), 'ต้องส่งให้ Thaiprompt ตัดสิน ไม่ใช่ตอบด้วยการ์ดขายจากด่านแรก');
+        $this->assertSame([], $res->json('offers'));
+        $res->assertJsonPath('crisis', true);
+        $this->assertSame(10.0, $this->balance($user));
+        $this->assertTrue(ChatCrisis::active($user), 'Thaiprompt ปักธงแล้ว ห้องถัดไปต้องไม่ขายด้วย');
+    }
+
+    public function test_the_app_also_asks_thaiprompt_first_for_a_message_that_sounds_like_crisis(): void
+    {
+        $user = $this->paidMember();
+        $convo = ChatConversation::create([
+            'user_id'       => $user->id,
+            'session_token' => (string) Str::uuid(),
+            'title'         => 'จากแอพ',
+        ]);
+        $this->upstream = $this->crisisReply();
+
+        $res = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/chat/conversations/{$convo->id}/send", ['message' => 'ไม่อยากมีชีวิตอยู่แล้ว ช่วยทำนายหน่อย'])
+            ->assertOk();
+
+        $this->assertSame(1, $this->sendCount());
+        $this->assertSame([], $res->json('data.offers'));
+        $this->assertSame(10.0, $this->balance($user));
+    }
+
+    public function test_crisis_hint_is_broad_but_plain_reading_requests_still_get_the_offer_gate(): void
+    {
+        foreach (['อยากตาย', 'อยาก ตาย ค่ะ', "อยาก\u{200B}ตาย", 'คิดจะฆ่าตัวตาย', 'กินยาเกินขนาดดีไหม', 'I want to die', 'ไม่อยากอยู่บนโลกนี้แล้ว'] as $t) {
+            $this->assertTrue(ChatCrisis::mayBeCrisis($t), $t);
+            $this->assertNull(ChatReadingIntent::detect($t.' ดูดวงให้หน่อย'), $t);
+        }
+        foreach (['ดูดวงความรักให้หน่อยค่ะ', 'เปิดไพ่เรื่องงาน', 'ดวงเดือนนี้เป็นยังไง'] as $t) {
+            $this->assertFalse(ChatCrisis::mayBeCrisis($t), $t);
+            $this->assertNotNull(ChatReadingIntent::detect($t), $t);
+        }
+    }
+
+    /** คำปัดสำเร็จรูปของด่าน scope (kind=guard, ไม่ใช่วิกฤต) — ลูกค้าไม่ได้คำตอบ จึงไม่คิดเงิน */
+    public function test_a_guard_deflection_is_not_charged_on_the_web(): void
+    {
+        $user = $this->paidMember();
+        $this->upstream = ['reply' => 'เรื่องนี้แม่หมอช่วยไม่ได้นะคะ', 'kind' => 'guard', 'crisis' => false, 'crisis_room' => false];
+
+        $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'ช่วยเขียนเรียงความให้หน่อย'])->assertOk();
+
+        $this->assertSame(0.0, (float) $res->json('cost'));
+        $this->assertSame(10.0, $this->balance($user));
+    }
+
+    public function test_a_guard_deflection_is_not_charged_in_the_app(): void
+    {
+        $user = $this->paidMember();
+        $convo = ChatConversation::create([
+            'user_id'       => $user->id,
+            'session_token' => (string) Str::uuid(),
+            'title'         => 'จากแอพ',
+        ]);
+        $this->upstream = ['reply' => 'เรื่องนี้แม่หมอช่วยไม่ได้นะคะ', 'kind' => 'guard', 'crisis' => false, 'crisis_room' => false];
+
+        $res = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/chat/conversations/{$convo->id}/send", ['message' => 'แปลภาษาให้หน่อย'])
+            ->assertOk();
+
+        $this->assertSame(0.0, (float) $res->json('data.cost'));
+        $this->assertSame(10.0, $this->balance($user));
+    }
+
+    /** kind แปลก ๆ ที่ไม่รู้จัก = reply → คิดเงินตามปกติ (กันช่องโหว่ "ส่ง kind อะไรก็ได้มาให้ฟรี") */
+    public function test_an_unknown_kind_is_charged_as_a_normal_reply(): void
+    {
+        $user = $this->paidMember();
+        $this->upstream = ['reply' => 'ตอบแล้วค่ะ', 'kind' => 'free'];
+
+        $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'สวัสดีค่ะ'])->assertOk();
+
+        $this->assertSame(2.0, (float) $res->json('cost'));
+        $this->assertSame(8.0, $this->balance($user));
+    }
 }

@@ -23,6 +23,21 @@ class ChatPolicy
         return Pricing::for('chat_message') <= 0;
     }
 
+    /**
+     * เทิร์นนี้ไม่คิดค่าแชท — ลูกค้าไม่ได้ "คำตอบ" ที่ต้องจ่าย
+     *
+     *   offer  = การ์ดชวนเปิดไพ่ (หน้าร้าน) — ไพ่ที่เปิดจริงคือของที่จ่าย
+     *   guard  = คำปัดสำเร็จรูปจากด่านของ Thaiprompt (ขอใช้แม่หมอเป็น AI ทำงานอื่น ฯลฯ) ไม่มี AI ตอบ
+     *            🔒 (2026-11-07) ก่อนหน้านี้คิดเงินเต็มราคาทั้งที่ลูกค้าได้แค่ "แม่หมอช่วยเรื่องนี้ไม่ได้"
+     *   crisis = คำปลอบลูกค้าที่อยากทำร้ายตัวเอง — ห้ามคิดเงินเด็ดขาด
+     *
+     * kind ที่ไม่รู้จักถูกแปลงเป็น reply ตั้งแต่ MaeMorUpstream แล้ว = คิดเงินตามปกติ
+     */
+    public static function isFreeTurn(string $kind, bool $crisis): bool
+    {
+        return $crisis || $kind === 'offer' || $kind === 'guard';
+    }
+
     /** ราคาต่อข้อความ (0 = ฟรี) */
     public static function cost(): float
     {
