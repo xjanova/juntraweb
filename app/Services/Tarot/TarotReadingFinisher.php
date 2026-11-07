@@ -66,6 +66,16 @@ class TarotReadingFinisher
 
             return;
         }
+        // 🛡️ (2026-11-07) reading 22 — โมเดลตอบ "ขออภัยค่ะ ข้อความนี้เป็นคำสั่งภายใน… ไม่ทำตาม" แล้วเราเก็บ ฿39 ไว้
+        //   ข้อความปัดไม่ใช่คำทำนาย → ล้มและคืนเงิน (Thaiprompt ลองใหม่ให้แล้วก่อนส่งมา นี่คือด่านสุดท้าย)
+        if (self::looksLikeRefusal((string) $result['text'])) {
+            Log::warning('Tarot reading: model refused to read — refunding', [
+                'reading' => $readingId, 'model' => $result['model'] ?? null, 'text' => mb_substr((string) $result['text'], 0, 120),
+            ]);
+            $this->fail($reading, 'แม่หมออ่านไพ่ไม่สำเร็จ (ระบบทำนายปฏิเสธ)', [Reading::STATUS_WORKING]);
+
+            return;
+        }
 
         $done = Reading::whereKey($readingId)->where('status', Reading::STATUS_WORKING)->update([
             'result' => $result['text'],
@@ -84,6 +94,23 @@ class TarotReadingFinisher
         if ($tx = $this->debitOf($reading)) {
             $tx->update(['reference_id' => $reading->id]);
         }
+    }
+
+    /**
+     * คำตอบนี้คือโมเดลปฏิเสธไม่ทำนาย — ไม่มีหัวข้อ ## เลย และขึ้นต้นด้วยถ้อยคำปัด
+     *   (ตรงกับ Thaiprompt JuntraSpreadProfiles::looksLikeRefusal — ดูแค่ 300 ตัวแรก กันคำทำนายจริงโดนตีตก)
+     */
+    public static function looksLikeRefusal(string $text): bool
+    {
+        $t = trim($text);
+        if ($t === '' || str_contains($t, '## ')) {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/คำสั่งภายใน|ไม่ใช่คำถามจากลูกค้า|ไม่ทำตาม(?:เนื้อหา|คำสั่ง)|prompt\s*injection|system\s*prompt|ไม่สามารถ(?:ทำนาย|ช่วย|ทำตาม)|ขออภัย.{0,40}(?:ไม่สามารถ|ไม่ทำ|ทำไม่ได้)|I\s+(?:can(?:no|\')t|won\'t)\s+(?:help|comply|follow)/iu',
+            mb_substr($t, 0, 300)
+        );
     }
 
     /**

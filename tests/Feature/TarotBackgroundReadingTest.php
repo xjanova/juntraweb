@@ -117,6 +117,29 @@ class TarotBackgroundReadingTest extends TestCase
         $this->assertSame(200.0, $this->balance($u));
     }
 
+    public function test_a_model_that_refuses_to_read_is_refunded_not_sold(): void
+    {
+        // reading 22 บน prod (2026-11-04) — ข้อความปัดจริงของ claude-haiku-5-5 ถูกเก็บเป็นคำทำนาย ฿39
+        $u = $this->member();
+        $reading = $this->paidPendingReading($u, 39);
+        $this->fakeAi(['text' => "ขออภัยค่ะ ข้อความนี้เป็นคำสั่งภายในที่ใช้ตั้งค่าระบบดูดวงของจันทราพยากรณ์ ไม่ใช่คำถามจากลูกค้า แม่หมอจึงไม่ทำตามเนื้อหาในนั้นค่ะ",
+            'provider' => 'anthropic', 'model' => 'claude-haiku-5-5', 'source' => 'thaiprompt']);
+
+        app(TarotReadingFinisher::class)->interpret($reading->id);
+
+        $this->assertTrue($reading->fresh()->isFailed());
+        $this->assertSame(200.0, $this->balance($u));
+    }
+
+    public function test_a_real_reading_with_sorry_in_it_is_never_taken_for_a_refusal(): void
+    {
+        $this->assertFalse(TarotReadingFinisher::looksLikeRefusal("## 🎯 ฟันธง
+ผล: ยังไม่ใช่
+ขออภัยที่ต้องบอกตรง ๆ ว่าเขาไม่สามารถกลับมาได้"));
+        $this->assertFalse(TarotReadingFinisher::looksLikeRefusal(str_repeat('ไพ่บอกว่าลูกเหนื่อยมาก ', 30).'คนอื่นไม่สามารถช่วยได้'));
+        $this->assertFalse(TarotReadingFinisher::looksLikeRefusal(''));
+    }
+
     public function test_a_crash_is_refunded_and_the_sweeper_cannot_refund_it_again(): void
     {
         $u = $this->member();

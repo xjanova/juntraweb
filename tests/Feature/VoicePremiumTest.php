@@ -43,6 +43,9 @@ class VoicePremiumTest extends TestCase
     /** /voice/speak ได้ไฟล์ไหม */
     private bool $speakOk = true;
 
+    /** URL ไฟล์เสียงที่ Thaiprompt ตอบกลับ (prod ตั้งแต่ 2026-11 = คลัง R2) */
+    private string $clipUrl = '/storage/voice/clip-7.mp3';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -68,9 +71,9 @@ class VoicePremiumTest extends TestCase
                     ['anchor' => 'verdict', 'say' => 'สรุปว่าเรื่องนี้ไปได้ดีจ้ะ'],
                 ]]]),
                 str_ends_with($url, '/voice/speak') => $this->speakOk
-                    ? Http::response(['data' => ['status' => 'completed', 'clip_id' => 7, 'url' => '/storage/voice/clip-7.mp3']])
+                    ? Http::response(['data' => ['status' => 'completed', 'clip_id' => 7, 'url' => $this->clipUrl]])
                     : Http::response([], 503),
-                str_contains($url, '/storage/voice/') => Http::response($mp3, 200, ['Content-Type' => 'audio/mpeg']),
+                str_contains($url, '/storage/voice/'), str_contains($url, '/fortune-voice/') => Http::response($mp3, 200, ['Content-Type' => 'audio/mpeg']),
                 str_ends_with($url, '/server/chat/start') => Http::response(['data' => ['session_id' => 'sess-1']], 201),
                 str_ends_with($url, '/server/chat/send') => Http::response(['data' => ['session_id' => 'sess-1', 'reply' => 'ไพ่บอกว่าไปต่อได้จ้ะ', 'kind' => 'reply']]),
                 default => Http::response([], 503),
@@ -283,6 +286,47 @@ class VoicePremiumTest extends TestCase
         $this->actingAs($this->member())->get(route('tarot.voice.file', $reading))->assertForbidden();
         $this->actingAs($this->member())->postJson(route('tarot.voice.next', $reading))->assertForbidden();
         $this->assertSame(500.0 - 100, $this->balance($u), 'ได้เสียงแล้ว ไม่คืนเงิน');
+    }
+
+    /** สร้างเสียงจนเสร็จ แล้วคืนสถานะล่าสุด */
+    private function buildVoice(User $u, Reading $reading): array
+    {
+        $last = [];
+        for ($i = 0; $i < 12; $i++) {
+            $last = $this->actingAs($u)->postJson(route('tarot.voice.next', $reading))->assertOk()->json();
+            if ($last['status'] !== 'building') {
+                break;
+            }
+        }
+
+        return $last;
+    }
+
+    public function test_voice_files_on_thaiprompts_r2_store_are_accepted(): void
+    {
+        // prod 2026-11-07: /voice/clips ตอบ URL ของ R2 — เดิมรับแค่โดเมน Thaiprompt ทุกคลิปจึงถูกทิ้ง แล้วคืนเงินทุกรายการ
+        config(['reading_voice.file_hosts' => ['pub-test.r2.dev']]);
+        $this->clipUrl = 'https://pub-test.r2.dev/fortune-voice/characters/maemor/abc.mp3';
+        $u = $this->member();
+        $reading = $this->premiumReading($u);
+
+        $last = $this->buildVoice($u, $reading);
+
+        $this->assertSame('ready', $last['status']);
+        $this->assertFalse($last['refunded']);
+        $this->assertSame(500.0 - 100, $this->balance($u));
+    }
+
+    public function test_voice_files_from_an_unlisted_host_or_plain_http_are_never_downloaded(): void
+    {
+        config(['reading_voice.file_hosts' => ['pub-test.r2.dev']]);
+        $client = app(\App\Services\Thaiprompt\JuntraServerClient::class);
+
+        $this->assertNull($client->voiceFileUrl('https://evil.example/fortune-voice/a.mp3'));
+        $this->assertNull($client->voiceFileUrl('http://pub-test.r2.dev/fortune-voice/a.mp3'));
+        $this->assertNull($client->voiceFileUrl('https://pub-test.r2.dev.evil.example/a.mp3'));
+        $this->assertSame('https://pub-test.r2.dev/a.mp3', $client->voiceFileUrl('https://pub-test.r2.dev/a.mp3'));
+        $this->assertSame(self::TP . '/storage/voice/a.mp3', $client->voiceFileUrl('/storage/voice/a.mp3'));
     }
 
     public function test_no_audio_at_all_refunds_the_premium_exactly_once(): void

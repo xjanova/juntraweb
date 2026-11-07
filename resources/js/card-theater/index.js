@@ -189,7 +189,10 @@ function boot(root) {
     let theater = null;
     const seenKey = `ct-revealed-${cfg.readingId}`;
     const get = () => (theater ||= createTheater(root, cfg, true));
-    if (cfg.status === 'reading' || (cfg.status === 'done' && !storage(seenKey))) get().open();
+    // 🎭 (2026-11-07) มาจากหน้าประวัติด้วย ?theater=1 = ลูกขอดูโรงละครคำทำนาย (กราฟชีวิต ฯลฯ) —
+    //   เดิมโรงละครเปิดไพ่เปิดเองทับเต็มจอ (z สูงกว่า) ลูกมองไม่เห็นโรงละครที่กดมาเลย · ดูพิธีเปิดไพ่ได้จากปุ่มเดิม
+    const wantsReadingTheater = new URLSearchParams(window.location.search).has('theater');
+    if (!wantsReadingTheater && (cfg.status === 'reading' || (cfg.status === 'done' && !storage(seenKey)))) get().open();
     document.querySelectorAll('[data-ct-open]').forEach((b) => {
         b.hidden = false;
         b.addEventListener('click', () => get().open(true));

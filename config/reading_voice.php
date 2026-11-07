@@ -25,6 +25,13 @@ return [
     'reply_max_chars' => (int) env('READING_VOICE_REPLY_MAX_CHARS', 600),
     'chat_char_cap'   => (int) env('READING_VOICE_CHAT_CHAR_CAP', 8000),
 
+    // 🎧 (2026-11-07) โฮสต์ไฟล์เสียงของ Thaiprompt นอกจากโดเมนหลัก (คลัง R2 สาธารณะ) — คั่นด้วย , · ต้อง https
+    //   ไม่อยู่ในรายการ = ไม่ดาวน์โหลด (กันข้อมูลตอบกลับถูกปลอมแล้วพาเว็บไปดึงไฟล์จากที่อื่น)
+    'file_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env(
+        'READING_VOICE_FILE_HOSTS',
+        'pub-29b3641000424075a1dbb24c1cff0e4f.r2.dev'
+    ))))),
+
     // งบตัวอักษรของบทเล่าต่อแพ็กเกจ (สัญญา voice-mode-plan ข้อ 21.3)
     'budget' => [
         'single' => 500, 'quick' => 500, 'three' => 500,
