@@ -301,7 +301,7 @@ class ChatController extends Controller
         // for an offer of reading packages — the reading is what gets paid for.
         // Nor for a crisis turn: comfort for someone who wants to hurt themselves is never billed.
         $debitTx = null;
-        if ($cost > 0 && !$degraded && ! ChatPolicy::isFreeTurn($kind, $crisis)) {
+        if ($cost > 0 && !$degraded && empty($dispatch['fallback']) && ! ChatPolicy::isFreeTurn($kind, $crisis)) {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับ' . ChatRooms::name((string) $conversation->persona), [
                     'reference_type' => 'chat_message',
@@ -448,6 +448,8 @@ class ChatController extends Controller
         return [
             'reply'    => $this->oracle->chat([(object) ['role' => 'user', 'content' => $message]], $context),
             'degraded' => !$this->oracle->isConfigured(),
+            // 🛡 (2026-11-07) คำตอบจากทางสำรองไม่ผ่านด่านของสมองบอท (กันมโนไพ่/หลุดบท/ความจำ) — ตอบได้ แต่ไม่คิดเงิน
+            'fallback' => true,
         ];
     }
 

@@ -652,7 +652,7 @@ class ChatController extends Controller
         // hurt themselves gets comfort, never a bill for it.
         // Race-safe because debit() locks the wallet row.
         $debitTx = null;
-        if ($cost > 0 && !$degraded && ! ChatPolicy::isFreeTurn($kind, $crisis)) {
+        if ($cost > 0 && !$degraded && empty($dispatch['fallback']) && ! ChatPolicy::isFreeTurn($kind, $crisis)) {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับ' . ChatRooms::name($room), [
                     'reference_type' => 'chat_message',
@@ -1001,6 +1001,8 @@ class ChatController extends Controller
         return [
             'reply'    => $this->fallback($message, $context),
             'degraded' => !$this->oracle->isConfigured(),
+            // 🛡 (2026-11-07) คำตอบจากทางสำรองไม่ผ่านด่านของสมองบอท (กันมโนไพ่/หลุดบท/ความจำ) — ตอบได้ แต่ไม่คิดเงิน
+            'fallback' => true,
         ];
     }
 

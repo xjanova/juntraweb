@@ -82,7 +82,7 @@ class MaeMorUpstream
         $this->lastFailure = null;
 
         if ($mode === 'srv') {
-            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded, $context, $this->thaipromptUserId($user), $persona, $timeout);
+            $res = $this->server->chatSend($user->id, $user->name, $sid, $text, $grounded, $context, $this->thaipromptUserId($user), $persona, $timeout, self::birthOf($user));
             $reply = trim((string) ($res['data']['reply'] ?? ''));
             if ($res['status'] !== 'ok' || $reply === '') {
                 $this->lastFailure = $res['status'] === 'ok' ? 'empty' : ($this->server->lastFailure() ?? 'busy');
@@ -117,6 +117,25 @@ class MaeMorUpstream
         }
 
         return ['reply' => $reply, 'kind' => 'reply', 'offer_topic' => null, 'suggestions' => [], 'crisis' => false, 'crisis_room' => null];
+    }
+
+    /**
+     * 🪐 (2026-11-07) วันเกิด/เวลาเกิดในโปรไฟล์ — ส่งเฉพาะวันที่ผ่านมาแล้ว (Thaiprompt ตอบ 422 กับวันในอนาคต)
+     *
+     * @return array{birth_date:string,birth_time:?string}|null
+     */
+    public static function birthOf(User $user): ?array
+    {
+        $profile = $user->profile;
+        $date = $profile?->birth_date;
+        if (! $date instanceof \Carbon\CarbonInterface || ! $date->lt(now('Asia/Bangkok')->startOfDay())) {
+            return null;
+        }
+        $time = is_string($profile->birth_time) && preg_match('/^([01]\d|2[0-3]):([0-5]\d)/', $profile->birth_time, $m)
+            ? $m[1] . ':' . $m[2]
+            : null;
+
+        return ['birth_date' => $date->format('Y-m-d'), 'birth_time' => $time];
     }
 
     /**
