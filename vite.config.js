@@ -13,6 +13,8 @@ export default defineConfig({
                 'resources/js/card-theater/index.js',
                 // 🎵 เพลงวนในห้องพยากรณ์ (หน้าแชทสด) — เครื่องเล่นตัวเดียวกับโรงละคร
                 'resources/js/oracle-room/music.js',
+                // 🎭 อิริยาบถของผู้พยากรณ์ในห้องแชท (คลิปพื้นใส คิด/ฟัง/พูด/ยิ้ม)
+                'resources/js/oracle-room/room-poses.js',
                 // 🏛️ ห้องพยากรณ์เต็มจอ (หน้าแชทสด)
                 'resources/css/oracle-room.css',
                 'resources/css/themes/mae-mor-chantra.css',

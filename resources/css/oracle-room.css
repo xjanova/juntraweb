@@ -31,6 +31,16 @@ html.or-open body > nav, html.or-open body > footer { display: none; }
 .or-actor img { position: absolute; left: 50%; bottom: -3%; height: 100%; transform: translateX(-50%); transform-origin: 50% 100%;
   filter: drop-shadow(0 0 22px color-mix(in srgb, var(--or-glow) 45%, transparent)); animation: or-breathe 6s ease-in-out infinite; }
 .or-actor.is-busy img { filter: drop-shadow(0 0 30px var(--or-glow)) brightness(1.08); }
+/* 🎭 (2026-11-07) อิริยาบถ — คลิปพื้นใสวางทับ sprite ตำแหน่งเดียวกัน (resources/js/oracle-room/poses.js)
+   กล่องคลิปสูงกว่า sprite (scale ใน config) มีที่ว่างเหนือหัว → ตัดเฉพาะด้านล่าง (สะโพกจมหลังขอบโต๊ะ) ไม่ตัดหัว/มือ */
+.or-actor:has(.oracle-pose) { overflow: visible; clip-path: inset(-30% -30% 0 -30%); }
+.or-actor .oracle-pose { position: absolute; left: 50%; bottom: -3%; width: auto; max-width: none; transform: translateX(-50%);
+  opacity: 0; transition: opacity .35s ease; pointer-events: none;
+  filter: drop-shadow(0 0 22px color-mix(in srgb, var(--or-glow) 45%, transparent)); }
+.or-actor .oracle-pose.is-on { opacity: 1; }
+.or-actor.is-busy .oracle-pose { filter: drop-shadow(0 0 30px var(--or-glow)) brightness(1.08); }
+/* คลิปเล่นอยู่ = ภาพนิ่งข้างใต้หยุดโยก (กลับมาโยกเองตอนพักที่ภาพนิ่ง) */
+.or-actor.has-pose img { animation: none; }
 @keyframes or-breathe {
   0%, 100% { transform: translateX(-50%); }
   30% { transform: translateX(-50%) translateY(-.6%) scaleY(1.008) rotate(.35deg); }
