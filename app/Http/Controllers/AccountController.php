@@ -106,7 +106,7 @@ class AccountController extends Controller
             $birth = Carbon::parse($data['birth_date']);
             $autoDerive = !empty($data['auto_zodiac']);
             if ($autoDerive || empty($data['zodiac_slug'])) {
-                $data['zodiac_slug'] = Astrology::westernZodiacSlug($birth);
+                $data['zodiac_slug'] = Astrology::thaiZodiacSlug($birth, $data['birth_time'] ?? null);
             }
             if ($autoDerive || empty($data['chinese_zodiac_slug'])) {
                 $data['chinese_zodiac_slug'] = Astrology::chineseZodiacSlug($birth->year);
