@@ -274,7 +274,13 @@ class TarotController extends Controller
         // Guarded by cost > 0 so admin can set the price to 0 (free reading)
         // without debit() throwing InvalidArgumentException.
         // ✨ (2026-11-05) พรีเมียมเสียงผู้พยากรณ์ — เลือกที่หน้าจ่ายเงิน · ระบบเสียงไม่พร้อม = ไม่ขาย (เปิดไพ่ราคาปกติ)
-        $premium = $request->boolean('premium') && VoicePremium::offerable();
+        // (2026-11-07) หน้าเปิดค้างไว้ตอนเสียงพร้อม แล้วเสียงล่มก่อนกดจ่าย — เดิมเปิดไพ่ราคาปกติให้เงียบ ๆ
+        //    ลูกค้าเลือกแพ็กเสียงไว้ ต้องไม่ได้ของน้อยกว่าที่เลือกโดยไม่รู้ตัว → ไม่ตัดอะไรเลย กลับไปเลือกใหม่ (ปุ่มพรีเมียมหายไปแล้ว)
+        if ($request->boolean('premium') && ! VoicePremium::offerable()) {
+            return redirect()->back(fallback: route('tarot.index'))
+                ->with('status', 'ขออภัยค่ะ ระบบเสียงพรีเมียมเพิ่งปิดชั่วคราว ยังไม่มีการหักเครดิตเลย — เปิดไพ่แบบปกติได้ทันที หรือรอสักครู่แล้วลองพรีเมียมใหม่นะคะ');
+        }
+        $premium = $request->boolean('premium');
         $premiumPrice = $premium ? VoicePremium::price() : 0.0;
         if ($premium && $premiumPrice > 0
             && bccomp(number_format((float) $this->wallet->balance($user), 2, '.', ''), number_format($cost + $premiumPrice, 2, '.', ''), 2) < 0) {
