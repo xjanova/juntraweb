@@ -57,8 +57,10 @@ final class VoicePremium
     /** ห้องถามต่อของคำทำนายนี้พูดออกเสียงได้อีกไหม (ยังไม่เกินเพดานตัวอักษรของคำทำนายนี้) */
     public static function canSpeak(Reading $reading, int $chars): bool
     {
+        $cap = (int) config('reading_voice.chat_char_cap', 0);   // 0 = ไม่อั้น (เจ้าของสั่ง 2026-11-07)
+
         return self::active($reading)
-            && (int) data_get($reading->payload, 'premium.chat_chars', 0) + $chars <= (int) config('reading_voice.chat_char_cap', 8000);
+            && ($cap <= 0 || (int) data_get($reading->payload, 'premium.chat_chars', 0) + $chars <= $cap);
     }
 
     /** นับตัวอักษรที่พูดไปแล้วในห้องถามต่อ (กันค่าเสียงบานปลาย) */

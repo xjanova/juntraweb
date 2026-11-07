@@ -104,7 +104,8 @@ class ReadingVoiceBuilder
                 'reversed' => (bool) $rc->reversed,
             ])->values()->all(),
             'birth_known'  => filled(data_get($reading->payload, 'birth_date')),
-            'budget_chars' => (int) (config('reading_voice.budget.' . $key) ?? 650),
+            // 0 = ไม่อั้น (เจ้าของสั่ง 2026-11-07) · ค่าบวก 100–2000 = งบรวมทุกบท
+            'budget_chars' => max(0, (int) config('reading_voice.narration_budget', 0)),
             'user_ref'     => (string) $reading->user_id,
         ]);
 
