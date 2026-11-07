@@ -652,7 +652,7 @@ class ChatController extends Controller
         // hurt themselves gets comfort, never a bill for it.
         // Race-safe because debit() locks the wallet row.
         $debitTx = null;
-        if ($cost > 0 && !$degraded && $kind !== 'offer' && ! $crisis) {
+        if ($cost > 0 && !$degraded && ! ChatPolicy::isFreeTurn($kind, $crisis)) {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับ' . ChatRooms::name($room), [
                     'reference_type' => 'chat_message',
@@ -716,7 +716,7 @@ class ChatController extends Controller
                 'voice_url'   => $voiceUrl,
                 'reply_html'  => Markdown::safe($reply),
                 'balance'     => $this->wallet->balance($user),
-                'cost'        => $kind === 'offer' || $crisis ? 0.0 : $cost,
+                'cost'        => ChatPolicy::isFreeTurn($kind, $crisis) ? 0.0 : $cost,
                 'degraded'    => $degraded,
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => ChatPolicy::dailyLeft($user),
