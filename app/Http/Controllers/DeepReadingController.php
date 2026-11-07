@@ -42,6 +42,8 @@ class DeepReadingController extends Controller
             'cost'    => Pricing::for('deep'),
             'balance' => $user ? $this->wallet->balance($user) : null,
             'maxQ'    => self::MAX_QUESTIONS,
+            // 🪐 กรอกวันเกิดในโปรไฟล์ไว้ให้ก่อน — ลูกค้าแก้ได้
+            'profileBirth' => \App\Support\ProfileBirth::date($user),
         ]);
     }
 
@@ -61,6 +63,8 @@ class DeepReadingController extends Controller
             'birth_date' => 'วันเกิด',
             'questions'  => 'คำถาม',
         ]);
+        // 🪐 (2026-11-07) เว้นช่องวันเกิด = ใช้วันเกิดในโปรไฟล์ — คำทำนายผูกดวงจริงได้เหมือนบิลของบอทแชทเพจ
+        $data['birth_date'] = ($data['birth_date'] ?? null) ?: \App\Support\ProfileBirth::date($user);
 
         $questions = array_values(array_filter(array_map(
             fn ($q) => trim((string) $q),

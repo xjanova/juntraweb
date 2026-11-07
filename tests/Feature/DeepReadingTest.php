@@ -129,6 +129,22 @@ class DeepReadingTest extends TestCase
         $this->actingAs(User::factory()->create())->getJson(route('deep.status', $reading))->assertForbidden();
     }
 
+    /** 🪐 (2026-11-07) เว้นช่องวันเกิด = ใช้วันเกิดในโปรไฟล์ (บอทผูกดวงจริงได้เหมือนบิลแชทเพจ) · กรอกเอง = ชนะเสมอ */
+    public function test_a_blank_birth_date_falls_back_to_the_profile_and_a_typed_one_wins(): void
+    {
+        Bus::fake();
+        $user = $this->member();
+        \App\Models\Profile::create(['user_id' => $user->id, 'birth_date' => '1990-11-07']);
+
+        $this->actingAs($user)->get('/deep')->assertOk()->assertSee('value="1990-11-07"', false);
+
+        $this->order($user->fresh(), ['ปีนี้การงานจะเป็นอย่างไร']);
+        $this->assertSame('1990-11-07', Reading::where('type', 'deep')->latest('id')->first()->payload['birth_date']);
+
+        $this->order($user->fresh(), ['ปีนี้การเงินจะเป็นอย่างไร'], '1985-01-02');
+        $this->assertSame('1985-01-02', Reading::where('type', 'deep')->latest('id')->first()->payload['birth_date']);
+    }
+
     /** ทีละข้อ — ข้อหลังได้คำตอบข้อก่อนไปด้วย (ตอบต่อเนื่องเหมือนในแชท) แล้วรวมเป็นคำทำนายฉบับเดียว */
     public function test_each_question_is_answered_in_turn_with_the_earlier_answers(): void
     {

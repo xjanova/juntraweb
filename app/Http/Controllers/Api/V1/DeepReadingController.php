@@ -55,6 +55,8 @@ class DeepReadingController extends Controller
             'questions'   => 'required|array|min:1|max:'.self::MAX_QUESTIONS,
             'questions.*' => 'nullable|string|max:500',
         ]);
+        // 🪐 (2026-11-07) เว้นช่องวันเกิด = ใช้วันเกิดในโปรไฟล์ — คำทำนายผูกดวงจริงได้เหมือนบิลของบอทแชทเพจ
+        $data['birth_date'] = ($data['birth_date'] ?? null) ?: \App\Support\ProfileBirth::date($user);
 
         $questions = array_values(array_filter(array_map(
             fn ($q) => trim((string) $q),

@@ -33,7 +33,7 @@
 
       <div class="field">
         <label for="birth_date">วันเกิดของคุณ <span style="color:var(--ink-faint);font-size:11px">(ไม่บังคับ แต่ใส่แล้วแม่หมอทำนายได้ตรงกว่ามาก)</span></label>
-        <input type="date" id="birth_date" name="birth_date" value="{{ old('birth_date') }}"
+        <input type="date" id="birth_date" name="birth_date" value="{{ old('birth_date', $profileBirth ?? '') }}"
                max="{{ now()->subDay()->format('Y-m-d') }}">
       </div>
 
