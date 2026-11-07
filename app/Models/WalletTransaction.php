@@ -79,6 +79,11 @@ class WalletTransaction extends Model
 
     public function statusLabel(): string
     {
+        // 🧾 (2026-11-07) บิล QR ที่ไม่มีใครโอนจนหมดเวลา เดิมขึ้นว่า "ปฏิเสธ" — ลูกตกใจว่าโอนแล้วโดนตีกลับ
+        if ($this->wasExpired() || ($this->isExpired() && ! $this->slip_path)) {
+            return 'หมดอายุ';
+        }
+
         return match ($this->status) {
             'pending'   => 'รอตรวจสอบ',
             'success'   => 'สำเร็จ',
@@ -87,6 +92,19 @@ class WalletTransaction extends Model
             'cancelled' => 'ยกเลิกโดยผู้ใช้',
             default     => $this->status,
         };
+    }
+
+    /**
+     * เติมเงินที่ปิดเพราะหมดเวลา ไม่ใช่เพราะแอดมิน/แอป SMS ปฏิเสธ
+     *   ตัวกวาด (topups:cleanup-expired) ใส่ meta.expired · รายการเก่าก่อนมี flag ดูจาก "ไม่มีผู้ตัดสิน"
+     *   (การปฏิเสธทุกทางใส่ approved_at เสมอ — WalletService::rejectTopup / rejectFromSmsChecker)
+     */
+    public function wasExpired(): bool
+    {
+        return $this->type === 'topup'
+            && $this->status === 'failed'
+            && (data_get($this->meta, 'expired') === true
+                || ($this->approved_at === null && ! data_get($this->meta, 'reject_reason')));
     }
 
     /** A pending top-up whose expiry has passed and admin never acted on it. */

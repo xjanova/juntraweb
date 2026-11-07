@@ -369,11 +369,20 @@ class JuntraServerClient
         if (str_starts_with($url, '/') && ! str_starts_with($url, '//')) {
             return $this->base() . $url;
         }
-        $host = parse_url($url, PHP_URL_HOST);
+        $host = is_string($h = parse_url($url, PHP_URL_HOST)) ? strtolower($h) : null;
         $scheme = parse_url($url, PHP_URL_SCHEME);
+        if ($host === null || ! in_array($scheme, ['https', 'http'], true)) {
+            return null;
+        }
+        if ($host === parse_url($this->base(), PHP_URL_HOST)) {
+            return $url;
+        }
 
-        return in_array($scheme, ['https', 'http'], true) && $host !== null && $host === parse_url($this->base(), PHP_URL_HOST)
-            ? $url : null;
+        // 🎧 (2026-11-07) Thaiprompt ย้ายไฟล์เสียงไปไว้ที่ Cloudflare R2 (pub-…r2.dev) — เดิมรับแค่โฮสต์ Thaiprompt
+        //   ทุกคลิปจึงถูกทิ้ง พรีเมียมเสียง ฿100 คืนเงินทุกรายการ · รับเพิ่มเฉพาะโฮสต์ที่ตั้งไว้ใน config และต้อง https
+        $allowed = array_map('strtolower', (array) config('reading_voice.file_hosts', []));
+
+        return $scheme === 'https' && in_array($host, $allowed, true) ? $url : null;
     }
 
     private function clipResult(?Response $resp, string $what): array
