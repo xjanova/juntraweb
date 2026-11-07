@@ -118,14 +118,15 @@
   .aftercare .aftercare-card { margin: 0; }
   .aftercare-art { width: 100%; height: auto; aspect-ratio: 1600/686; object-fit: cover; border-radius: 14px; margin-bottom: 18px; opacity: .92; }
   .aftercare-stars { display: flex; gap: 6px; justify-content: center; margin: 14px 0 4px; }
-  .aftercare-stars button, .aftercare-stars span {
+  /* ธีม juntra-payakorn ล้างสีปุ่มด้วย body.theme-… button:not(.btn) (0,2,2) → ผูกกับ #review/#share ให้ชนะ */
+  #review .aftercare-stars button, #review .aftercare-stars span {
     font-size: 34px; line-height: 1; background: none; border: 0; padding: 4px; cursor: pointer;
     color: rgba(244,207,106,.22); transition: color .15s, transform .15s;
   }
-  .aftercare-stars.is-static span { cursor: default; font-size: 26px; }
-  .aftercare-stars .on { color: var(--gold); text-shadow: 0 0 14px rgba(244,207,106,.45); }
-  .aftercare-stars button:hover { transform: scale(1.12); }
-  .aftercare-stars button:focus-visible { outline: 2px solid var(--gold); border-radius: 8px; }
+  #review .aftercare-stars.is-static span { cursor: default; font-size: 26px; }
+  #review .aftercare-stars .on { color: var(--gold); text-shadow: 0 0 14px rgba(244,207,106,.45); }
+  #review .aftercare-stars button:hover { transform: scale(1.12); }
+  #review .aftercare-stars button:focus-visible { outline: 2px solid var(--gold); border-radius: 8px; }
   .aftercare-note { font-size: 13px; color: var(--ink-dim); margin: 4px 0 14px; min-height: 1.4em; }
   .aftercare-ok { color: var(--gold); font-size: 14px; margin: 8px 0 0; }
   .aftercare-err { color: #ff8c8c; font-size: 13px; margin: 0 0 10px; }
@@ -136,7 +137,7 @@
   .aftercare-text:focus { outline: none; border-color: var(--gold); }
   .aftercare-check { display: flex; gap: 10px; align-items: flex-start; text-align: left; font-size: 13px; color: var(--ink-dim); margin: 12px 0 18px; line-height: 1.6; cursor: pointer; }
   .aftercare-check input { margin-top: 4px; accent-color: var(--gold); }
-  .aftercare-link { background: none; border: 0; color: var(--ink-faint); font-size: 13px; text-decoration: underline; cursor: pointer; font-family: inherit; }
+  #share .aftercare-link { background: none; border: 0; color: var(--ink-faint); font-size: 13px; text-decoration: underline; cursor: pointer; font-family: inherit; }
 </style>
 @endpush
 @endonce

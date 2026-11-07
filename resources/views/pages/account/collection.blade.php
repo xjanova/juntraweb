@@ -34,7 +34,7 @@
           ครบทั้งสำรับแล้ว ไพ่ทุกใบเคยมาหาคุณอย่างน้อยหนึ่งครั้ง ✨
         @else
           อีก {{ $total - $seenCount }} ใบที่ยังไม่เคยมาหาคุณ
-          @if ($favCard) · ใบที่มาหาบ่อยที่สุดคือ <strong style="color:var(--gold)">{{ $favCard->name_th }}</strong> ({{ $favorite->times }} ครั้ง) @endif
+          @if ($favCard && $favorite->times > 1) · ใบที่มาหาบ่อยที่สุดคือ <strong style="color:var(--gold)">{{ $favCard->name_th }}</strong> ({{ $favorite->times }} ครั้ง) @endif
         @endif
       </p>
 
