@@ -40,10 +40,15 @@
       @if (session('status'))
         <div class="flash">{{ session('status') }}</div>
       @endif
+      @include('partials.form-errors')
 
+      {{-- รับทั้งอีเมลและเบอร์โทร — เดิมเป็น type="email" เบราว์เซอร์จึงไม่ยอมส่งเบอร์
+           คนที่สมัครด้วยเบอร์ (ลูกค้าส่วนใหญ่) เลยเข้าสู่ระบบไม่ได้เลย --}}
       <div class="field">
-        <label for="email">อีเมล</label>
-        <input id="email" type="email" name="email" value="{{ old('email') }}" required autofocus autocomplete="username">
+        <label for="email">อีเมล หรือ เบอร์โทรศัพท์</label>
+        <input id="email" type="text" name="email" value="{{ old('email') }}" required autofocus
+               autocomplete="username" autocapitalize="none" spellcheck="false"
+               placeholder="อีเมล หรือ 08x-xxx-xxxx">
       </div>
       <div class="field">
         <label for="password">รหัสผ่าน</label>

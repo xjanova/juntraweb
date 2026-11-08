@@ -344,6 +344,13 @@ class ThaipromptController extends Controller
      */
     private function fail(Request $request, string $message): RedirectResponse
     {
+        // เดิมไม่มีร่องรอยเลย — ลูกค้าเข้าไม่ได้ซ้ำ ๆ แต่ log ว่างเปล่า ทีมจึงไม่รู้ว่าพังตรงไหน
+        Log::info('Thaiprompt SSO failed', [
+            'reason'    => $message,
+            'user_id'   => $request->user()?->id,
+            'has_state' => $request->query('state') !== null,
+        ]);
+
         if ($request->user()) {
             $request->session()->forget('thaiprompt_oauth_origin');
 

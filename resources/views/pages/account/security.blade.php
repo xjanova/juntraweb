@@ -19,6 +19,7 @@
       @if (session('status'))
         <div class="flash" style="padding:14px 18px;margin-bottom:24px">{{ session('status') }}</div>
       @endif
+      @include('partials.form-errors', ['style' => 'padding:14px 18px;margin-bottom:24px'])
 
       {{-- Browser session (current) --}}
       <div class="panel" style="padding:24px;margin-bottom:24px">

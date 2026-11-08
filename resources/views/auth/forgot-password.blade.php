@@ -12,17 +12,25 @@
     <div style="text-align:center;margin-bottom:48px">
       <div class="eyebrow" style="display:inline-flex">RESET PASSWORD</div>
       <h1 class="display" style="font-size:clamp(40px,5vw,72px);margin-bottom:16px">ลืม <em>รหัสผ่าน</em>?</h1>
-      <p class="lede" style="margin:0 auto">กรอกอีเมลของคุณ ระบบจะส่งลิงก์รีเซ็ตรหัสผ่านให้</p>
+      <p class="lede" style="margin:0 auto">กรอกอีเมลหรือเบอร์โทรที่ใช้สมัคร ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ให้ทางอีเมล</p>
     </div>
 
     <form action="{{ route('password.email') }}" method="POST" class="panel">
       @csrf
       @if (session('status'))<div class="flash">{{ session('status') }}</div>@endif
+      @include('partials.form-errors')
       <div class="field">
-        <label for="email">อีเมล</label>
-        <input id="email" type="email" name="email" value="{{ old('email') }}" required autofocus>
+        <label for="email">อีเมล หรือ เบอร์โทรศัพท์</label>
+        <input id="email" type="text" name="email" value="{{ old('email') }}" required autofocus
+               autocomplete="username" autocapitalize="none" spellcheck="false"
+               placeholder="อีเมล หรือ 08x-xxx-xxxx">
       </div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center">ส่งลิงก์รีเซ็ตรหัสผ่าน</button>
+      <button class="btn btn-primary" style="width:100%;justify-content:center">ส่งลิงก์ตั้งรหัสผ่านใหม่</button>
+      <div style="text-align:center;margin-top:20px;font-size:13px;color:var(--ink-dim);line-height:1.7">
+        สมัครด้วยเบอร์โทร หรือไม่ได้รับอีเมล?
+        <a href="{{ $lineUrl ?? config('business.social.line.url') }}" target="_blank" rel="noopener" style="color:var(--gold)">ทักแม่หมอทาง LINE</a>
+        <br><a href="{{ route('login') }}" style="color:var(--ink-dim)">← กลับไปหน้าเข้าสู่ระบบ</a>
+      </div>
     </form>
   </div>
 </section>

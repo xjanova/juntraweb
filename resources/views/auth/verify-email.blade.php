@@ -18,6 +18,7 @@
     @if (session('status') == 'verification-link-sent')
       <div class="flash" style="margin-bottom:24px">ส่งลิงก์ยืนยันใหม่แล้ว — โปรดตรวจอีเมล</div>
     @endif
+    @include('partials.form-errors', ['style' => 'margin-bottom:24px'])
 
     <div class="panel" style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap">
       <form action="{{ route('verification.send') }}" method="POST">

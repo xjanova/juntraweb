@@ -19,6 +19,7 @@
       @if (session('status'))
         <div class="flash" style="padding:14px 18px;margin-bottom:24px">{{ session('status') }}</div>
       @endif
+      @include('partials.form-errors', ['style' => 'padding:14px 18px;margin-bottom:24px'])
 
       <form method="POST" action="{{ route('account.astrology.update') }}" class="panel" style="padding:28px">
         @csrf
