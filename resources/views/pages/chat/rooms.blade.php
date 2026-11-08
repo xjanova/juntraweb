@@ -30,6 +30,7 @@
     @if (session('status'))
       <div class="flash" role="status" style="text-align:center;margin-bottom:18px">{{ session('status') }}</div>
     @endif
+    @include('partials.form-errors', ['style' => 'text-align:center;margin-bottom:18px'])
 
     {{-- มือถือ: ปัดซ้าย-ขวา (scroll-snap ไม่ต้องใช้ JS) · จอใหญ่: วางเรียงกัน --}}
     <div class="rooms-deck" role="list">

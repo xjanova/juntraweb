@@ -53,6 +53,7 @@
     @if (session('status'))
       <div class="flash" style="margin-bottom:20px">✓ {{ session('status') }}</div>
     @endif
+    @include('partials.form-errors')
 
     @if (empty($stats))
       <div class="flash flash-error" style="margin-bottom:20px">
