@@ -190,7 +190,7 @@ class AdminChatTakeoverTest extends TestCase
         $this->assertNull($room->fresh()->bot_paused_at);
 
         $balance = app(WalletService::class)->balance($customer);
-        $this->actingAs($customer)->postJson('/chat/send', ['message' => 'ถามต่อได้ไหมคะ', 'room' => 'maemor'])
+        $this->actingAs($customer)->postJson('/chat/send', ['message' => 'ฟังแล้วสบายใจขึ้นเยอะเลยค่ะ', 'room' => 'maemor'])
             ->assertOk()->assertJsonPath('reply', 'แม่หมอรับฟังอยู่ค่ะ');
         $this->assertEquals($balance - 2, app(WalletService::class)->balance($customer), 'บอทกลับมาตอบ = คิดเงินตามปกติ');
 
