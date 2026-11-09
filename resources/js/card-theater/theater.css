@@ -37,6 +37,12 @@ html.ct-open, html.ct-open body { overflow: hidden; }
 }
 /* พยักหน้า + เรืองแสงวูบ ทุกครั้งที่พลิกไพ่ — ใช้ property translate แยกจาก transform ของกล่อง จึงไม่ชนกัน */
 .ct-actor.nod { animation: ct-nod .9s ease-out; }
+/* 🎭 (2026-11-07) อิริยาบถ — คลิปพื้นใสวางทับ sprite (resources/js/oracle-room/poses.js) · ตัดเฉพาะด้านล่างหลังขอบโต๊ะ */
+.ct-actor:has(.oracle-pose) { overflow: visible; clip-path: inset(-30% -30% 0 -30%); }
+.ct-actor .oracle-pose { position: absolute; left: 50%; bottom: -3%; width: auto; max-width: none; transform: translateX(-50%);
+  opacity: 0; transition: opacity .35s ease; pointer-events: none; filter: drop-shadow(0 0 18px rgba(200, 160, 255, .25)); }
+.ct-actor .oracle-pose.is-on { opacity: 1; }
+.ct-actor.has-pose img { animation: none; }
 @keyframes ct-nod {
   0% { translate: 0 0; filter: none; }
   35% { translate: 0 1.6%; filter: brightness(1.25) drop-shadow(0 0 24px var(--ct-room-a)); }

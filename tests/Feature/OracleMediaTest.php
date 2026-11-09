@@ -18,6 +18,9 @@ use Tests\TestCase;
  *  - ประโยคเสียงห้ามมีราคา · ไม่มี voice ID ใน manifest (เจ้าของเปลี่ยนเสียงได้ที่หลังบ้าน Thaiprompt)
  *  - 🎵 เพลงบรรเลงโรงละคร: ทุกห้องมี 2 เพลง ไฟล์มีจริง เป็น mp3 ขนาดพอดีมือถือ (2026-11-04)
  *  - คอมโพเนนต์ไม่เล่นเสียงเอง: <video> muted ทุกตัว ไม่มี autoplay
+ *  - 🎭 อิริยาบถ (2026-11-07): ทุกท่าที่ manifest อ้างถึงมีไฟล์ WebM จริงและเล็กพอ · สถานะที่ใช้ต้องเป็นชุดที่ poses.js รู้จัก
+ *    ทุกสถานะหลัก (รอ/ฟัง/คิด/พูด/เปิดไพ่/สรุป) มีท่าอย่างน้อย 1 ท่า · ห้องที่ไม่มีไฟล์ = ไม่ส่งท่า (ภาพนิ่ง)
+ *  - <x-oracle-stage> ห้ามมีเมธอดชื่อซ้ำ (เคยมี play() สองตัว ตัวเสียงทับตัวคลิป → คลิป idle ไม่เล่นเลย 3 วัน)
  */
 class OracleMediaTest extends TestCase
 {
@@ -237,5 +240,105 @@ class OracleMediaTest extends TestCase
         } finally {
             File::deleteDirectory(public_path($dir));
         }
+    }
+
+    /** สถานะที่ resources/js/oracle-room/poses.js รู้จัก */
+    private const MOODS = ['idle', 'listen', 'think', 'talk', 'smile', 'reveal', 'summary'];
+
+    public function test_every_referenced_pose_clip_exists_is_webm_and_small_enough(): void
+    {
+        $rooms = 0;
+        foreach (ChatRooms::keys() as $persona) {
+            $paths = OracleMedia::posePaths($persona);
+            if (! $paths) {
+                continue;   // ห้องนี้ยังไม่มีอิริยาบถ — ภาพนิ่งเหมือนเดิม
+            }
+            $rooms++;
+            $cfg = config("oracle_media.rooms.{$persona}.poses");
+            $this->assertGreaterThan(1.0, (float) $cfg['scale'], "{$persona}: กล่องคลิปต้องสูงกว่า sprite (มีที่ว่างเหนือหัว)");
+
+            foreach ($paths as $name => $path) {
+                $full = public_path($path);
+                $this->assertFileExists($full, "manifest อ้างถึงท่า {$path} แต่ไม่มีไฟล์");
+                $this->assertLessThanOrEqual(1_200_000, filesize($full), "{$path} ใหญ่เกินไปสำหรับมือถือ");
+                $this->assertSame("\x1A\x45\xDF\xA3", (string) file_get_contents($full, false, null, 0, 4), "{$path} ไม่ใช่ WebM");
+                foreach ((array) $cfg['clips'][$name] as $mood) {
+                    $this->assertContains($mood, self::MOODS, "{$persona}/{$name}: ไม่รู้จักสถานะ {$mood}");
+                }
+            }
+
+            // ทุกสถานะหลักต้องมีท่า — ไม่งั้นผู้พยากรณ์ไม่ขยับตอนนั้น
+            $poses = OracleMedia::poses($persona);
+            $this->assertCount(count($paths), $poses['clips']);
+            $covered = array_unique(array_merge(...array_column($poses['clips'], 'moods')));
+            foreach (['idle', 'listen', 'think', 'talk', 'reveal', 'summary'] as $mood) {
+                $this->assertContains($mood, $covered, "{$persona}: ไม่มีท่าสำหรับสถานะ {$mood}");
+            }
+        }
+        $this->assertGreaterThanOrEqual(1, $rooms, 'อย่างน้อยห้องแม่หมอต้องมีอิริยาบถ');
+    }
+
+    public function test_poses_only_ship_files_that_exist(): void
+    {
+        $dir = 'media/oracle-test-' . uniqid();
+        config(['oracle_media.dir' => $dir]);
+        File::ensureDirectoryExists(public_path("{$dir}/maemor/poses"));
+        File::put(public_path("{$dir}/maemor/poses/nod.webm"), "\x1A\x45\xDF\xA3fake");
+
+        try {
+            $p = OracleMedia::poses('maemor');
+            $this->assertCount(1, $p['clips']);
+            $this->assertSame('nod', $p['clips'][0]['name']);
+            $this->assertSame(['listen', 'talk', 'smile'], $p['clips'][0]['moods']);
+            $this->assertTrue($p['clips'][0]['pp']);
+            $this->assertStringContainsString('/poses/nod.webm?v=', $p['clips'][0]['url']);
+            $this->assertNull($p['still'], 'ยังไม่มี still.webp = ใช้ sprite เดิม');
+            // ห้องอื่นไม่ได้ไฟล์ของแม่หมอ
+            $this->assertSame([], OracleMedia::poses('kunsai')['clips']);
+            // โรงละครเปิดไพ่ได้ท่าชุดเดียวกัน
+            $this->assertSame($p, \App\Support\CardTheater::room('maemor')['poses']);
+        } finally {
+            File::deleteDirectory(public_path($dir));
+        }
+    }
+
+    /** ห้องแชทเต็มจอ: มีท่า = ใส่ data-poses ให้ .or-actor + โหลดสคริปต์ · ไม่มีท่า = ภาพนิ่งล้วน ไม่โหลดอะไรเพิ่ม */
+    public function test_room_scene_attaches_poses_only_when_clips_exist(): void
+    {
+        $this->withoutVite();
+        $dir = 'media/oracle-test-' . uniqid();
+        config(['oracle_media.dir' => $dir]);
+
+        try {
+            $this->get(route('chat.index', ['room' => 'maemor']))->assertOk()
+                ->assertSee('class="or-actor"', false)
+                ->assertDontSee('data-poses', false);
+
+            File::ensureDirectoryExists(public_path("{$dir}/maemor/poses"));
+            File::put(public_path("{$dir}/maemor/poses/wait.webm"), "\x1A\x45\xDF\xA3fake");
+            $this->get(route('chat.index', ['room' => 'maemor']))->assertOk()
+                ->assertSee('data-poses', false)
+                ->assertSee('wait.webm', false)
+                ->assertSee('sprite-maemor', false);
+
+            // มีภาพนิ่งท่าตั้งต้น (มือวางบนโต๊ะ) = ใช้แทน sprite เดิม ทั้งห้องแชทและโรงละคร
+            File::put(public_path("{$dir}/maemor/poses/still.webp"), 'RIFFfake');
+            $this->assertStringContainsString('/poses/still.webp?v=', \App\Support\CardTheater::room('maemor')['sprite']);
+            $this->get(route('chat.index', ['room' => 'maemor']))->assertOk()
+                ->assertSee('poses/still.webp', false);
+        } finally {
+            File::deleteDirectory(public_path($dir));
+        }
+    }
+
+    /** กันบั๊กเดิม: Alpine.data ที่มีเมธอดชื่อซ้ำ = ตัวหลังทับตัวแรกเงียบ ๆ (play() เสียงเคยทับ play() คลิป) */
+    public function test_oracle_stage_methods_have_unique_names(): void
+    {
+        $src = (string) file_get_contents(resource_path('views/components/oracle-stage.blade.php'));
+        preg_match_all('/^    ([a-zA-Z_]\w*)\s*\([^)]*\)\s*\{\s*$/m', $src, $m);
+        $this->assertNotEmpty($m[1]);
+        $dupes = array_keys(array_filter(array_count_values($m[1]), fn ($n) => $n > 1));
+        $this->assertSame([], $dupes, 'เมธอดชื่อซ้ำใน oracleStage: ' . implode(', ', $dupes));
+        $this->assertContains('playLine', $m[1]);
     }
 }

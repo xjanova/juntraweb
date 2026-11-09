@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import './theater.css';
 import { sfx, music, voice, holdVoice, soundOn } from './sound';
+import { attachPoses } from '../oracle-room/poses.js';
 
 const STEPS = ['เข้าห้อง', 'สับไพ่', 'เลือกไพ่', 'วางไพ่', 'รอคำทำนาย', 'เปิดคำทำนาย'];
 const CW = 0.62;
@@ -225,6 +226,22 @@ function createTheater(root, cfg, useGL) {
     el.subWho.textContent = R.name;
 
     const state = { run: 0, phase: 'idle', fanOff: 0, fanVel: 0, picked: [], revealAt: -1, playing: false, layout: null, submitting: false, opened: false };
+
+    // 🎭 (2026-11-07) อิริยาบถของผู้พยากรณ์ — คลิปพื้นใสวางทับ sprite ตามจังหวะพิธี (resources/js/oracle-room/poses.js)
+    //   ทุกท่าขยับเบา ๆ มือวางบนโต๊ะ (เจ้าของ: "เหมือนรอเรา ไม่ต้องดิ้นเยอะ") — สับไพ่/วางไพ่/รอคำทำนาย = ท่ารอ
+    //   เลือกไพ่ = พยักหน้ารับฟัง · เปิดไพ่แต่ละใบ = เหลือบมองยิ้ม 1 ท่า · สรุป/เล่าเรื่อง = ท่ารอ
+    //   เครื่องที่เล่นไม่ได้ (Safari/iPhone, ลดการเคลื่อนไหว, ประหยัดเน็ต) หรือห้องที่ยังไม่มีคลิป = ภาพนิ่งเหมือนเดิม
+    const poses = attachPoses(el.actor, R.poses);
+    poses.active(false);   // ผู้พยากรณ์ยังไม่ขึ้นเวที (oracle('on') เปิดเอง) — ยังไม่โหลดคลิป
+    const PHASE_MOOD = { shuffle: 'think', pick: 'listen', confirm: 'listen', deal: 'think', wait: 'think', reveal: 'idle', done: 'summary', story: 'summary' };
+    if (poses.live) {
+        let lastPhase = '';
+        setInterval(() => {
+            if (state.phase === lastPhase) return;
+            lastPhase = state.phase;
+            poses.base(PHASE_MOOD[state.phase] || 'idle');
+        }, 400);
+    }
     let W = 1; let H = 1; let visH = 1; let visW = 1; let ppu = 1; let portrait = false; let safeTop = 0;
 
     // ระยะขอบจอปลอดภัย (ติ่งกล้อง) — อ่านจากกล่องทดสอบ
@@ -407,12 +424,14 @@ function createTheater(root, cfg, useGL) {
         Object.assign(el.actor.style, { top: `${ty - hgt}px`, height: `${hgt}px`, width: `${Math.round(Math.min(W, hgt * 0.9))}px` });
     }
     function oracle(mode) {
+        poses.active(mode !== '');
         el.actor.classList.toggle('on', mode !== '');
         el.actor.classList.toggle('faint', mode === 'faint');
     }
     // ผู้พยากรณ์พยักหน้า + เรืองแสงวูบ ทุกครั้งที่พลิกไพ่
     function nod() {
         el.actor.classList.remove('nod'); void el.actor.offsetWidth; el.actor.classList.add('nod');
+        poses.pulse('reveal');
     }
     let endSaid = false;
     function stageRect(full = false) {

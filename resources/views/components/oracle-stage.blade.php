@@ -101,7 +101,7 @@ document.addEventListener('alpine:init', () => {
       window.addEventListener('oracle-say', this._say);
       this._toggle = () => this.toggleSound();
       window.addEventListener('oracle-sound-toggle', this._toggle);
-      this._unlock = () => { if (this.pending) { const k = this.pending; this.pending = null; this.play(k); } };
+      this._unlock = () => { if (this.pending) { const k = this.pending; this.pending = null; this.playLine(k); } };
       document.addEventListener('pointerdown', this._unlock, { capture: true });
       // ป๊อปอัปกลางจอ: "แตะเพื่อเปิดเสียง" = เล่นประโยคที่ค้าง · "ไม่ต้องมีเสียง" = ปิด
       window.addEventListener('oracle-sound-unlock', this._unlock);
@@ -216,7 +216,7 @@ document.addEventListener('alpine:init', () => {
       this.announce();
       if (!this.sound) { this.audio?.pause(); this.pending = null; return; }
       // กดเปิด = การแตะของลูกค้า เล่นได้แน่นอน — ทักทุกครั้งที่เปิด ให้รู้ว่าเสียงมาแล้ว
-      this.play(cfg.greet && this.voice[cfg.greet] ? cfg.greet : 'room_greet');
+      this.playLine(cfg.greet && this.voice[cfg.greet] ? cfg.greet : 'room_greet');
     },
 
     // บอกปุ่มลำโพงตัวอื่นในหน้าว่าตอนนี้เปิดหรือปิด
@@ -229,14 +229,21 @@ document.addEventListener('alpine:init', () => {
       const scope = 'room-' + (cfg.persona || '');
       if (once && window.JuntraVoice.said(scope, key)) return;
       window.JuntraVoice.mark(scope, key);
-      this.play(key);
+      this.playLine(key);
     },
 
-    play(key) {
+    // ⚠️ (2026-11-07) ชื่อต้องไม่ซ้ำ play(v) ของคลิป — เดิมตั้งชื่อ play เหมือนกัน ตัวนี้ทับตัวคลิป
+    //    คลิป idle ทุกห้องเลยไม่เคยเล่นตั้งแต่ 4 พ.ย. (play(video) ไปเปิดหาเสียงชื่อ "[object HTMLVideoElement]")
+    playLine(key) {
       if (!this.voice[key]) return;
       this.audio?.pause();
-      this.audio = new Audio(this.voice[key]);
-      const p = this.audio.play();
+      const a = new Audio(this.voice[key]);
+      this.audio = a;
+      // บอกท่าทางของผู้พยากรณ์ (poses.js) ว่ากำลังพูดประโยคนี้อยู่
+      const line = (on) => window.dispatchEvent(new CustomEvent('oracle-line', { detail: { on, key } }));
+      a.addEventListener('playing', () => line(true), { once: true });
+      ['ended', 'pause', 'error'].forEach((ev) => a.addEventListener(ev, () => line(false), { once: true }));
+      const p = a.play();
       // ยังไม่ได้แตะหน้า (นโยบาย autoplay) → เก็บประโยคล่าสุดไว้เล่นตอนแตะครั้งแรก
       if (p && p.catch) p.catch((e) => { if (e && e.name === 'NotAllowedError') this.pending = key; });
     },

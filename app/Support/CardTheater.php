@@ -128,6 +128,7 @@ final class CardTheater
         $key = ChatRooms::normalize($persona);
         $all = (array) config('card_theater.rooms', []);
         $r = $all[$key] ?? $all[ChatRooms::DEFAULT];
+        $poses = OracleMedia::poses($key);
 
         return [
             'key'     => $key,
@@ -141,13 +142,16 @@ final class CardTheater
                 'table' => (float) $r['plate']['table'],
                 'posY'  => (float) $r['plate']['pos_y'],
             ],
-            'sprite'  => asset($r['sprite']),
+            // มีภาพนิ่งของชุดอิริยาบถ = ใช้ภาพนั้น (ท่าเดียวกับเฟรมแรกของคลิป ไม่กระตุกตอนสลับ)
+            'sprite'  => $poses['still'] ?? asset($r['sprite']),
             'accent'  => $r['accent'],
             'accent2' => $r['accent_2'],
             'glow'    => $r['glow'],
             'star'    => $r['star'],
             // เพลงบรรเลงของห้อง (เล่นเบา ๆ เฉพาะตอนลูกค้าเปิดเสียง)
             'music'   => OracleMedia::music($key),
+            // 🎭 อิริยาบถของผู้พยากรณ์ (คลิปพื้นใสวางทับ sprite) — ไม่มีไฟล์ = clips ว่าง
+            'poses'   => $poses,
         ];
     }
 

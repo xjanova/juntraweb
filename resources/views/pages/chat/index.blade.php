@@ -135,7 +135,12 @@
       @endif
       <div class="or-scene" aria-hidden="true">
         <div class="or-plate"></div>
-        <div class="or-actor" :class="{ 'is-busy': thinking }"><img src="{{ $scene['sprite'] }}" alt="" decoding="async" fetchpriority="high"></div>
+        {{-- 🎭 (2026-11-07) อิริยาบถ: คลิปพื้นใสวางทับภาพนี้ (resources/js/oracle-room/poses.js) — คิด/ฟัง/พูด/ยิ้ม ตามสถานะห้อง --}}
+        <div class="or-actor" :class="{ 'is-busy': thinking }"
+             @if (! empty($scene['poses']['clips'])) data-poses='@json($scene['poses'])' @endif><img src="{{ $scene['sprite'] }}" alt="" decoding="async" fetchpriority="high"></div>
+        @if (! empty($scene['poses']['clips']))
+          @vite('resources/js/oracle-room/room-poses.js')
+        @endif
         <div class="or-vignette"></div>
       </div>
 

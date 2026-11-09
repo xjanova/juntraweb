@@ -81,6 +81,50 @@ final class OracleMedia
     }
 
     /**
+     * 🎭 อิริยาบถของผู้พยากรณ์ที่ยืนหลังโต๊ะ (คลิปพื้นใส) ที่มีไฟล์แล้ว — ใช้โดย resources/js/oracle-room/poses.js
+     * ไม่มีคลิปสักท่า = clips ว่าง (หน้าเว็บเหลือภาพนิ่งเหมือนเดิม)
+     *
+     * @return array{scale: float, clips: list<array{name: string, url: string, moods: list<string>, pp: bool}>}
+     */
+    public static function poses(string $persona): array
+    {
+        $cfg = (array) config('oracle_media.rooms.' . ChatRooms::normalize($persona) . '.poses', []);
+        $clips = [];
+        foreach (self::posePaths($persona) as $name => $path) {
+            if (! is_file(public_path($path))) {
+                continue;
+            }
+            $clips[] = [
+                'name'  => $name,
+                'url'   => self::url($path),
+                'moods' => array_values(array_map('strval', (array) ($cfg['clips'][$name] ?? ['idle']))),
+                'pp'    => true,   // ต่อไป-กลับทุกคลิป → เร่งกลับท่าตั้งต้นกลางคลิปได้
+            ];
+        }
+
+        // ภาพนิ่งท่าตั้งต้นของคลิป (ถ้ามี) — ใช้แทน sprite เดิม ให้เฟรมแรก/สุดท้ายของคลิปตรงกับภาพที่ค้างอยู่
+        $still = self::dir($persona) . '/poses/still.webp';
+
+        return [
+            'scale' => (float) ($cfg['scale'] ?? 1.0),
+            'still' => $clips && is_file(public_path($still)) ? self::url($still) : null,
+            'clips' => $clips,
+        ];
+    }
+
+    /** @return array<string, string> ชื่อท่า => path ใต้ public/ ตาม manifest (ไม่สนว่ามีไฟล์หรือยัง) */
+    public static function posePaths(string $persona): array
+    {
+        $dir = self::dir($persona);
+        $out = [];
+        foreach (array_keys((array) config('oracle_media.rooms.' . ChatRooms::normalize($persona) . '.poses.clips', [])) as $name) {
+            $out[$name] = "{$dir}/poses/{$name}.webm";
+        }
+
+        return $out;
+    }
+
+    /**
      * path ของคลิปทั้งหมดตาม manifest (ไม่สนว่ามีไฟล์หรือยัง) — ให้เทสต์ใช้เช็คความครบ
      *
      * @return list<array{webm: string, mp4: string}>
