@@ -234,7 +234,8 @@ class ThaipromptSsoTest extends TestCase
         $this->actingAs($stranger);
         $res = $this->roundTrip(['id' => '3', 'email' => 'fb_3@thaiprompt.local', 'name' => 'ลูกค้า FB'], self::HANDOFF);
 
-        $res->assertRedirect(url(self::HANDOFF));
+        // 🔮 (2026-11-09) บัญชีที่เพิ่งสมัครลงหน้าเลือกผู้พยากรณ์ตรง ๆ (ปลายทางเดียวกับ /chat/continue/{h})
+        $res->assertRedirect(route('chat.index', ['pick' => 1]));
         $res->assertSessionHasNoErrors();
         $this->assertNull($stranger->refresh()->thaiprompt_user_id, 'ห้ามผูก Thaiprompt เข้าบัญชีที่ค้างอยู่');
 
@@ -255,11 +256,12 @@ class ThaipromptSsoTest extends TestCase
         $this->assertAuthenticatedAs($owner);
     }
 
-    public function test_handoff_guest_login_lands_on_chat_continue_without_remember(): void
+    public function test_handoff_guest_login_lands_on_oracle_picker_without_remember(): void
     {
         $res = $this->roundTrip(['id' => '5', 'email' => 'fb_5@thaiprompt.local', 'name' => 'ลูกค้าใหม่'], self::HANDOFF);
 
-        $res->assertRedirect(url(self::HANDOFF));
+        // 🔮 (2026-11-09) ลูกค้าใหม่จากการ์ดในเพจ → หน้าเลือกผู้พยากรณ์ทันที
+        $res->assertRedirect(route('chat.index', ['pick' => 1]));
         $this->assertAuthenticatedAs(User::where('thaiprompt_user_id', '5')->firstOrFail());
         $res->assertCookieMissing($this->recallerName());
     }

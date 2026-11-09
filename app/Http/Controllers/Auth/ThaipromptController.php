@@ -244,12 +244,16 @@ class ThaipromptController extends Controller
             return $this->fail($request, 'บัญชีทีมงานต้องเข้าสู่ระบบด้วยอีเมลและรหัสผ่านเท่านั้น');
         }
 
+        // 🔮 (2026-11-09) สมัครใหม่ครั้งนี้หรือไม่ — ใช้ตัดสินหน้าปลายทางหลังสมัคร (ดู landingAfterSignup)
+        $createdNow = ! $user;
+
         if (!$user) {
             $user = new User();
             $user->email = $email;
             // อีเมลสังเคราะห์ชนกับแถวที่มีอยู่ (คนจองไว้ก่อนมีด่านกันโดเมนสงวน) = ไม่แตะแถวนั้น
             //   สร้างอีเมลภายในใหม่ให้เจ้าของตัวจริงแทน กันชน unique
-            if ($reservedEmail && User::where('email', $email)->exists()) {
+            //   withTrashed: แถวที่ถูกลบแบบ soft delete (เช่นแอดมินลบ) ยังถือ unique email อยู่ — เดิมชนแล้ว 500
+            if ($reservedEmail && User::withTrashed()->where('email', $email)->exists()) {
                 Log::warning('Thaiprompt SSO reserved email collision', ['thaiprompt_user_id' => $tpId]);
                 $user->email = 'tp' . preg_replace('/[^A-Za-z0-9]/', '', $tpId) . '-' . Str::lower(Str::random(8)) . '@thaiprompt.local';
             }
@@ -322,7 +326,17 @@ class ThaipromptController extends Controller
             ]);
         }
 
-        $redirect = redirect()->intended(route('dashboard'));
+        // 🔮 (2026-11-09 เจ้าของสั่ง) "หลังจากสมัครเสร็จ ให้ส่งไปหน้าเลือกผู้พยากรณ์ทันที"
+        //    บัญชีใหม่ที่ไม่มีปลายทางเฉพาะ (ลิงก์การ์ดจากเพจ /chat/continue/{h}, ลิงก์ /chat เปล่า ๆ,
+        //    หรือไม่มีปลายทางเลย) → หน้าเลือกผู้พยากรณ์ ไม่ใช่แดชบอร์ดที่ไม่มีอะไรให้ทำ
+        //    ลิงก์ที่ชี้หน้าเฉพาะ (/tarot/free, /mlm, /chat?room=…) ยังไปหน้านั้นตามเดิม
+        $fallback = route('dashboard');
+        if ($createdNow && self::landsOnPicker($request->session()->get('url.intended'))) {
+            $request->session()->forget('url.intended');
+            $fallback = route('chat.index', ['pick' => 1]);
+        }
+
+        $redirect = redirect()->intended($fallback);
         if ($referralStatus !== null) {
             $redirect->with('status', $referralStatus);
         }
@@ -335,6 +349,34 @@ class ThaipromptController extends Controller
     public static function isHandoffPath(string $to): bool
     {
         return str_starts_with($to, '/chat/continue/');
+    }
+
+    /**
+     * บัญชีที่เพิ่งสมัครควรลงหน้าเลือกผู้พยากรณ์แทนปลายทางนี้ไหม
+     *
+     * true = ไม่มีปลายทาง / ห้องแชทเปล่า ๆ (/chat ไม่ระบุห้อง) / เส้นการ์ดจากเพจ (/chat/continue/…) / แดชบอร์ด
+     * false = ลิงก์ชี้หน้าเฉพาะ (ดูดวงฟรี, สายงาน, ห้องที่ระบุ) — เคารพลิงก์นั้น
+     *
+     * @param  string|null  $intended  url.intended ใน session (URL เต็มที่ redirect() ตั้งไว้)
+     */
+    public static function landsOnPicker(?string $intended): bool
+    {
+        if ($intended === null || $intended === '') {
+            return true;
+        }
+
+        $path = '/' . ltrim((string) parse_url($intended, PHP_URL_PATH), '/');
+        parse_str((string) parse_url($intended, PHP_URL_QUERY), $query);
+
+        if (self::isHandoffPath($path)) {
+            return true;
+        }
+
+        if ($path === '/chat') {
+            return empty($query['room']);
+        }
+
+        return in_array($path, ['/dashboard', '/account/dashboard'], true);
     }
 
     /**
