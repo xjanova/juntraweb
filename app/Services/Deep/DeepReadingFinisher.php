@@ -154,22 +154,20 @@ class DeepReadingFinisher
 
     /**
      * Thaiprompt ไม่ให้คำทำนาย — ล้มทั้งบิล + คืนเงิน
-     *   คำถามที่ส่อสัญญาณวิกฤต (crisis) เก็บข้อความปลอบไว้ให้หน้าผลแสดงแทนข้อความ "ไม่สำเร็จ"
      *
-     * @param  array{status:string,crisis?:bool,message?:?string,reason_code?:?string}  $res
+     * @param  array{status:string,message?:?string,reason_code?:?string}  $res
      */
     private function failWith(Reading $reading, array $res, int $index): void
     {
         $reason = $res['reason_code'] ?? null;
         Log::warning('Deep reading: Thaiprompt gave no reading — refunding', [
-            'reading' => $reading->id, 'index' => $index, 'reason_code' => $reason, 'crisis' => $res['crisis'] ?? false,
+            'reading' => $reading->id, 'index' => $index, 'reason_code' => $reason,
         ]);
 
         if ($reason === 'question_rejected') {
             $payload = (array) $reading->payload;
             $payload['failure'] = array_filter([
                 'reason' => 'question_rejected',
-                'crisis' => ($res['crisis'] ?? false) === true ? true : null,
                 'message' => is_string($res['message'] ?? null) ? mb_substr($res['message'], 0, 1000) : null,
             ], fn ($v) => $v !== null);
             // update ผ่าน query builder ไม่ผ่าน cast → เข้ารหัส JSON เอง

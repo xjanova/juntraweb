@@ -164,6 +164,10 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
     Route::post('/from-reading/{reading}', 'fromReading')
         ->middleware(['auth', 'throttle:chat-send'])
         ->name('from-reading');
+    // 🎁 (2026-11-09) ดูฟรีจบ → ห้องแม่หมอพร้อมคำทำนายใบนั้น + การ์ดแพ็กเกจ (ไม่ไปหน้าผลไพ่)
+    Route::get('/from-free/{reading}', 'fromFreeReading')
+        ->middleware('auth')
+        ->name('from-free');
     Route::get('/conversation/{conversation}', 'show')
         ->middleware('auth')
         ->name('show');

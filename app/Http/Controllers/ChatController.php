@@ -17,7 +17,6 @@ use App\Services\Chat\MaeMorUpstream;
 use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
-use App\Support\ChatCrisis;
 use App\Support\ChatRooms;
 use App\Support\ChatSuggestions;
 use App\Support\Markdown;
@@ -155,9 +154,6 @@ class ChatController extends Controller
         $qa = ReadingQaClock::state($conversation, $reading);
         // ระหว่างเวลาถามต่อของไพ่ชุดนี้ = ยังอยู่ในการทำนาย → ไม่ยื่นไพ่ชุดใหม่ (กด "พอแล้ว" ก่อนได้)
         $hideOffers = $hideOffers || ($qa !== null && ! $qa['over']);
-        // 🤍 ลูกค้าที่ส่งสัญญาณอยากทำร้ายตัวเอง — ไม่มีการ์ด/แพ็กเกจ/ปุ่มชวนดูดวงเลยจนห้องวิกฤตหมดอายุ
-        $crisisRoom = ChatCrisis::active($user);
-        $hideOffers = $hideOffers || $crisisRoom;
         // 🔮 (2026-11-06) ทุกแบบการเปิดไพ่ของห้อง — หน้ารวมแพ็กเกจ /tarot ปิดแล้ว ลูกค้าเลือกบนโต๊ะในห้องแทน
         //    โต๊ะวางไม่เกิน 3 แบบที่เปิดได้ตอนนี้ (ผู้สูงอายุ ตัวเลือกมากไปคือไม่เลือก) ที่เหลืออยู่ใน "ไพ่แบบอื่น"
         $menu  = $gate['allowed'] && ! $hideOffers ? ChatOffers::roomMenu((string) $conversation->persona, $user) : [];
@@ -184,8 +180,8 @@ class ChatController extends Controller
             'menuOpen'     => $request->boolean('menu') && count($menu) > count($table),
             'roomLock'     => $lock !== null ? ReadingRoomLock::view($lock) : null,
             'pendingBill'  => $bill !== null ? ChatTopupController::billView($bill) : null,
-            'aiSuggestions' => $crisisRoom ? [] : ($hideOffers ? ChatSuggestions::withoutReadingStarters((array) Cache::get(self::askKey($conversation->id), []))
-                                           : (array) Cache::get(self::askKey($conversation->id), [])),
+            'aiSuggestions' => $hideOffers ? ChatSuggestions::withoutReadingStarters((array) Cache::get(self::askKey($conversation->id), []))
+                                           : (array) Cache::get(self::askKey($conversation->id), []),
             'gate'         => $gate,
             'channel'      => $user?->chatLinkChannel(),
             'cost'         => $cost,
@@ -193,8 +189,7 @@ class ChatController extends Controller
             'dailyLimit'   => $dailyLimit,
             'dailyLeft'    => $dailyLeft ?? 0,
             'readonly'     => false, // live chat room — input is active
-            'suggestions'  => $crisisRoom ? [] : $this->staticChips($request, $this->suggestionsFor($conversation, $reading)),
-            'crisisRoom'   => $crisisRoom,
+            'suggestions'  => $this->staticChips($request, $this->suggestionsFor($conversation, $reading)),
             // คุยต่อจากผลทำนาย → เปิดเสียงแล้วแม่หมอชวนถามต่อ แทนคำทักทายทั่วไป
             'fromReading'  => $reading !== null,
             'topics'       => ChatSuggestions::topics(),
@@ -605,7 +600,7 @@ class ChatController extends Controller
         //   ⚠️ exhausted() บล็อกเฉพาะโหมดฟรีล้วน — โหมดคิดเงินให้ผ่านไปหักเครดิตแทน
         if (ChatPolicy::exhausted($user)) {
             $this->releaseChargeLock();
-            $limitMsg = ChatCrisis::active($user) ? ChatCrisis::limitMessage($room) : ChatPolicy::limitMessage($room);
+            $limitMsg = ChatPolicy::limitMessage($room);
 
             return $request->wantsJson()
                 ? response()->json([
@@ -684,13 +679,7 @@ class ChatController extends Controller
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
-        // 🤍 (2026-11-06) crisis = คำปลอบของเทิร์นนี้ (ไม่คิดเงิน) · crisis_room = ห้องโหมดวิกฤต (ไม่ขายอะไรเลย)
-        $crisis   = (bool) ($dispatch['crisis'] ?? false);
-        if (array_key_exists('crisis_room', $dispatch)) {
-            ChatCrisis::remember($user, $dispatch['crisis_room']);
-        }
-        $crisisRoom = $crisis || ChatCrisis::active($user);
-        $offers   = $kind === 'offer' && ! $crisisRoom ? ChatOffers::forRoom($conversation->persona, (string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
+        $offers   = $kind === 'offer' ? ChatOffers::forRoom($conversation->persona, (string) ($dispatch['offer_topic'] ?? 'general'), $user) : [];
         // 🔒 (2026-11-05) กำลังทำนายอยู่ (สับไพ่/อ่านไพ่) หรือมีบิลเติมเงินค้าง — ไม่ยื่นการ์ดเปิดไพ่ใบใหม่ซ้อน
         //    เจ้าของสั่ง "ถ้าทำนายอยู่ปุ่มดูดวงไม่ควรโผล่มา" + "ป้ายเปิดไพ่ต้องไม่ขึ้นถ้ายังค้างบิลอยู่"
         if ($offers !== [] && ($hold = $this->offerHold($request, $user, $conversation->persona, $qa)) !== null) {
@@ -698,7 +687,7 @@ class ChatController extends Controller
             $reply  = $hold;
         }
         // ✨ ปุ่มที่ผู้พยากรณ์คิดมาให้จากบทสนทนา — การ์ดเปิดไพ่ขึ้นอยู่แล้วไม่ต้องมีปุ่มแย่งความสนใจ
-        $aiSuggestions = ! $degraded && $offers === [] && ! $crisisRoom ? (array) ($dispatch['suggestions'] ?? []) : [];
+        $aiSuggestions = ! $degraded && $offers === [] ? (array) ($dispatch['suggestions'] ?? []) : [];
         if ($aiSuggestions !== [] && (ReadingRoomLock::active($request) !== null || $qa !== null)) {
             $aiSuggestions = ChatSuggestions::withoutReadingStarters($aiSuggestions);
         }
@@ -720,11 +709,9 @@ class ChatController extends Controller
         // upstream unreachable): the user gets the "not ready" note for free.
         // Nor for an invitation to open cards (kind=offer): that is the shop
         // counter, not an answer — the reading itself is what gets paid for.
-        // Nor for a crisis turn (data.crisis): a customer who said they want to
-        // hurt themselves gets comfort, never a bill for it.
         // Race-safe because debit() locks the wallet row.
         $debitTx = null;
-        if ($cost > 0 && !$degraded && empty($dispatch['fallback']) && ! ChatPolicy::isFreeTurn($kind, $crisis)) {
+        if ($cost > 0 && !$degraded && empty($dispatch['fallback']) && ! ChatPolicy::isFreeTurn($kind)) {
             try {
                 $debitTx = $this->wallet->debit($user, $cost, 'สนทนากับ' . ChatRooms::name($room), [
                     'reference_type' => 'chat_message',
@@ -788,13 +775,10 @@ class ChatController extends Controller
                 'voice_url'   => $voiceUrl,
                 'reply_html'  => Markdown::safe($reply),
                 'balance'     => $this->wallet->balance($user),
-                'cost'        => ChatPolicy::isFreeTurn($kind, $crisis) ? 0.0 : $cost,
+                'cost'        => ChatPolicy::isFreeTurn($kind) ? 0.0 : $cost,
                 'degraded'    => $degraded,
                 'daily_limit' => ChatPolicy::dailyLimit(),
                 'daily_left'  => ChatPolicy::dailyLeft($user),
-                // 🤍 หน้าแชทซ่อนแพ็กเกจบนโต๊ะ ปุ่มลัด และเสียงประโยคประจำ เมื่อห้องอยู่ในโหมดวิกฤต
-                'crisis'      => $crisis,
-                'crisis_room' => $crisisRoom,
                 // 🎁 (2026-07-28) "โควตาหมด" ไม่ได้แปลว่าคุยต่อไม่ได้เสมอไป
                 //    ฝั่ง client เคยเดาเองจาก daily_left <= 0 แล้วปิดช่องพิมพ์
                 //    → พอเปิดโหมดคิดเงิน คนที่พร้อมจ่ายจะโดนปิดปาก ต้องให้เซิร์ฟเวอร์บอก
@@ -804,7 +788,7 @@ class ChatController extends Controller
                 // ⏳ นาฬิกาถามต่อ (null = ห้องคุยทั่วไป) — หน้าเว็บนับถอยหลังตามเวลาของเซิร์ฟเวอร์
                 'qa'          => ReadingQaClock::state($conversation, $reading),
                 'server_now'  => now()->getTimestamp(),
-                'suggestions' => $awaiting || $offers !== [] || $crisisRoom ? [] : $this->staticChips($request, ChatSuggestions::followUp()),
+                'suggestions' => $awaiting || $offers !== [] ? [] : $this->staticChips($request, ChatSuggestions::followUp()),
                 // ✨ (2026-11-05) ปุ่มจาก AI — แม่หมอถามกลับอยู่ = ตัวเลือกคำตอบ · ไม่ได้ถาม = คำถามที่น่าถามต่อ
                 'ai_suggestions' => $aiSuggestions,
                 // 🌙 (2026-09-15) ลูกค้าขอให้ทำนาย → การ์ดแพ็กเกจเปิดไพ่ (หักเครดิตตอนเปิดไพ่จริง)
@@ -920,6 +904,99 @@ class ChatController extends Controller
     }
 
     /**
+     * 🎁 (2026-11-09) ดูฟรีจบ → เข้าห้องแม่หมอทันที — GET /chat/from-free/{reading}
+     *
+     * เจ้าของสั่ง: "หลังจากดูฟรี ควรรีบพาไปปิดการขายเพิ่ม อย่าไปหน้าอื่นอีกมันงง ให้ไปหน้าแชทเพื่อเริ่มปิดการขาย ชวนคุยต่อ ทันที"
+     *   เดิมดูฟรีเสร็จไปหน้าผลไพ่ที่มีปุ่มพาไปหลายหน้า (เปิดไพ่ชุดเต็ม / เติมเครดิต / คุยกับแม่หมอ) ลูกค้างงแล้วหลุด
+     *
+     * ห้องที่ได้ = ห้องคุยทั่วไปของแม่หมอ (ไม่ผูก reading_id) — ห้องที่ผูกไพ่มีนาฬิกาถามต่อและซ่อนแพ็กเกจ
+     * ซึ่งเป็นของคนที่จ่ายแล้ว ห้องนี้ต้องขายต่อได้ทันที:
+     *   1. คำทำนายฟรีเป็นข้อความแรกของห้อง (ลูกค้าอ่านผลในห้องเดียวกับที่คุยต่อ)
+     *   2. แม่หมอชวนคุยต่อ + การ์ดแพ็กเกจเปิดไพ่ (offer_topic) — บิลออกเมื่อลูกค้ากดสแกนจ่ายเองเท่านั้น
+     *   3. คำถามต่อจากไพ่ใบนี้เป็นปุ่มลัด · ห้อง Thaiprompt ที่เปิดตอนข้อความแรกได้บริบทไพ่ใบนี้ไปด้วย
+     * เปิดซ้ำ (รีเฟรช / กดลิงก์เดิม) = ห้องเดิม ไม่วางข้อความซ้ำ
+     */
+    public function fromFreeReading(Request $request, Reading $reading)
+    {
+        $user = $request->user();
+        if (! $user || $reading->user_id !== $user->id) {
+            abort(403);
+        }
+        // ไม่ใช่ไพ่ฟรี / ยังไม่มีคำทำนาย = ไม่มีอะไรให้วางในห้อง → หน้าผลไพ่ตามเดิม
+        if (! data_get($reading->payload, 'free') || trim((string) $reading->result) === '' || ! ReadingChatContext::usable($reading)) {
+            return redirect()->route('tarot.show', $reading);
+        }
+
+        $room = ChatRooms::roomForSpread(TarotSpreads::keyFromType((string) $reading->type));
+        $request->session()->put('chat_room', $room);
+        $key = self::freeRoomKey($reading->id);
+
+        try {
+            $conversation = Cache::lock($key.':lock', 10)->block(5, function () use ($request, $user, $reading, $room, $key) {
+                $known = ChatConversation::where('id', (int) Cache::get($key))->where('user_id', $user->id)->first();
+                if ($known) {
+                    return $known;
+                }
+
+                $conversation = ChatConversation::create([
+                    'session_token' => (string) Str::uuid(),
+                    'user_id'       => $user->id,
+                    'title'         => 'สนทนากับ' . ChatRooms::name($room),
+                    'persona'       => $room,
+                ]);
+                ChatMessage::create([
+                    'chat_conversation_id' => $conversation->id,
+                    'role'    => 'assistant',
+                    'content' => trim((string) $reading->result),
+                ]);
+                ChatMessage::create([
+                    'chat_conversation_id' => $conversation->id,
+                    'role'        => 'assistant',
+                    'content'     => self::freeFollowUp($room),
+                    'offer_topic' => 'general',
+                ]);
+
+                // ปุ่มลัด = คำถามต่อจากไพ่ใบนี้ที่ AI คิดไว้ตอนดูฟรี
+                $next = array_values(array_filter((array) data_get($reading->payload, 'next_questions', []), 'is_string'));
+                if ($next !== []) {
+                    Cache::put(self::askKey($conversation->id), array_slice($next, 0, 3), now()->addHours(6));
+                }
+                // ผู้พยากรณ์ต้องรู้ว่าลูกค้าเพิ่งได้ไพ่ใบไหน — ใช้ตอนเปิดห้อง Thaiprompt ครั้งแรก (openUpstreamSession)
+                Cache::put(self::seedContextKey($conversation->id), ReadingChatContext::for($reading), now()->addHours(6));
+                Cache::put($key, $conversation->id, now()->addDays(30));
+
+                return $conversation;
+            });
+        } catch (LockTimeoutException) {
+            return redirect()->route('tarot.show', $reading);
+        }
+
+        $this->rememberRoomToken($request, $room, $conversation->session_token);
+
+        return redirect()->route('chat.index', ['room' => $room]);
+    }
+
+    /** คำชวนต่อหลังคำทำนายฟรี — ประกอบในเครื่อง ไม่ถาม AI (ไม่เสียรอบ ไม่กินโควตาคุยฟรี) */
+    private static function freeFollowUp(string $room): string
+    {
+        $self = ChatRooms::selfName($room);
+        $customer = ChatRooms::customer($room);
+
+        return "ไพ่ใบเดียวบอกได้แค่ภาพรวมนะคะ 🌙 ถ้า{$customer}อยากรู้ลึกว่าเรื่องนี้จะไปทางไหน {$self}เปิดไพ่ชุดเต็มให้ได้เลยด้านล่าง "
+            ."หรือจะเล่าเรื่องที่ค้างใจให้{$self}ฟังก่อนก็ได้ค่ะ";
+    }
+
+    private static function freeRoomKey(int $readingId): string
+    {
+        return "chat:free-room:{$readingId}";
+    }
+
+    private static function seedContextKey(int $conversationId): string
+    {
+        return "chat:seed-ctx:{$conversationId}";
+    }
+
+    /**
      * 🌙 (2026-11-03 FB web-only) ลูกค้าที่ย้ายมาจากแชทเพจ FB — /chat/continue/{handoff}
      *
      * ลิงก์ในเพจพาลูกค้าผ่าน SSO มาลงที่นี่ (ThaipromptController::isHandoffPath — สลับบัญชีเป็นเจ้าของลิงก์)
@@ -995,8 +1072,7 @@ class ChatController extends Controller
 
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย
         //    ไม่ส่งไปให้ AI ทำนายฟรี · ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว (ถามเรื่องไพ่ชุดนั้น = คุยได้)
-        //    🤍 ห้องวิกฤต: ส่งให้ผู้พยากรณ์ตอบเสมอ ไม่ยื่นใบเสนอราคาให้คนที่บอกว่าอยากทำร้ายตัวเอง
-        if (! $grounded && ! ChatCrisis::active($user) && ($topic = ChatReadingIntent::detect($message)) !== null) {
+        if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
             return ['reply' => ChatOffers::invite($topic, $room, $user), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
@@ -1035,8 +1111,6 @@ class ChatController extends Controller
             'kind'        => $out['kind'],
             'offer_topic' => $out['offer_topic'],
             'suggestions' => $out['suggestions'] ?? [],
-            'crisis'      => $out['crisis'] ?? false,
-            'crisis_room' => $out['crisis_room'] ?? null,
         ];
     }
 
@@ -1051,6 +1125,8 @@ class ChatController extends Controller
      */
     private function openUpstreamSession($user, ChatConversation $conversation, ?string $context = null): ?string
     {
+        // 🎁 ห้องที่เริ่มจากไพ่ฟรี — ไม่ผูก reading_id แต่ผู้พยากรณ์ต้องเห็นไพ่ใบนั้น (fromFreeReading)
+        $context ??= Cache::get(self::seedContextKey($conversation->id));
         $start     = $this->upstream->start($user, $context, persona: ChatRooms::upstreamPersona($conversation->persona));
         $sessionId = $start['session'] ?? null;
         if (! $sessionId) {

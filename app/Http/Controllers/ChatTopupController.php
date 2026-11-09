@@ -84,6 +84,7 @@ class ChatTopupController extends Controller
             'source'         => 'chat',
             'promptpay_id'   => $account['promptpay_id'],
             'promptpay_name' => $account['name'],
+            'transfer'       => $account['transfer'] ?? null,
         ])]);
 
         return response()->json($this->payload($tx, $account));
@@ -102,7 +103,9 @@ class ChatTopupController extends Controller
         }
         $meta = (array) $tx->meta;
         $account = ! empty($meta['promptpay_id'])
-            ? ['promptpay_id' => (string) $meta['promptpay_id'], 'name' => (string) ($meta['promptpay_name'] ?? ''), 'source' => 'bill']
+            ? ['promptpay_id' => (string) $meta['promptpay_id'], 'name' => (string) ($meta['promptpay_name'] ?? ''), 'source' => 'bill',
+                // บิลก่อน 2026-11-09 ไม่ได้จดเลขบัญชีไว้ = แสดงแค่ QR (ไม่ไปถาม Thaiprompt ใหม่ระหว่างรอเงินเข้า)
+                'transfer' => is_array($meta['transfer'] ?? null) ? $meta['transfer'] : null]
             : PayoutAccount::resolve($user);
         if (! $account) {
             return response()->json(['error' => 'ระบบเติมเงินยังไม่พร้อมชั่วคราว กรุณาติดต่อแอดมินค่ะ', 'reason_code' => 'promptpay_unset'], 503);
@@ -234,6 +237,8 @@ class ChatTopupController extends Controller
             'qr'             => PromptPayQr::svgDataUri($account['promptpay_id'], $payable),
             'qr_payload'     => PromptPayQr::payload($account['promptpay_id'], $payable),
             'promptpay_name' => $account['name'],
+            // 🏦 (2026-11-09) เลขบัญชีให้โอนตรงแทนการสแกน — null = แสดงแค่ QR
+            'transfer'       => $account['transfer'] ?? null,
             'auto_confirm'   => (bool) config('smschecker.enabled'),
             'expires_at'     => optional($tx->expires_at)->toIso8601String(),
         ];

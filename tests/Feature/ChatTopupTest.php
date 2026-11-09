@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Tests\Feature\Concerns\SmsCheckerDeviceRequests;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,7 @@ use Tests\TestCase;
 class ChatTopupTest extends TestCase
 {
     use RefreshDatabase;
+    use SmsCheckerDeviceRequests;
 
     protected function setUp(): void
     {
@@ -98,6 +100,29 @@ class ChatTopupTest extends TestCase
 
         $balance = (float) $this->actingAs($user)->getJson('/chat/topup/'.$res->json('id'))->json('balance');
         $this->assertGreaterThanOrEqual($price, $balance, 'จ่ายตามยอดที่ขาดแล้วต้องพอเปิดแพ็กเกจ');
+    }
+
+    /**
+     * 🧾 (2026-11-09) แตะแพ็กเกจบนโต๊ะตอนเครดิตไม่พอ ต้องไม่ออกบิลทันที — วางการ์ดให้กด "สแกนจ่าย" เองก่อน
+     *   เคสจริง: ลูกค้าแตะ "เปิดไพ่ ฿39" ครั้งเดียว ได้บิล TUP-1ZZNSYZX ใน 10 วินาทีหลังเข้าห้อง
+     *   บิลสร้างได้ทางเดียวคือ chooseAmount() ซึ่งเรียกจาก payAndOpen() — โต๊ะต้องไม่เรียก payAndOpen ตรง ๆ
+     */
+    public function test_table_package_without_credit_asks_before_creating_a_bill(): void
+    {
+        $user = $this->member();
+
+        $html = $this->actingAs($user)->get('/chat')->assertOk()->getContent();
+
+        preg_match('/openTable\(o\) \{(.*?)\n    \},/s', $html, $m);
+        $this->assertNotEmpty($m, 'หา openTable() ในหน้าแชทไม่เจอ');
+        $this->assertStringNotContainsString('payAndOpen', $m[1], 'แตะแพ็กเกจบนโต๊ะห้ามออกบิลทันที');
+        $this->assertStringContainsString('this.confirmPay(o)', $m[1]);
+
+        preg_match('/confirmPay\(o\) \{(.*?)\n    \},/s', $html, $c);
+        $this->assertNotEmpty($c, 'หา confirmPay() ในหน้าแชทไม่เจอ');
+        $this->assertStringNotContainsString('chooseAmount', $c[1], 'การ์ดยืนยันต้องไม่สร้างบิลเอง');
+        $this->assertStringNotContainsString('payAndOpen', $c[1]);
+        $this->assertStringContainsString("kind: 'confirm_pay'", $c[1]);
     }
 
     /** หน้าแชทต้องส่งขั้นต่ำ/สูงสุดเติมเงินให้ JS — ยอดที่ขาดต่ำกว่าขั้นต่ำต้องปัดขึ้น ไม่ใช่โดนปฏิเสธ */
@@ -213,6 +238,80 @@ class ChatTopupTest extends TestCase
         // เลข PromptPay ฝังอยู่ใน EMVCo payload — 0811111111 → 0066811111111
         $this->assertStringContainsString('0066811111111', (string) $res->json('qr_payload'));
         $this->assertStringNotContainsString('0066899999999', (string) $res->json('qr_payload'));
+    }
+
+    /**
+     * 🏦 (2026-11-09) การ์ดสแกนจ่ายในแชทแสดงเลขบัญชีให้โอนตรงด้วย แล้วเงินที่โอนเข้าบัญชีนั้นต้องเข้า wallet
+     *   เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารด้วย" → "ต้องเป็นบัญชีกสิกร ไม่ใช่ไทยพาณิชย์"
+     *   และ "ตรวจด้วยว่าเงินเข้าระบบ sms checker ... แล้วเงินเข้ากระเป๋าวอลเลตปกติไหม"
+     *   บัญชีโอนตรง = บัญชีเดียวกับ QR จากฟิลด์เดิมของ /payment/account — SMS จับด้วยยอดเศษสตางค์
+     */
+    public function test_chat_bill_shows_the_transfer_account_and_a_transfer_to_it_lands_in_the_wallet(): void
+    {
+        // รูปแบบเดียวกับที่ Thaiprompt ตอบอยู่บน prod วันนี้ (ไม่ต้องรอฝั่งนั้นแก้)
+        Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
+            'promptpay_id'        => '0811111111',
+            'promptpay_type'      => 'phone',
+            'account_name'        => 'จันทราพยากรณ์',
+            'account_number'      => '2323775349',
+            'bank_code'           => 'KBANK',
+            'bank_name'           => 'ธนาคารกสิกรไทย',
+            'sms_checker_enabled' => true,
+        ]], 200)]);
+        Cache::flush();
+        $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
+
+        $res = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 39])
+            ->assertOk()
+            ->assertJsonPath('transfer.bank_name', 'ธนาคารกสิกรไทย')
+            ->assertJsonPath('transfer.account_number', '2323775349')
+            ->assertJsonPath('transfer.display_number', '232-3-77534-9')
+            ->assertJsonPath('transfer.account_name', 'จันทราพยากรณ์');
+        $txId = (int) $res->json('id');
+        $payable = number_format((float) $res->json('payable'), 2, '.', '');
+
+        // รีเฟรชหน้าแล้วเปิดบิลเดิม = เลขบัญชีเดิมจากบิล ไม่ไปถาม Thaiprompt ใหม่
+        Http::fake(['*' => Http::response([], 503)]);
+        $this->actingAs($user)->getJson(route('chat.topup.resume', ['tx' => $txId]))
+            ->assertOk()
+            ->assertJsonPath('transfer.account_number', '2323775349');
+
+        // SMS กสิกรยอดตรงเข้ามา → บิลตัด เงินเข้า wallet
+        $req = $this->notifyRequest($this->device('auto'), [
+            'bank' => 'KBANK', 'type' => 'credit', 'amount' => $payable,
+            'sender_or_receiver' => 'ลูกค้า', 'reference_number' => 'KBANK-REF-1',
+            'sms_timestamp' => (int) round(microtime(true) * 1000) + 1000,
+        ]);
+        $this->postJson('/api/v1/sms-payment/notify', $req['body'], $req['headers'])
+            ->assertOk()
+            ->assertJsonPath('data.matched', true);
+
+        $tx = WalletTransaction::findOrFail($txId);
+        $this->assertSame('success', $tx->status);
+        $this->assertSame((float) $payable, app(WalletService::class)->balance($user));
+
+        // หน้าแชทเห็นว่าจ่ายแล้ว และประวัติ wallet มีรายการเติมเงินใบนี้
+        $this->actingAs($user)->getJson(route('chat.topup.status', ['tx' => $txId]))
+            ->assertOk()->assertJsonPath('paid', true);
+        $this->actingAs($user)->get('/wallet')->assertOk()->assertSee($tx->reference_code);
+    }
+
+    /** บัญชีที่ทำ QR ไม่ได้เปิดตัวจับ SMS = โอนแล้วบิลไม่ตัดเอง → ไม่โชว์เลขบัญชี แสดงแค่ QR */
+    public function test_chat_bill_shows_only_the_qr_when_the_account_has_no_sms_checking(): void
+    {
+        Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
+            'promptpay_id'        => '0811111111',
+            'account_name'        => 'จันทราพยากรณ์',
+            'account_number'      => '2323775349',
+            'bank_name'           => 'ธนาคารกสิกรไทย',
+            'sms_checker_enabled' => false,
+        ]], 200)]);
+        Cache::flush();
+        $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
+
+        $this->actingAs($user)->postJson('/chat/topup', ['amount' => 39])
+            ->assertOk()
+            ->assertJsonPath('transfer', null);
     }
 
     /** upstream ล่ม = ต้องยังเติมเงินได้ด้วยค่าที่ตั้งไว้เอง ไม่ใช่ตายทั้งระบบ */

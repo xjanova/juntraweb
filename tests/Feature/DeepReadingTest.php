@@ -252,24 +252,23 @@ class DeepReadingTest extends TestCase
         $this->assertEqualsWithDelta(100.0, $this->balance($user), 0.01);
     }
 
-    /** คำถามส่อสัญญาณวิกฤต — คืนเงิน + หน้าผลแสดงคำปลอบจาก Thaiprompt แทน "ดูดวงไม่สำเร็จ" */
-    public function test_crisis_question_is_refunded_and_shows_comfort(): void
+    /** Thaiprompt ปฏิเสธคำถาม — คืนเงิน + หน้าผลขึ้น "ดูดวงไม่สำเร็จ" ตามปกติ (เลิกแยกเคสวิกฤตแล้ว 2026-11-09) */
+    public function test_rejected_question_is_refunded_and_shows_the_plain_failure(): void
     {
         $user = $this->member();
         $this->fakeUpstream([
-            'message' => 'แม่หมออยู่ตรงนี้นะลูก เล่าให้แม่หมอฟังได้เสมอ',
+            'message' => 'คำถามนี้แม่หมอดูให้ไม่ได้นะคะ',
             'reason_code' => 'question_rejected',
-            'crisis' => true,
         ], 422);
 
-        $this->order($user, ['อยากตายไปให้พ้นๆ']);
+        $this->order($user, ['ถามเรื่องที่ระบบไม่รับ']);
 
         $reading = Reading::where('type', 'deep')->sole();
         $this->assertSame(Reading::STATUS_FAILED, $reading->status);
-        $this->assertTrue((bool) data_get($reading->payload, 'failure.crisis'));
+        $this->assertSame('question_rejected', data_get($reading->payload, 'failure.reason'));
         $this->assertEqualsWithDelta(100.0, $this->balance($user), 0.01);
         $this->actingAs($user)->get(route('deep.show', $reading))
-            ->assertOk()->assertSee('แม่หมออยู่ตรงนี้นะลูก')->assertDontSee('ดูดวงไม่สำเร็จ');
+            ->assertOk()->assertSee('ดูดวงไม่สำเร็จ');
     }
 
     /** ตัวกวาดปิดรายการไปแล้ว (เกิน 5 นาที คืนเงินแล้ว) — งานเบื้องหลังต้องไม่เขียนผลทับ ไม่คืนซ้ำ */
