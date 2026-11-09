@@ -11,6 +11,7 @@ use App\Models\Wallet;
 use App\Models\WalletTransaction;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -343,29 +344,73 @@ class WalletService
      * SmsCheckerService AFTER it has cryptographically verified the device and
      * matched the exact unique amount. Same atomic lock + bcmath as approve.
      */
-    public function confirmTopupAuto(WalletTransaction $tx, array $meta = []): WalletTransaction
+    /**
+     * @param  string|null  $creditAmount  ยอดที่จะเครดิตจริง ถ้าไม่เท่ายอดบิล — ใช้กับสลิปที่ลูกค้าโอน
+     *                                      "ตัดเศษสตางค์" (บิล ฿39.80 โอนมา ฿39.00) เท่านั้น
+     *                                      ต้องอยู่ระหว่างยอดฐาน (meta.base_amount) ถึงยอดบิล ห้ามเกินยอดบิล
+     */
+    public function confirmTopupAuto(WalletTransaction $tx, array $meta = [], ?string $creditAmount = null): WalletTransaction
     {
         if ($tx->type !== 'topup') {
             throw new \RuntimeException('Not a top-up');
         }
-        $result = DB::transaction(function () use ($tx, $meta) {
+        $result = DB::transaction(function () use ($tx, $meta, $creditAmount) {
             // wallet first, then the top-up — see class doc
             $wallet = Wallet::where('id', $tx->wallet_id)->lockForUpdate()->firstOrFail();
             $locked = WalletTransaction::where('id', $tx->id)->lockForUpdate()->firstOrFail();
             if ($locked->status !== 'pending' || (int) $locked->wallet_id !== (int) $wallet->id) {
                 throw new \RuntimeException('Not a pending top-up');
             }
-            $newBal = bcadd((string) $wallet->balance, (string) $locked->amount, 2);
+
+            // ยอดเครดิต — ปกติ = ยอดบิล · สลิปตัดเศษสตางค์ = ยอดที่โอนจริง (ตรวจขอบเขตใต้ล็อก)
+            $payable = number_format((float) $locked->amount, 2, '.', '');
+            $credit  = $payable;
+            $extra   = [];
+            if ($creditAmount !== null) {
+                $credit = number_format((float) $creditAmount, 2, '.', '');
+                $base   = number_format((float) (((array) $locked->meta)['base_amount'] ?? $payable), 2, '.', '');
+                if (bccomp($credit, $payable, 2) > 0 || bccomp($credit, $base, 2) < 0 || bccomp($credit, '0', 2) <= 0) {
+                    throw new \RuntimeException('Credit amount out of range');
+                }
+                if (bccomp($credit, $payable, 2) !== 0) {
+                    $extra['payable_amount'] = $payable; // ยอดบิลเดิม (มีเศษสตางค์ไว้จับคู่ SMS)
+                }
+            }
+
+            $newBal = bcadd((string) $wallet->balance, $credit, 2);
             $wallet->balance = $newBal;
             $wallet->save();
 
+            // 🧾 audit: อนุมัติอัตโนมัติ (ไม่มีแอดมินกด) — เก็บว่าอนุมัติด้วยอะไร เวลาไหน
+            $by = $meta['auto_approved_by'] ?? null;
+            unset($meta['auto_approved_by']);
+            if ($by !== null) {
+                $extra['auto_approved'] = [
+                    'by'    => $by,
+                    'label' => \App\Support\TopupAutoApprove::label($by),
+                    'at'    => now()->toIso8601String(),
+                ];
+            }
+
             $locked->update([
                 'status'        => 'success',
+                'amount'        => $credit,
                 'balance_after' => $newBal,
-                'slip_amount'   => $locked->amount, // SMS-verified amount == charged amount
+                'slip_amount'   => $credit, // ยอดที่ยืนยันแล้ว == ยอดที่เครดิต (ยอดในสลิปจริงอยู่ใน meta.slip_amount)
                 'approved_at'   => now(),
-                'meta'          => array_merge((array) $locked->meta, $meta),
+                'meta'          => array_merge((array) $locked->meta, $meta, $extra),
             ]);
+
+            if ($by !== null) {
+                Log::info('Wallet: top-up auto-approved', [
+                    'tx_id'     => $locked->id,
+                    'reference' => $locked->reference_code,
+                    'by'        => $by,
+                    'credit'    => $credit,
+                    'payable'   => $payable,
+                ]);
+            }
+
             return $locked->fresh();
         });
         Cache::forget('wallet:pending_topup_count');

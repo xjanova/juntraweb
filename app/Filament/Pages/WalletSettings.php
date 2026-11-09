@@ -7,6 +7,7 @@ use App\Support\FreeReadingPolicy;
 use App\Support\ReadingCooldown;
 use App\Support\ServiceGate;
 use App\Support\TarotSpreads;
+use App\Support\TopupAutoApprove;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Placeholder;
@@ -52,6 +53,10 @@ class WalletSettings extends Page implements HasForms
         $fill = [
             // Master switch — off = every service free site-wide.
             'billing_enabled' => Setting::get('billing_enabled', '1') === '1',
+
+            // ⚡ อนุมัติเติมเงินอัตโนมัติ (ค่าเริ่มต้นเปิดทั้งคู่)
+            'topup_auto_approve_sms' => TopupAutoApprove::on(TopupAutoApprove::SMS),
+            'topup_auto_approve_slip' => TopupAutoApprove::on(TopupAutoApprove::SLIP),
 
             'promptpay_id' => Setting::get('promptpay_id', $cfg['promptpay_id']),
             'promptpay_name' => Setting::get('promptpay_name', $cfg['promptpay_name']),
@@ -125,6 +130,19 @@ class WalletSettings extends Page implements HasForms
                         ->inline(false)
                         ->onColor('success')->offColor('danger'),
                 ]),
+
+            Section::make('⚡ อนุมัติเติมเงินอัตโนมัติ')
+                ->description('เปิด = ลูกค้าเติมเงินแล้วเครดิตเข้าทันที ไม่ต้องรอแอดมิน · ทุกรายการที่ระบบอนุมัติเองมีป้าย "อนุมัติอัตโนมัติโดย SMS/SlipOK" ในประวัติรายการ · ปิดไว้ใช้ตอนสงสัยว่ามีคนโกงเท่านั้น')
+                ->schema([
+                    Toggle::make('topup_auto_approve_sms')
+                        ->label('SMS ธนาคารยอดตรงทุกสตางค์ → เติมให้ทันที')
+                        ->helperText('ปิด = จับคู่ SMS ให้เห็นในบิล แต่แอดมินต้องกดอนุมัติเอง · ยอดไม่ตรงทุกสตางค์ (เช่นบิล ฿39.80 โอนมา ฿39) ระบบไม่เดา รอแอดมินหรือให้ลูกค้าแนบสลิปเสมอ')
+                        ->inline(false)->onColor('success')->offColor('danger'),
+                    Toggle::make('topup_auto_approve_slip')
+                        ->label('สลิปผ่าน SlipOK ครบทุกด่าน → เติมให้ทันที')
+                        ->helperText('ด่าน: สลิปจริง · ไม่เคยใช้ทั้งเว็บและบอทแม่หมอ · เข้าบัญชีร้าน · ไม่เกิน 3 วัน · ยอดไม่ต่ำกว่ายอดที่เลือก (ตัดเศษสตางค์ได้ เติมตามยอดที่โอนจริง) — ปิด = ตรวจสลิปให้ แต่แอดมินกดอนุมัติเอง')
+                        ->inline(false)->onColor('success')->offColor('danger'),
+                ])->columns(2),
 
             Section::make('ไพ่ยิปซี')
                 ->description('เปิด/ปิดการเก็บเงิน ตั้งราคา และข้อห้ามเปิดซ้ำของครูบาอาจารย์ (ลูกค้าคนเดิมเปิดแพ็กเกจเดิมซ้ำไม่ได้จนครบจำนวนวัน · 0 = ไม่จำกัด) ของไพ่แต่ละรูปแบบ')
@@ -251,6 +269,10 @@ class WalletSettings extends Page implements HasForms
         foreach ($data as $key => $value) {
             if ($key === 'billing_enabled') {
                 Setting::put('billing_enabled', $value ? '1' : '0', 'pricing');
+            } elseif ($key === 'topup_auto_approve_sms') {
+                TopupAutoApprove::set(TopupAutoApprove::SMS, (bool) $value);
+            } elseif ($key === 'topup_auto_approve_slip') {
+                TopupAutoApprove::set(TopupAutoApprove::SLIP, (bool) $value);
             } elseif ($key === 'google_play_billing_enabled') {
                 Setting::put('google_play_billing_enabled', $value ? '1' : '0', 'google_play');
             } elseif ($key === 'google_play_products') {

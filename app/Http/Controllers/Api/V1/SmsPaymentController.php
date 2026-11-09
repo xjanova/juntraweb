@@ -436,7 +436,7 @@ class SmsPaymentController extends Controller
             'server_name'   => SmsOrderPresenter::siteName(),
             'status'        => $device->status,
             // Will an exact SMS match credit the wallet on its own for this device?
-            'auto_confirm'  => (bool) config('smschecker.enabled') && $device->autoConfirms(),
+            'auto_confirm'  => \App\Support\TopupAutoApprove::sms() && $device->autoConfirms(),
         ]]);
     }
 

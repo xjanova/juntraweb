@@ -514,35 +514,64 @@
                   {{-- ขั้น 2: สแกนจ่าย --}}
                   <template x-if="m.pay.step === 'qr'">
                     <div>
-                      <div class="pay-title">สแกนจ่ายได้เลยค่ะ</div>
+                      <div class="pay-title">จ่ายเงินเติมเครดิต</div>
                       <div class="pay-sub pay-bill" x-show="m.pay.reference_code">
                         เลขที่บิล <strong x-text="m.pay.reference_code"></strong> · <span>ยังไม่ได้รับเงิน</span>
-                      </div>
-                      <div class="pay-sub">เปิดแอพธนาคาร → สแกน QR นี้ → โอนตามยอดด้านล่าง</div>
-
-                      <div class="pay-qr">
-                        <img :src="m.pay.qr" alt="QR พร้อมเพย์สำหรับเติมเงิน" x-show="m.pay.qr">
                       </div>
 
                       {{-- ยอดต้องเป๊ะถึงสตางค์ เพราะระบบใช้เศษสตางค์จับคู่กับ
                            SMS ธนาคารเพื่อเครดิตให้อัตโนมัติ --}}
                       <div class="pay-amount-due">
+                        <span class="l">ยอดที่ต้องโอน (รวมสตางค์)</span>
                         <span class="n" x-text="'฿' + Number(m.pay.payable).toFixed(2)"></span>
-                        <span class="l" x-show="m.pay.auto_confirm">โอนยอดนี้ให้ตรงเป๊ะนะคะ ระบบจะเติมให้เองทันที</span>
-                        <span class="l" x-show="!m.pay.auto_confirm">โอนแล้วแนบสลิปด้านล่างได้เลยค่ะ</span>
+                        <span class="l" x-show="m.pay.auto_confirm">โอนยอดนี้ครบทุกสตางค์ ระบบเติมเครดิตให้เองทันที ไม่ต้องรอแอดมิน</span>
+                        <span class="l" x-show="!m.pay.auto_confirm">โอนแล้วกด "แนบสลิป" ด้านล่างได้เลยค่ะ</span>
                       </div>
 
+                      <div class="pay-qr">
+                        <img :src="m.pay.qr" alt="QR พร้อมเพย์สำหรับเติมเงิน" x-show="m.pay.qr">
+                      </div>
                       <div class="pay-sub" style="text-align:center;margin-top:8px" x-show="m.pay.promptpay_name">
                         เข้าบัญชี <strong x-text="m.pay.promptpay_name"></strong>
                       </div>
 
+                      {{-- 📱 (2026-11-09) เจ้าของ: "ถ้าแสกนในช่องแชท ... กดตรงไหนต้องบอกให้ดี"
+                           มือถือ = แชทกับแอปธนาคารอยู่เครื่องเดียวกัน ส่องกล้องไม่ได้ → บันทึกรูป QR แล้วสแกนจากรูป
+                           (ยอดขึ้นเองครบทุกสตางค์ SMS จับคู่ได้) · คอม = ส่องกล้องมือถือที่จอนี้ได้เลย --}}
+                      <div class="pay-guide" x-show="payIsTouch()">
+                        <div class="pay-guide-h">วิธีที่ 1 สแกนจากรูป QR <small>แนะนำ · ยอดขึ้นเองครบทุกสตางค์</small></div>
+                        <ol class="pay-steps">
+                          <li>กดปุ่ม <b>💾 บันทึกรูป QR</b> ด้านล่าง (หรือแคปหน้าจอนี้ไว้ก็ได้)</li>
+                          <li>เปิดแอปธนาคาร → กด <b>สแกน</b> → กดไอคอน <b>รูปภาพ / อัลบั้ม</b> ที่มุมจอ → เลือกรูป QR ที่เพิ่งบันทึก</li>
+                          <li>ตรวจว่ายอดเป็น <b x-text="'฿' + Number(m.pay.payable).toFixed(2)"></b> แล้วกดยืนยันโอน</li>
+                          <li>กลับมาหน้านี้ เครดิตเข้าเองภายในไม่กี่วินาที</li>
+                        </ol>
+                        <button type="button" class="chip chip-strong" :disabled="m.pay.savingQr" @click="saveQr(m)">
+                          <span class="chip-icon">💾</span>
+                          <span x-text="m.pay.savingQr ? 'กำลังบันทึก...' : 'บันทึกรูป QR'"></span>
+                        </button>
+                      </div>
+                      <div class="pay-guide" x-show="!payIsTouch()">
+                        <div class="pay-guide-h">สแกนด้วยมือถือ</div>
+                        <ol class="pay-steps">
+                          <li>เปิดแอปธนาคารบนมือถือ → กด <b>สแกน</b></li>
+                          <li>ส่องกล้องที่ QR บนจอนี้ → ยอด <b x-text="'฿' + Number(m.pay.payable).toFixed(2)"></b> ขึ้นเอง → กดยืนยันโอน</li>
+                          <li>รอที่หน้านี้ เครดิตเข้าเองภายในไม่กี่วินาที</li>
+                        </ol>
+                      </div>
+
                       {{-- 🏦 (2026-11-09) เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารด้วย"
-                           บัญชีนี้ตัวจับ SMS ดูอยู่ (Thaiprompt ส่งมาเฉพาะใบแบบนั้น) โอนยอดเดียวกันเป๊ะ = บิลตัดเอง --}}
+                           บัญชีนี้ตัวจับ SMS ดูอยู่ (Thaiprompt ส่งมาเฉพาะใบแบบนั้น) โอนยอดเดียวกันเป๊ะ = บิลตัดเอง
+                           ⚠️ บิลคืนวันที่ 9 พ.ย. ลูกค้าโอนด้วยเลขบัญชีแล้วพิมพ์ยอดกลม (฿39 / ฿100) → ต้องบอกเรื่องสตางค์ให้ชัด --}}
                       <div class="pay-transfer" x-show="m.pay.transfer">
-                        <div class="pay-sub">หรือโอนเข้าบัญชีนี้ด้วยยอดเดียวกัน</div>
+                        <div class="pay-guide-h" x-text="payIsTouch() ? 'วิธีที่ 2 โอนด้วยเลขบัญชี' : 'หรือโอนด้วยเลขบัญชี'"></div>
                         <div class="pay-transfer-bank" x-text="m.pay.transfer?.bank_name"></div>
                         <div class="pay-transfer-no" x-text="m.pay.transfer?.display_number"></div>
                         <div class="pay-sub" x-text="m.pay.transfer?.account_name"></div>
+                        <div class="pay-guide-warn">
+                          พิมพ์ยอด <b x-text="'฿' + Number(m.pay.payable).toFixed(2)"></b> ให้ครบ รวมสตางค์ด้วย ·
+                          ถ้าโอนยอดกลม (เช่น <span x-text="'฿' + Math.floor(Number(m.pay.payable))"></span>) กด <b>🧾 แนบสลิป</b> ด้านล่าง ระบบตรวจแล้วเติมให้ทันที
+                        </div>
                       </div>
 
                       <div class="pay-sub" style="text-align:center;margin-top:8px" x-show="m.pay.then && !m.pay.superseded">
@@ -553,7 +582,8 @@
                       {{-- ถูกแทนด้วยการ์ดยอดใหม่ — หยุดรอที่ใบนี้ แต่ถ้าโอนไปแล้วเงินก็ยังเข้าตามปกติ --}}
                       <div class="pay-wait" x-show="!m.pay.superseded">
                         <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                        <span x-text="m.pay.waited < 600 ? persona.self + 'กำลังรอเงินเข้าอยู่ค่ะ...' : 'ยังไม่พบเงินเข้า — แนบสลิปให้' + persona.self + 'ได้เลยค่ะ'"></span>
+                        {{-- เดิมชวนแนบสลิปหลังรอ 10 นาที — ลูกค้ารอไม่ไหว ทักแอดมินก่อน (บิล 9 พ.ย. แอดมินต้องอนุมัติมือ) --}}
+                        <span x-text="m.pay.waited < 90 ? persona.self + 'กำลังรอเงินเข้าอยู่ค่ะ...' : 'โอนแล้วแต่ยังไม่ขึ้น? กด 🧾 แนบสลิป ด้านล่าง ระบบตรวจแล้วเติมให้ทันทีค่ะ'"></span>
                       </div>
                       <div class="pay-sub" style="text-align:center;margin-top:10px" x-show="m.pay.superseded">
                         ใช้ยอดใหม่ด้านล่างแทนนะคะ (ถ้าโอนยอดนี้ไปแล้ว ระบบเติมให้เองค่ะ)
@@ -589,6 +619,7 @@
                       <div class="pay-sub pay-bill" x-show="m.pay.reference_code">
                         เลขที่บิล <strong x-text="m.pay.reference_code"></strong> · <span style="color:#9eddae">ได้รับเงินแล้ว ✓</span>
                       </div>
+                      <div class="pay-guide-warn" x-show="m.pay.notice" x-text="m.pay.notice"></div>
                       {{-- จ่ายมาเพื่อเปิดแพ็กเกจนี้ → พาไปต่อเอง (ปุ่มสำรองเผื่อ redirect ไม่ไป) --}}
                       <template x-if="m.pay.then && canAfford(m.pay.then.offer)">
                         <div>
@@ -1666,9 +1697,85 @@ document.addEventListener('alpine:init', () => {
           });
           if (!r.ok) return;
           const j = await r.json();
-          if (j.paid && m.pay.step !== 'done') this.afterPaid(m, j.balance);
+          if (j.paid && m.pay.step !== 'done') {
+            // ยอดที่เครดิตจริง (สลิปตัดเศษสตางค์ = น้อยกว่ายอดบิลเล็กน้อย)
+            if (j.credited) m.pay.payable = j.credited;
+            this.afterPaid(m, j.balance);
+          }
         } catch (_) { /* เน็ตสะดุดชั่วคราว — รอบหน้าลองใหม่ */ }
       }, 5000);
+    },
+
+    /** จอสัมผัส (มือถือ/แท็บเล็ต) = แชทกับแอปธนาคารอยู่เครื่องเดียวกัน ส่องกล้องที่ QR ไม่ได้ */
+    payIsTouch() {
+      try { return window.matchMedia('(pointer: coarse)').matches; } catch (_) { return false; }
+    },
+
+    /**
+     * บันทึก QR เป็นรูป PNG (พื้นขาว + ยอดเงินในรูป) ให้แอปธนาคาร "สแกนจากรูป" ได้
+     * iPhone: เปิดหน้าแชร์ → "บันทึกรูปภาพ" ลงอัลบั้ม (ดาวน์โหลดตรง ๆ จะไปอยู่ใน Files ที่แอปธนาคารมองไม่เห็น)
+     * Android: ดาวน์โหลดลงเครื่อง (อัลบั้ม Download ในแกลเลอรี) · ทำไม่ได้ (เช่นเบราว์เซอร์ในแอป LINE/FB) = บอกให้แคปจอ
+     */
+    async saveQr(m) {
+      if (!m.pay.qr || m.pay.savingQr) return;
+      m.pay.savingQr = true;
+      m.pay.error = '';
+      m.pay.notice = '';
+      const fallback = 'บันทึกรูปในแอปนี้ไม่ได้ค่ะ — แคปหน้าจอที่เห็น QR นี้ไว้ (iPhone: ปุ่มด้านข้าง + เพิ่มเสียง · Android: ปุ่มเปิดปิด + ลดเสียง) แล้วในแอปธนาคารกด สแกน → เลือกรูปที่แคปได้เลยค่ะ';
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const i = new Image();
+          i.onload = () => resolve(i);
+          i.onerror = reject;
+          i.src = m.pay.qr;
+        });
+        const size = 720, pad = 40, foot = 150;
+        const c = document.createElement('canvas');
+        c.width = size + pad * 2;
+        c.height = size + pad * 2 + foot;
+        const g = c.getContext('2d');
+        g.fillStyle = '#ffffff';
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, pad, pad, size, size);
+        g.fillStyle = '#1a1206';
+        g.textAlign = 'center';
+        g.font = 'bold 56px sans-serif';
+        g.fillText('฿' + Number(m.pay.payable).toFixed(2), c.width / 2, size + pad * 2 + 60);
+        g.font = '30px sans-serif';
+        g.fillText((m.pay.promptpay_name || 'พร้อมเพย์') + (m.pay.reference_code ? ' · ' + m.pay.reference_code : ''), c.width / 2, size + pad * 2 + 110);
+        const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('no blob');
+        const name = 'qr-' + (m.pay.reference_code || m.pay.id) + '.png';
+        const file = new File([blob], name, { type: 'image/png' });
+        const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        if (ios && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: 'QR เติมเงิน' });
+            m.pay.notice = 'ถ้าเห็นหน้าแชร์ กด "บันทึกรูปภาพ" แล้วไปสแกนจากรูปในแอปธนาคารได้เลยค่ะ';
+          } catch (err) {
+            // กดปิดหน้าแชร์เอง = ไม่ใช่ข้อผิดพลาด
+            if (!err || err.name !== 'AbortError') m.pay.notice = fallback;
+          }
+          return;
+        }
+        // iPhone ที่ไม่มีหน้าแชร์ (เช่นเบราว์เซอร์ในแอป LINE/FB) ดาวน์โหลดแล้วรูปไม่เข้าอัลบั้ม → ให้แคปจอแทน
+        if (ios) { m.pay.notice = fallback; return; }
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        m.pay.notice = 'บันทึกรูป QR แล้วค่ะ — เปิดแอปธนาคาร → สแกน → เลือกรูปจากอัลบั้ม (โฟลเดอร์ Download) · ถ้าหาไม่เจอ แคปหน้าจอแทนได้เลยค่ะ';
+      } catch (_) {
+        m.pay.notice = fallback;
+      } finally {
+        m.pay.savingQr = false;
+      }
     },
 
     async copyAmount(m, e) {
@@ -1722,7 +1829,10 @@ document.addEventListener('alpine:init', () => {
 
         // ตรวจสลิปผ่านทันที (SlipOK) → ข้ามการรอ SMS ไปหน้าสำเร็จได้เลย
         if (j.paid) {
+          if (j.credited) m.pay.payable = j.credited;
           if (m.pay.step !== 'done') this.afterPaid(m, j.balance);
+          // โอนเกิน: บอกลูกค้าว่าส่วนเกินแอดมินจัดการให้ (ข้อความมาจาก SlipAutoVerifier)
+          if (j.message && j.message.includes('โอนเกิน')) m.pay.notice = j.message;
           return;
         }
 
