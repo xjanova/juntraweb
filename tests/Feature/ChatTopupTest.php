@@ -242,9 +242,9 @@ class ChatTopupTest extends TestCase
 
     /**
      * 🏦 (2026-11-09) การ์ดสแกนจ่ายในแชทแสดงเลขบัญชีให้โอนตรงด้วย แล้วเงินที่โอนเข้าบัญชีนั้นต้องเข้า wallet
-     *   เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารสวยๆ ของไทยพาณิชย์ด้วย"
+     *   เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารด้วย" → "ต้องเป็นบัญชีกสิกร ไม่ใช่ไทยพาณิชย์"
      *   และ "ตรวจด้วยว่าเงินเข้าระบบ sms checker ... แล้วเงินเข้ากระเป๋าวอลเลตปกติไหม"
-     *   QR เป็นบัญชีกสิกร แต่บัญชีโอนตรงเป็นไทยพาณิชย์ — SMS จับด้วยยอดเศษสตางค์ ไม่ดูธนาคาร
+     *   บัญชีโอนตรง = บัญชีดูดวงใบเดียวกับ QR (Thaiprompt เลือกให้) — SMS จับด้วยยอดเศษสตางค์
      */
     public function test_chat_bill_shows_the_transfer_account_and_a_transfer_to_it_lands_in_the_wallet(): void
     {
@@ -253,10 +253,10 @@ class ChatTopupTest extends TestCase
             'account_name'     => 'จันทราพยากรณ์',
             'bank_name'        => 'ธนาคารกสิกรไทย',
             'transfer_account' => [
-                'bank_code'      => 'SCB',
-                'bank_name'      => 'ธนาคารไทยพาณิชย์',
-                'account_number' => '5552545514',
-                'account_name'   => 'บุญณราช อุปเสน',
+                'bank_code'      => 'KBANK',
+                'bank_name'      => 'ธนาคารกสิกรไทย',
+                'account_number' => '2323775349',
+                'account_name'   => 'จันทราพยากรณ์',
             ],
         ]], 200)]);
         Cache::flush();
@@ -264,10 +264,10 @@ class ChatTopupTest extends TestCase
 
         $res = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 39])
             ->assertOk()
-            ->assertJsonPath('transfer.bank_name', 'ธนาคารไทยพาณิชย์')
-            ->assertJsonPath('transfer.account_number', '5552545514')
-            ->assertJsonPath('transfer.display_number', '555-2-54551-4')
-            ->assertJsonPath('transfer.account_name', 'บุญณราช อุปเสน');
+            ->assertJsonPath('transfer.bank_name', 'ธนาคารกสิกรไทย')
+            ->assertJsonPath('transfer.account_number', '2323775349')
+            ->assertJsonPath('transfer.display_number', '232-3-77534-9')
+            ->assertJsonPath('transfer.account_name', 'จันทราพยากรณ์');
         $txId = (int) $res->json('id');
         $payable = number_format((float) $res->json('payable'), 2, '.', '');
 
@@ -275,12 +275,12 @@ class ChatTopupTest extends TestCase
         Http::fake(['*' => Http::response([], 503)]);
         $this->actingAs($user)->getJson(route('chat.topup.resume', ['tx' => $txId]))
             ->assertOk()
-            ->assertJsonPath('transfer.account_number', '5552545514');
+            ->assertJsonPath('transfer.account_number', '2323775349');
 
-        // SMS ไทยพาณิชย์ยอดตรงเข้ามา → บิลตัด เงินเข้า wallet
+        // SMS กสิกรยอดตรงเข้ามา → บิลตัด เงินเข้า wallet
         $req = $this->notifyRequest($this->device('auto'), [
-            'bank' => 'SCB', 'type' => 'credit', 'amount' => $payable,
-            'sender_or_receiver' => 'ลูกค้า', 'reference_number' => 'SCB-REF-1',
+            'bank' => 'KBANK', 'type' => 'credit', 'amount' => $payable,
+            'sender_or_receiver' => 'ลูกค้า', 'reference_number' => 'KBANK-REF-1',
             'sms_timestamp' => (int) round(microtime(true) * 1000) + 1000,
         ]);
         $this->postJson('/api/v1/sms-payment/notify', $req['body'], $req['headers'])

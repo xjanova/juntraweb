@@ -108,8 +108,9 @@ class PayoutAccount
 
     /**
      * 🏦 (2026-11-09) เลขบัญชีให้โอนตรง จาก transfer_account ของ Thaiprompt — ข้อมูลไม่ครบ = null
-     *   เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารสวยๆ ของไทยพาณิชย์ด้วย"
-     *   Thaiprompt ส่งเฉพาะบัญชีที่ตัวจับ SMS เปิดอยู่ โอนเข้าใบนี้ด้วยยอดเศษสตางค์ = บิลตัดเอง
+     *   เจ้าของ: "ให้แจ้งเลขบัญชีธนาคารด้วย" → "ต้องเป็นบัญชีกสิกร ไม่ใช่ไทยพาณิชย์"
+     *   Thaiprompt เลือกบัญชีดูดวงใบเดียวกับ QR และส่งเฉพาะบัญชีที่ตัวจับ SMS เปิดอยู่
+     *   โอนเข้าใบนี้ด้วยยอดเศษสตางค์ = บิลตัดเอง
      *
      * @return array{bank_code:string,bank_name:string,account_number:string,display_number:string,account_name:string}|null
      */
