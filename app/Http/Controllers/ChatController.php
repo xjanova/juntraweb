@@ -18,6 +18,7 @@ use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\ChatRooms;
+use App\Support\ChatTakeover;
 use App\Support\ChatSuggestions;
 use App\Support\Markdown;
 use App\Support\Pricing;
@@ -582,6 +583,13 @@ class ChatController extends Controller
                 : redirect()->route('chat.index', ['pick' => 1])->with('status', $msg);
         }
 
+        // 🧑‍💼 (2026-11-09) แอดมินคุมห้องอยู่ — ข้อความไปหาแอดมิน ไม่ถาม AI ไม่คิดเงิน
+        //    เช็คก่อนด่านโควตา/เครดิต: ลูกค้าที่เครดิตหมดต้องยังตอบแอดมินที่กำลังคุยด้วยได้
+        $conversation = $this->conversationFor($request, $user, $room);
+        if (ChatTakeover::isPaused($conversation)) {
+            return $this->deliverToAdmin($request, $user, $conversation, $data['message']);
+        }
+
         // Idempotency — block a double-submit of the same message.
         // guardChargeAuto: ล้ม/คืนเงิน → ปล่อยล็อก ลูกค้ากด "ลองส่งใหม่" ได้ทันที (เดิมค้าง 409 ไป 90 วิ)
         if (! $this->guardChargeAuto($request, 'chat')) {
@@ -641,16 +649,15 @@ class ChatController extends Controller
         }
 
         try {
-            return $this->deliver($request, $user, $room, $data['message'], $cost, $t0);
+            return $this->deliver($request, $user, $room, $conversation, $data['message'], $cost, $t0);
         } finally {
             $inflight->release();
         }
     }
 
     /** ส่งข้อความที่ผ่านทุกด่านแล้ว — บันทึก → ถามผู้พยากรณ์ → หักเงิน → ตอบกลับ */
-    private function deliver(Request $request, $user, string $room, string $message, float $cost, float $t0)
+    private function deliver(Request $request, $user, string $room, ChatConversation $conversation, string $message, float $cost, float $t0)
     {
-        $conversation = $this->conversationFor($request, $user, $room);
 
         // ⏳ ห้องที่คุยต่อจากไพ่: หมดเวลาถามต่อ/กด "พอแล้ว" แล้ว = ไม่ส่ง ไม่ถาม AI ไม่คิดเงิน
         $reading = ReadingChatContext::readingOf($conversation);
@@ -676,6 +683,19 @@ class ChatController extends Controller
         ]);
 
         $dispatch = $this->dispatchToUpstream($user, $conversation, $message, $t0);
+
+        // 🧑‍💼 แอดมินกดเทคบอท/พิมพ์เข้ามาระหว่างที่ AI กำลังคิด — คำตอบนี้ทิ้ง ไม่บันทึก ไม่คิดเงิน
+        //    ข้อความของลูกค้ายังอยู่ในห้อง (แอดมินเห็นและตอบเอง) · ยังไม่เริ่มนับเวลาถามต่อ
+        if (ChatTakeover::isPaused($conversation)) {
+            $this->releaseChargeLock();
+            $userMessage->update(['admin_as' => ChatMessage::HELD]);
+            if ($qaJustStarted) {
+                ChatConversation::whereKey($conversation->id)->update(['qa_started_at' => null]);
+            }
+
+            return $this->heldResponse($request, $user, $conversation);
+        }
+
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
@@ -799,6 +819,86 @@ class ChatController extends Controller
         }
 
         return redirect()->route('chat.index')->with('status', ChatRooms::short($conversation->persona) . 'ตอบกลับแล้ว');
+    }
+
+    /**
+     * 🧑‍💼 (2026-11-09) ห้องที่แอดมินคุมอยู่ — เก็บข้อความของลูกค้าให้แอดมินอ่าน แล้วจบแค่นั้น
+     *
+     * ไม่ถาม AI · ไม่คิดเงิน · กดส่งซ้ำ (ข้อความเดิมภายใน 10 วิ) = ไม่เก็บซ้ำ
+     */
+    private function deliverToAdmin(Request $request, $user, ChatConversation $conversation, string $message)
+    {
+        $dupe = ChatMessage::where('chat_conversation_id', $conversation->id)
+            ->where('role', 'user')
+            ->where('content', $message)
+            ->where('created_at', '>=', now()->subSeconds(10))
+            ->exists();
+        if (! $dupe) {
+            ChatMessage::create([
+                'chat_conversation_id' => $conversation->id,
+                'role'     => 'user',
+                'content'  => $message,
+                'admin_as' => ChatMessage::HELD,
+            ]);
+            $conversation->touch();
+        }
+        ChatTakeover::touchSeen($conversation);
+
+        return $this->heldResponse($request, $user, $conversation);
+    }
+
+    /** คำตอบของ /chat/send เมื่อแอดมินคุมห้อง — หน้าห้องไม่โชว์ฟองคำตอบ รอข้อความแอดมินจาก feed */
+    private function heldResponse(Request $request, $user, ChatConversation $conversation)
+    {
+        if (! $request->wantsJson()) {
+            return redirect()->route('chat.index', ['room' => $conversation->persona]);
+        }
+
+        return response()->json([
+            'held'           => true,
+            'reply'          => null,
+            'reply_html'     => null,
+            'kind'           => 'held',
+            'cost'           => 0.0,
+            'degraded'       => false,
+            'balance'        => $this->wallet->balance($user),
+            'daily_limit'    => ChatPolicy::dailyLimit(),
+            'daily_left'     => ChatPolicy::dailyLeft($user),
+            'blocked'        => false,
+            'next_cost'      => ChatPolicy::costFor($user),
+            'awaiting'       => false,
+            'suggestions'    => [],
+            'ai_suggestions' => [],
+            'offers'         => [],
+        ]);
+    }
+
+    /**
+     * 🧑‍💼 (2026-11-09) หน้าห้องของลูกค้าถามหาข้อความใหม่จากแอดมิน (poll)
+     *
+     * คืนเฉพาะข้อความที่แอดมินพิมพ์หลัง id ที่หน้าจอมีแล้ว — ข้อความบอท/ลูกค้ามาทาง /chat/send อยู่แล้ว
+     * held = แอดมินคุมห้องอยู่ (หน้าห้องเปิดช่องพิมพ์ให้แม้โควตา/เครดิตหมด และถามถี่ขึ้น)
+     */
+    public function feed(Request $request, ChatConversation $conversation)
+    {
+        abort_unless($conversation->user_id !== null && $conversation->user_id === $request->user()->id, 403);
+        $after = max(0, (int) $request->query('after', 0));
+
+        ChatTakeover::touchSeen($conversation);
+        $messages = ChatMessage::where('chat_conversation_id', $conversation->id)
+            ->where('id', '>', $after)
+            ->where('role', 'assistant')
+            ->whereNotNull('admin_as')
+            ->orderBy('id')
+            ->limit(30)
+            ->get()
+            ->map(fn (ChatMessage $m) => ChatTakeover::payload($m))
+            ->values();
+
+        return response()->json([
+            'messages' => $messages,
+            'held'     => ChatTakeover::isPaused($conversation),
+        ]);
     }
 
     /**
@@ -1065,9 +1165,12 @@ class ChatController extends Controller
         $reading  = ReadingChatContext::readingOf($conversation);
         // ⏳ บรรทัดเวลาที่เหลือขึ้นก่อนบริบทไพ่ — ผู้พยากรณ์รู้ว่าเหลือกี่นาที (เจ้าของถาม "ทำไมบอทไม่รู้ว่าเหลือเวลาเท่าไหร่")
         $timeLine = $reading ? ReadingQaClock::contextLine(ReadingQaClock::state($conversation, $reading)) : null;
+        // 🧑‍💼 (2026-11-09) เพิ่งคืนห้องจากแอดมิน — ผู้พยากรณ์ต้องรู้ว่าทีมงานคุยอะไรไป (ห้ามขัดที่รับปากไว้)
+        $head     = trim(($timeLine ?? '') . "\n\n" . (ChatTakeover::handbackNote($conversation) ?? ''));
+        $head     = $head !== '' ? $head : null;
         $context  = $reading
-            ? trim(($timeLine !== null ? $timeLine . "\n\n" : '') . ReadingChatContext::for($reading, $timeLine !== null ? mb_strlen($timeLine) + 2 : 0))
-            : null;
+            ? trim(($head !== null ? $head . "\n\n" : '') . ReadingChatContext::for($reading, $head !== null ? mb_strlen($head) + 2 : 0))
+            : $head;
         $grounded = $reading !== null;
 
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย

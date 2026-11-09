@@ -16,6 +16,7 @@ use App\Services\Chat\ReadingChatContext;
 use App\Services\Wallet\WalletService;
 use App\Support\ChatPolicy;
 use App\Support\ChatRooms;
+use App\Support\ChatTakeover;
 use App\Support\ChatSuggestions;
 use App\Support\Pricing;
 use App\Support\TarotSpreads;
@@ -229,6 +230,21 @@ class ChatController extends Controller
         ]);
 
         $user = $request->user();
+
+        // 🧑‍💼 (2026-11-09) แอดมินคุมห้องอยู่ — เก็บข้อความให้แอดมิน ไม่ถาม AI ไม่คิดเงิน (กติกาเดียวกับเว็บ)
+        //    เช็คก่อนด่านโควตา/เครดิต: ลูกค้าที่เครดิตหมดต้องยังตอบแอดมินได้
+        if (ChatTakeover::isPaused($conversation)) {
+            ChatMessage::create([
+                'chat_conversation_id' => $conversation->id,
+                'role'     => 'user',
+                'content'  => $data['message'],
+                'admin_as' => ChatMessage::HELD,
+            ]);
+            $conversation->touch();
+
+            return $this->heldResponse($user);
+        }
+
         // 🎁 (2026-07-28) ราคาต่อคน — 0 ระหว่างที่ยังอยู่ในโควตาฟรีของวันนี้
         //    ต้องอ่านก่อนบันทึกข้อความ ไม่งั้น dailyUsed() นับข้อความนี้รวมด้วย
         $cost = ChatPolicy::costFor($user);
@@ -282,6 +298,15 @@ class ChatController extends Controller
         ]);
 
         $dispatch = $this->dispatchToUpstream($user, $conversation, $data['message']);
+
+        // 🧑‍💼 แอดมินเทคห้องระหว่างที่ AI กำลังคิด — คำตอบนี้ทิ้ง ไม่บันทึก ไม่คิดเงิน
+        if (ChatTakeover::isPaused($conversation)) {
+            $this->releaseChargeLock();
+            $userMessage->update(['admin_as' => ChatMessage::HELD]);
+
+            return $this->heldResponse($user);
+        }
+
         $reply    = $dispatch['reply'];
         $degraded = $dispatch['degraded'] ?? false;
         $kind     = $dispatch['kind'] ?? 'reply';
@@ -378,7 +403,11 @@ class ChatController extends Controller
         // 💬 (2026-09-21) ห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว (reading_id) — บริบทสร้างใหม่จากฐานข้อมูลและส่งไปทุกรอบ
         //    ห้องฝั่ง Thaiprompt หมดอายุ (cache ของเรา 6 ชม.) เปิดใหม่เมื่อไรแม่หมอก็ยังเห็นคำพยากรณ์ครบ
         $reading  = ReadingChatContext::readingOf($conversation);
-        $context  = $reading ? ReadingChatContext::for($reading) : null;
+        // 🧑‍💼 (2026-11-09) เพิ่งคืนห้องจากแอดมิน — ผู้พยากรณ์ต้องรู้ว่าทีมงานคุยอะไรไป
+        $handback = ChatTakeover::handbackNote($conversation);
+        $context  = $reading
+            ? trim(($handback !== null ? $handback . "\n\n" : '') . ReadingChatContext::for($reading, $handback !== null ? mb_strlen($handback) + 2 : 0))
+            : $handback;
         $grounded = $reading !== null;
         // 🔮 (2026-11-03) ห้องเดียวกับเว็บ (ห้องที่เปิดจากเว็บโผล่ในรายการของแอพด้วย) — ผู้พยากรณ์ต้องตรงห้อง
         $room    = ChatRooms::normalize($conversation->persona);
@@ -468,11 +497,43 @@ class ChatController extends Controller
         ];
     }
 
+    /**
+     * 🧑‍💼 (2026-11-09) ห้องที่แอดมินคุมอยู่ — ไม่มีคำตอบจากบอท แอพดึงข้อความของแอดมินจาก conversations/{id}
+     *
+     * message = null · reply = '' (แอพไม่ต้องวาดฟองคำตอบ) · held = true
+     */
+    private function heldResponse($user): JsonResponse
+    {
+        return response()->json([
+            'data' => [
+                'message'     => null,
+                'reply'       => '',
+                'held'        => true,
+                'balance'     => (float) $this->wallet->balance($user),
+                'cost'        => 0.0,
+                'crisis'      => false,
+                'crisis_room' => false,
+                'degraded'    => false,
+                'daily_limit' => ChatPolicy::dailyLimit(),
+                'daily_left'  => ChatPolicy::dailyLeft($user),
+                'blocked'     => false,
+                'next_cost'   => ChatPolicy::costFor($user),
+                'awaiting'    => false,
+                'suggestions' => [],
+                'kind'        => 'held',
+                'offers'      => [],
+                'question'    => null,
+            ],
+        ]);
+    }
+
     private function msgPayload(ChatMessage $m): array
     {
         return [
             'id'          => $m->id,
             'role'        => $m->role,
+            // 🧑‍💼 ข้อความที่แอดมินพิมพ์ (role ยังเป็น assistant ให้แอพรุ่นเก่าวาดได้) · ป้าย "แอดมิน" เฉพาะที่เลือกพูดเป็นแอดมิน
+            'from_admin'  => $m->admin_as === ChatMessage::AS_ADMIN && $m->role === 'assistant',
             'content'     => $m->content,
             'created_at'  => optional($m->created_at)->toIso8601String(),
             // ข้อความที่แม่หมอยื่นแพ็กเกจเปิดไพ่ — ราคาอ่านสด ณ ตอนนี้ ไม่ใช่ราคาตอนที่คุย

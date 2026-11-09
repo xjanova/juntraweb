@@ -111,6 +111,8 @@ class ChatPolicy
             ChatConversation::where('user_id', $user->id)->select('id')
         )
             ->where('role', 'user')
+            // 🧑‍💼 (2026-11-09) ข้อความที่คุยกับแอดมิน (บอทไม่ได้ตอบ) ไม่กินโควตาคุยฟรี
+            ->whereNull('admin_as')
             ->where('created_at', '>=', now()->startOfDay())
             ->count();
     }

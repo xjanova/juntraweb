@@ -298,6 +298,45 @@
   color: var(--ink-dim, rgba(246, 239, 224, .7));
   font-size: 14px;
 }
+/* 🧑‍💼 (2026-11-09) ข้อความที่แอดมิน (คนจริง) พิมพ์ — สีเขียวหยก แยกจากบอทชัด ๆ */
+/* (.is-ai.is-admin ให้หนักกว่ากฎสีฟองรายห้อง .chat-shell[data-persona] .msg.is-ai ที่อยู่ท้ายไฟล์) */
+.msg.is-ai.is-admin .msg-body,
+.chat-shell[data-persona] .msg.is-ai.is-admin .msg-body {
+  background: linear-gradient(135deg, rgba(45, 190, 150, .22), rgba(45, 190, 150, .06));
+  border: 1px solid rgba(80, 220, 180, .42);
+}
+.msg.is-admin .msg-head { color: #7fe8c8; letter-spacing: .04em; text-transform: none; }
+
+/* 🧑‍💼 แถบควบคุมของแอดมินในห้อง (หลังบ้านเท่านั้น ลูกค้าไม่เห็น) */
+.admin-bar {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 0 0 10px; padding: 10px 12px; border-radius: 14px;
+  background: rgba(20, 40, 36, .72); border: 1px solid rgba(80, 220, 180, .35);
+  color: var(--ink, #f6efe0); font-size: 13px;
+}
+.admin-bar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.admin-chip {
+  padding: 4px 10px; border-radius: 999px; font-size: 12.5px;
+  background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .14);
+}
+.admin-chip.is-human { background: rgba(45, 190, 150, .25); border-color: rgba(80, 220, 180, .55); color: #c9fbe9; }
+.admin-chip.is-bot { background: rgba(106, 59, 214, .25); border-color: rgba(176, 124, 255, .45); }
+.admin-chip.is-live { color: #9df5c0; }
+.admin-btn {
+  min-height: 40px; padding: 8px 16px; border-radius: 10px; font-weight: 700; cursor: pointer;
+  border: 1px solid transparent; color: #0c1512;
+}
+.admin-btn.is-take { background: #f4cf6a; }
+.admin-btn.is-release { background: #7fe8c8; }
+.admin-btn:disabled { opacity: .55; cursor: wait; }
+.admin-voice { display: inline-flex; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .2); }
+.admin-voice button {
+  min-height: 40px; padding: 8px 12px; background: transparent; color: var(--ink-dim, rgba(246, 239, 224, .75));
+  border: 0; cursor: pointer; font-size: 13px;
+}
+.admin-voice button.is-on { background: rgba(244, 207, 106, .22); color: var(--moon, #fff5d4); font-weight: 700; }
+.admin-note { font-size: 12px; color: var(--ink-dim, rgba(246, 239, 224, .7)); }
+
 .msg-body > :first-child { margin-top: 0 }
 .msg-body > :last-child { margin-bottom: 0 }
 .msg-body p { margin: 0 0 .7em }
