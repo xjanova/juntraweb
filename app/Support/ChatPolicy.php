@@ -34,7 +34,8 @@ class ChatPolicy
      */
     public static function isFreeTurn(string $kind): bool
     {
-        return $kind === 'offer' || $kind === 'guard';
+        // 'help' (2026-11-10) = ถามวิธีใช้เว็บ/แจ้งปัญหา (App\Support\SiteHelp) — ช่วยลูกค้าใช้ร้านไม่ใช่คำทำนาย
+        return $kind === 'offer' || $kind === 'guard' || $kind === 'help';
     }
 
     /** ราคาต่อข้อความ (0 = ฟรี) */

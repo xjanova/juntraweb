@@ -283,9 +283,11 @@ class JuntraServerClient
      *                        ให้คำขอทั้งก้อนจบก่อน Apache ตัดที่ ~60 วิ
      * @param  array{birth_date?:?string,birth_time?:?string}|null  $birth  🪐 (2026-11-07) วันเกิด/เวลาเกิดในโปรไฟล์
      *                        → แม่หมอเห็นผังดวงจริงชุดเดียวกับบิลของเพจ · Thaiprompt รุ่นก่อนไม่รู้จักก็แค่ไม่ใช้
+     * @param  string|null  $siteHelp  🧭 (2026-11-10) คู่มือใช้เว็บเฉพาะหัวข้อที่ลูกค้าถาม + สถานะบัญชีจริง (App\Support\SiteHelp)
+     *                        → เทิร์นนี้ผู้พยากรณ์ตอบตามคู่มือ ไม่ชวนเปิดไพ่ · Thaiprompt รุ่นก่อนไม่รู้จักก็แค่ไม่ใช้
      * @return array{status:'ok'|'unavailable'|'unsupported',data:?array}
      */
-    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45, ?array $birth = null): array
+    public function chatSend(int|string $userRef, ?string $name, string $sessionId, string $text, bool $grounded = false, ?string $context = null, ?int $thaipromptUserId = null, ?string $persona = null, int $timeout = 45, ?array $birth = null, ?string $siteHelp = null): array
     {
         if (! $this->isConfigured()) {
             return ['status' => 'unsupported', 'data' => null];
@@ -309,6 +311,7 @@ class JuntraServerClient
                 'suggest'    => 1,
                 'birth_date' => $birth['birth_date'] ?? null,
                 'birth_time' => $birth['birth_time'] ?? null,
+                'site_help'  => $siteHelp !== null ? mb_substr($siteHelp, 0, 4000) : null,
             ], fn ($v) => $v !== null && $v !== '')));
 
         if ($resp?->successful() && is_array($resp->json('data'))) {
