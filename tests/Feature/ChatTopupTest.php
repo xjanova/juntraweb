@@ -296,6 +296,51 @@ class ChatTopupTest extends TestCase
         $this->actingAs($user)->get('/wallet')->assertOk()->assertSee($tx->reference_code);
     }
 
+    /**
+     * 🐛 (2026-11-09) บิลที่สร้างก่อนขึ้นเลขบัญชี (meta ไม่มี transfer) เปิดกลับมาแล้วเห็นแค่ QR
+     *   เจ้าของ: "ทำไมในห้องแชทพยากรณ์ไม่เห็นมีบัญชีแม่หมอกสิกรมาด้วย เห็นมีแต่ qrcode" (บิล TUP-9DCWRR9W)
+     *   → ยืมบัญชีปัจจุบันมาแสดง แต่เฉพาะเมื่อพร้อมเพย์ยังเป็นเบอร์เดียวกับในบิล
+     */
+    public function test_old_bill_without_saved_account_shows_the_current_transfer_account_of_the_same_promptpay(): void
+    {
+        $account = [
+            'promptpay_id'        => '0811111111',
+            'account_name'        => 'จันทราพยากรณ์',
+            'account_number'      => '2323775349',
+            'bank_code'           => 'KBANK',
+            'bank_name'           => 'ธนาคารกสิกรไทย',
+            'sms_checker_enabled' => true,
+        ];
+        // closure = เปลี่ยนเบอร์พร้อมเพย์กลางเทสต์ได้ (Http::fake ตัวแรกชนะเสมอ ลงซ้ำไม่มีผล)
+        $promptpay = '0811111111';
+        Http::fake(['*/juntra/payment/account' => function () use (&$account, &$promptpay) {
+            return Http::response(['data' => array_merge($account, ['promptpay_id' => $promptpay])], 200);
+        }]);
+        Cache::flush();
+        $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
+        $txId = (int) $this->actingAs($user)->postJson('/chat/topup', ['amount' => 39])->assertOk()->json('id');
+
+        // ทำให้เหมือนบิลเก่า: meta ไม่มีคีย์ transfer
+        $tx = WalletTransaction::findOrFail($txId);
+        $meta = (array) $tx->meta;
+        unset($meta['transfer']);
+        $tx->meta = $meta;
+        $tx->save();
+
+        $this->actingAs($user)->getJson(route('chat.topup.resume', ['tx' => $txId]))
+            ->assertOk()
+            ->assertJsonPath('promptpay_name', 'จันทราพยากรณ์')
+            ->assertJsonPath('transfer.display_number', '232-3-77534-9')
+            ->assertJsonPath('transfer.bank_name', 'ธนาคารกสิกรไทย');
+
+        // พร้อมเพย์ปัจจุบันเปลี่ยนเบอร์ไปแล้ว = บัญชีนั้นไม่ใช่ของบิลนี้ → แสดงแค่ QR เดิม
+        $promptpay = '0822222222';
+        Cache::flush();
+        $this->actingAs($user)->getJson(route('chat.topup.resume', ['tx' => $txId]))
+            ->assertOk()
+            ->assertJsonPath('transfer', null);
+    }
+
     /** บัญชีที่ทำ QR ไม่ได้เปิดตัวจับ SMS = โอนแล้วบิลไม่ตัดเอง → ไม่โชว์เลขบัญชี แสดงแค่ QR */
     public function test_chat_bill_shows_only_the_qr_when_the_account_has_no_sms_checking(): void
     {
