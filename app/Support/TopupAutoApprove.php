@@ -23,6 +23,9 @@ class TopupAutoApprove
 
     public const SLIP = 'slipok';
 
+    /** 🧾 (2026-11-10) สลิปที่ลูกค้าส่งในแชทเพจ (บอทตรวจแล้วส่งต่อ) — ใช้สวิตช์เดียวกับ SLIP */
+    public const SLIP_CHAT = 'slipok_chat';
+
     private const KEYS = [
         self::SMS  => 'topup_auto_approve_sms',
         self::SLIP => 'topup_auto_approve_slip',
@@ -31,6 +34,7 @@ class TopupAutoApprove
     private const LABELS = [
         self::SMS  => 'อนุมัติอัตโนมัติโดย SMS',
         self::SLIP => 'อนุมัติอัตโนมัติโดย SlipOK',
+        self::SLIP_CHAT => 'อนุมัติอัตโนมัติโดย SlipOK (สลิปจากแชทเพจ)',
     ];
 
     /** SMS ธนาคารเครดิตให้เองได้ไหม (ยังต้องเปิด smschecker.enabled ด้วย) */

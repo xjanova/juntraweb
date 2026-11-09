@@ -194,6 +194,12 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 // Money moves only on signed evidence: notify / notify-action (AES-GCM+HMAC),
 // or orders/match when a signed /notify record for that exact amount already
 // exists — never on X-Api-Key alone (see SmsCheckerService::matchForApp).
+// 🧾 (2026-11-10) กริ่งจากบอท Thaiprompt: "มีสลิปจากแชทเพจรออยู่" — รับแค่เลขอ้างอิง
+//    ข้อมูลจริงดึงจาก Thaiprompt ด้วย token ของเว็บเอง (ChatSlipIntake) จึงไม่ต้องมีความลับร่วม
+Route::post('server/chat-slips/ping', \App\Http\Controllers\Api\ChatSlipPingController::class)
+    ->middleware('throttle:30,1')
+    ->name('api.server.chat-slips.ping');
+
 Route::prefix('v1/sms-payment')->middleware(VerifySmsCheckerDevice::class)->name('api.v1.sms.')->group(function () {
     Route::post('notify',           [SmsPaymentController::class, 'notify'])->middleware('throttle:300,1')->name('notify');
     Route::post('notify-action',    [SmsPaymentController::class, 'notifyAction'])->middleware('throttle:300,1')->name('action');

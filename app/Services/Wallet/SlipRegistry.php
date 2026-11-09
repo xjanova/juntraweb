@@ -94,7 +94,7 @@ class SlipRegistry
      * @param  array  $slip  ผลตรวจสลิป (trans_ref, amount, sender_name, receiver_account, sending_bank, receiving_bank, trans_timestamp)
      * @return array{status:string,used_by:?array}
      */
-    public function claim(WalletTransaction $tx, array $slip): array
+    public function claim(WalletTransaction $tx, array $slip, ?string $chatOwner = null): array
     {
         $ref = trim((string) ($slip['trans_ref'] ?? ''));
         if ($ref === '') {
@@ -111,6 +111,7 @@ class SlipRegistry
             'sending_bank'     => $slip['sending_bank'] ?? null,
             'receiving_bank'   => $slip['receiving_bank'] ?? null,
             'trans_timestamp'  => $slip['trans_timestamp'] ?? null,
+            'chat_owner'       => $chatOwner,
         ]);
 
         return [

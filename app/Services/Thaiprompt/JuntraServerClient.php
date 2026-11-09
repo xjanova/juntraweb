@@ -145,6 +145,8 @@ class JuntraServerClient
             'sending_bank'     => $slip['sending_bank'] ?? null,
             'receiving_bank'   => $slip['receiving_bank'] ?? null,
             'trans_timestamp'  => $slip['trans_timestamp'] ?? null,
+            // 🧾 (2026-11-10) สลิปจากแชทเพจที่บอทพักไว้ให้ลูกค้าคนนี้ — Thaiprompt ผูกเข้าบิลนี้ได้ครั้งเดียว
+            'chat_owner'       => $slip['chat_owner'] ?? null,
         ], fn ($v) => $v !== null && $v !== '');
 
         $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/slips/claim'), $body));
@@ -156,6 +158,84 @@ class JuntraServerClient
             return ['status' => 'already_used', 'data' => (array) ($resp->json('data') ?? [])];
         }
         $this->logMiss('claimSlip', $resp);
+
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
+    }
+
+    /* ======================== CHAT SLIPS ======================== */
+
+    /**
+     * 🧾 (2026-11-10) สลิปที่ลูกค้าส่งในแชทเพจ บอทตรวจ SlipOK แล้วพักไว้ให้เว็บมารับ
+     *
+     * @return array{status:'ok'|'not_found'|'unavailable'|'unsupported',data:?array}
+     */
+    public function fetchChatSlip(string $transRef): array
+    {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'data' => null];
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/chat-slips/fetch'), ['trans_ref' => $transRef]));
+
+        if ($resp?->successful() && is_array($resp->json('data'))) {
+            return ['status' => 'ok', 'data' => $resp->json('data')];
+        }
+        if ($resp?->status() === 404 && $resp->json('reason_code') === 'not_found') {
+            return ['status' => 'not_found', 'data' => null];
+        }
+        $this->logMiss('fetchChatSlip', $resp);
+
+        return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
+    }
+
+    /**
+     * สลิปจากแชทที่ยังพักอยู่ (ตัวกวาดทุกนาที — กรณีกริ่งจากบอทมาไม่ถึง)
+     *
+     * @return array<int,array>|null  null = ถามไม่ได้
+     */
+    public function pendingChatSlips(): ?array
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+        $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/chat-slips/pending'), []));
+
+        if ($resp?->successful()) {
+            return array_values(array_filter((array) ($resp->json('data') ?? []), 'is_array'));
+        }
+        $this->logMiss('pendingChatSlips', $resp);
+
+        return null;
+    }
+
+    /**
+     * รายงานผลสลิปจากแชทกลับไปที่ Thaiprompt (ครั้งเดียว — ซ้ำด้วยผลเดิมได้)
+     *
+     * @param  array{trans_ref:string,outcome:string,user_ref?:?string,topup_ref?:?string,credited_amount?:?float,note?:?string}  $body
+     * @return array{status:'ok'|'conflict'|'unavailable'|'unsupported',data:?array}
+     */
+    public function resolveChatSlip(array $body): array
+    {
+        if (! $this->isConfigured()) {
+            return ['status' => 'unsupported', 'data' => null];
+        }
+        $payload = array_filter([
+            'trans_ref'       => (string) $body['trans_ref'],
+            'outcome'         => (string) $body['outcome'],
+            'user_ref'        => isset($body['user_ref']) ? (string) $body['user_ref'] : null,
+            'topup_ref'       => $body['topup_ref'] ?? null,
+            'credited_amount' => isset($body['credited_amount']) ? number_format((float) $body['credited_amount'], 2, '.', '') : null,
+            'note'            => isset($body['note']) ? mb_substr((string) $body['note'], 0, 250) : null,
+        ], fn ($v) => $v !== null && $v !== '');
+
+        $resp = $this->send(fn (PendingRequest $http) => $http->post($this->url('/chat-slips/resolve'), $payload));
+
+        if ($resp?->successful()) {
+            return ['status' => 'ok', 'data' => (array) $resp->json('data')];
+        }
+        if ($resp?->status() === 409) {
+            return ['status' => 'conflict', 'data' => (array) ($resp->json('data') ?? [])];
+        }
+        $this->logMiss('resolveChatSlip', $resp);
 
         return ['status' => $this->missing($resp) ? 'unsupported' : 'unavailable', 'data' => null];
     }

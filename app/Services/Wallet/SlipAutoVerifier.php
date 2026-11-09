@@ -75,6 +75,28 @@ class SlipAutoVerifier
             return null;
         }
 
+        return $this->evaluate($tx, $user, $verify, $mode);
+    }
+
+    /**
+     * 🧾 (2026-11-10) สลิปที่ลูกค้าส่งในแชทเพจ — บอท Thaiprompt ตรวจ SlipOK แล้วพักไว้
+     * ผ่านด่านเดียวกับสลิปที่แนบบนเว็บทุกด่าน (ไม่มีรูปให้อ่านซ้ำ ใช้ผลที่ตรวจแล้ว)
+     * การจองในทะเบียนกลางส่ง chat_owner ไปด้วย — Thaiprompt ผูกสลิปที่พักไว้ให้ลูกค้าคนนี้เข้าบิลนี้ได้ครั้งเดียว
+     *
+     * @return array{paid:bool,message:string,decision:string,credited?:float}
+     */
+    public function verifyChatSlip(WalletTransaction $tx, User $user, array $verify, string $chatOwner): array
+    {
+        return $this->evaluate($tx, $user, $verify, 'chat', $chatOwner);
+    }
+
+    /**
+     * ด่านทั้งหมดหลังอ่านสลิปได้แล้ว (ใช้ร่วมกันทั้งสลิปบนเว็บและสลิปจากแชท)
+     *
+     * @return array{paid:bool,message:string,decision:string,credited?:float}
+     */
+    private function evaluate(WalletTransaction $tx, User $user, array $verify, string $mode, ?string $chatOwner = null): array
+    {
         $slip = $this->slipFacts($verify);
         $payable = (float) $tx->amount;
 
@@ -119,7 +141,7 @@ class SlipAutoVerifier
         //    ลูกค้าที่โอนด้วยเลขบัญชีมักพิมพ์ยอดกลม (บิล ฿39.80 โอน ฿39.00) = จ่ายครบราคาที่เลือกแล้ว
         //    → ยอมรับถ้า ≥ ยอดฐาน (meta.base_amount) และเครดิตตามยอดที่โอนจริง
         //    ต่ำกว่ายอดฐาน = โอนขาดจริง → รอแอดมินเหมือนเดิม (ห้ามอนุมัติเอง)
-        $minimum = $this->minimumAccepted($tx, $payable);
+        $minimum = self::minimumFor($tx);
         if ((float) $slip['amount'] + 0.01 < $minimum) {
             return $this->review($tx, [
                 sprintf('ยอดในสลิป %s น้อยกว่ายอดที่ต้องโอน %s', Pricing::format((float) $slip['amount']), Pricing::format($payable)),
@@ -140,7 +162,7 @@ class SlipAutoVerifier
         }
 
         // ---- จองในทะเบียนกลาง: ใครจองก่อนได้ใช้ก่อน (ส่งสลิปพร้อมกันสองระบบก็ผ่านได้ใบเดียว)
-        $claim = $this->registry->claim($tx, $slip);
+        $claim = $this->registry->claim($tx, $slip, $chatOwner);
         if ($claim['status'] === SlipRegistry::ALREADY_USED) {
             return $this->duplicate($tx, $user, $slip, 'slip_registry', (array) $claim['used_by']);
         }
@@ -153,8 +175,8 @@ class SlipAutoVerifier
 
         try {
             $done = $this->wallet->confirmTopupAuto($tx, [
-                'source'           => 'slipok',
-                'auto_approved_by' => TopupAutoApprove::SLIP,
+                'source'           => $chatOwner ? 'slipok_chat' : 'slipok',
+                'auto_approved_by' => $chatOwner ? TopupAutoApprove::SLIP_CHAT : TopupAutoApprove::SLIP,
                 'trans_ref'        => $ref,
                 'slip_amount'      => $slip['amount'],
                 'sender_name'      => $slip['sender_name'],
@@ -188,9 +210,10 @@ class SlipAutoVerifier
      * ยอดต่ำสุดในสลิปที่ยอมให้ผ่านเอง = ยอดฐานที่ลูกค้าเลือก (ไม่รวมเศษสตางค์จับคู่)
      * ถ้าบิลไม่มียอดฐาน หรือยอดฐานไม่สมเหตุสมผล ใช้ยอดบิลเต็มเหมือนเดิม
      */
-    private function minimumAccepted(WalletTransaction $tx, float $payable): float
+    public static function minimumFor(WalletTransaction $tx): float
     {
-        $base = (float) (((array) $tx->meta)['base_amount'] ?? 0);
+        $payable = (float) $tx->amount;
+        $base    = (float) (((array) $tx->meta)['base_amount'] ?? 0);
 
         // ยอดฐานต้องต่างจากยอดบิลแค่เศษสตางค์ (< ฿1) — กันข้อมูลแปลก ๆ ทำให้ยอมรับยอดต่ำเกิน
         return ($base > 0 && $base <= $payable && $payable - $base < 1) ? $base : $payable;

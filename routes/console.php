@@ -13,6 +13,8 @@ Artisan::command('inspire', function () {
 //  - reconcile every wallet balance against its ledger and log drift (nightly)
 Schedule::command('wallet:cleanup-expired-topups')->hourly();
 Schedule::command('wallet:reconcile')->dailyAt('00:30');
+// 🧾 สลิปจากแชทเพจที่บอทพักไว้แต่กริ่งมาไม่ถึง — รับมาเติมกระเป๋า (ปกติกริ่งทำให้เสร็จทันที)
+Schedule::command('wallet:sweep-chat-slips')->everyMinute()->withoutOverlapping(5)->runInBackground();
 // คำทำนายไพ่ที่อ่านเบื้องหลังแล้วค้าง (PHP ตายกลางงาน) → คืนเงินภายใน ~5-10 นาที
 Schedule::command('readings:sweep-stuck')->everyFiveMinutes()->withoutOverlapping();
 // 🌅 ดวงรายวัน 12 ราศีจากดาวจริง — เขียนไว้ก่อนคนแรกของวันเปิด (หน้าเว็บรอ AI ได้ไม่ถึง 60 วิ)
