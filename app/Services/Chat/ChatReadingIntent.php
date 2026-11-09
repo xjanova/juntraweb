@@ -36,11 +36,6 @@ final class ChatReadingIntent
         if ($t === '' || mb_strlen($t) > 400) {
             return null;   // เรื่องยาว ๆ คือการเล่า ไม่ใช่การสั่ง — ให้แม่หมอฟังก่อน
         }
-        // 🤍 (2026-11-07) อาจเป็นคนที่อยากทำร้ายตัวเอง — ห้ามยื่นใบเสนอราคาก่อน Thaiprompt ได้เห็นข้อความ
-        if (\App\Support\ChatCrisis::mayBeCrisis($t)) {
-            return null;
-        }
-
         // "โดนของไหม / ช่วยดูหน่อยว่าโดนคุณไสย์หรือเปล่า" — ขอให้ดูเรื่องของโดยตรง
         if (preg_match('/' . self::KUNSAI . '/u', $t) === 1 && preg_match('/' . self::KUNSAI_ASK . '/u', $t) === 1) {
             return 'kunsai';

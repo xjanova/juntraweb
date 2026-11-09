@@ -559,7 +559,7 @@ class FortuneBotClient
      *
      * @param  array<int,string>  $questions
      * @param  array<int,array{question:string,answer:string}>  $previous
-     * @return array{status:'ok',reading:string,whole:bool,ai_provider:?string,ai_model:?string}|array{status:'failed',crisis:bool,message:?string,reason_code:?string}
+     * @return array{status:'ok',reading:string,whole:bool,ai_provider:?string,ai_model:?string}|array{status:'failed',message:?string,reason_code:?string}
      */
     public function deepQuestion(User $user, array $questions, int $index, array $previous, ?string $birthDate, ?string $name, int $timeout = 150): array
     {
@@ -595,7 +595,6 @@ class FortuneBotClient
                     }
                     $res['error'] = array_filter([
                         'reason_code' => is_string($resp->json('reason_code')) ? $resp->json('reason_code') : null,
-                        'crisis' => $resp->json('crisis') === true ? true : null,
                         'message' => is_string($resp->json('message')) ? $resp->json('message') : null,
                     ], fn ($v) => $v !== null) ?: null;
                 }
@@ -618,7 +617,6 @@ class FortuneBotClient
 
         return [
             'status' => 'failed',
-            'crisis' => ($error['crisis'] ?? false) === true,
             'message' => $error['message'] ?? null,
             'reason_code' => $error['reason_code'] ?? null,
         ];

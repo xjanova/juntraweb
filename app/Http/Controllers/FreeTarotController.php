@@ -42,10 +42,9 @@ class FreeTarotController extends Controller
         $user = $request->user();
         $gate = FreeReadingPolicy::gate($user);
 
-        // เคยรับไปแล้วและมีผลอยู่ → พาไปดูผลเดิม ไม่ใช่ขึ้นข้อความปฏิเสธ
+        // เคยรับไปแล้วและมีผลอยู่ → กลับห้องแม่หมอที่มีคำทำนายใบนั้น (🎁 2026-11-09 ไม่ไปหน้าผลไพ่แล้ว)
         if ($gate['code'] === 'used' && ! empty($gate['reading_id'])) {
-            return redirect()->route('tarot.show', $gate['reading_id'])
-                ->with('status', 'นี่คือคำทำนายฟรีที่แม่หมอเปิดให้คุณไว้ค่ะ ✨');
+            return redirect()->route('chat.from-free', $gate['reading_id']);
         }
 
         return view('pages.tarot.free', [
@@ -78,7 +77,7 @@ class FreeTarotController extends Controller
             $gate = FreeReadingPolicy::gate($user);
             if (! $gate['allowed']) {
                 if (! empty($gate['reading_id'])) {
-                    return redirect()->route('tarot.show', $gate['reading_id']);
+                    return redirect()->route('chat.from-free', $gate['reading_id']);
                 }
 
                 // ไม่ต้องแนบ status — หน้าปลายทางแสดง reason ให้อยู่แล้ว
@@ -151,7 +150,8 @@ class FreeTarotController extends Controller
                     ->with('status', 'ระบบขัดข้องชั่วคราวค่ะ 🙏 สิทธิ์ดูฟรียังอยู่ครบ ลองใหม่อีกครั้งนะคะ');
             }
 
-            return redirect()->route('tarot.show', $reading);
+            // 🎁 (2026-11-09) เจ้าของสั่ง "ดูฟรีจบ ให้ไปหน้าแชทเพื่อเริ่มปิดการขาย ชวนคุยต่อ ทันที" — ไม่ผ่านหน้าผลไพ่
+            return redirect()->route('chat.from-free', $reading);
         } finally {
             $lock->release();
         }

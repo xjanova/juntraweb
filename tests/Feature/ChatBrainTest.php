@@ -110,4 +110,24 @@ class ChatBrainTest extends TestCase
         $this->assertStringContainsString('ทางสำรอง', (string) $res->json('reply'));
         $this->assertSame(10.0, (float) app(WalletService::class)->balance($user), 'คำตอบที่ไม่ผ่านด่านของสมองบอทห้ามคิดเงิน');
     }
+    /**
+     * 🎁 (2026-11-09) ห้องที่เริ่มจากไพ่ฟรี — ห้องไม่ผูกไพ่ แต่ตอนเปิดห้อง Thaiprompt ครั้งแรก
+     *   ผู้พยากรณ์ต้องได้บริบทไพ่ใบนั้น (ลูกค้ากดปุ่มคำถามต่อจากไพ่ แม่หมอต้องรู้ว่าพูดถึงใบไหน)
+     */
+    public function test_a_room_started_from_a_free_reading_tells_thaiprompt_about_that_reading(): void
+    {
+        $user = $this->member();
+        $reading = \App\Models\Reading::create([
+            'user_id' => $user->id, 'session_token' => (string) \Illuminate\Support\Str::uuid(), 'type' => 'tarot_single',
+            'payload' => ['positions' => ['คำตอบของไพ่'], 'cost' => 0, 'free' => true, 'next_questions' => ['งานจะดีขึ้นไหม']],
+            'result' => 'ไพ่กงล้อแห่งโชคกลับหัว ช่วงนี้วงล้อหมุนลง',
+        ]);
+
+        $this->actingAs($user)->get(route('chat.from-free', $reading))->assertRedirect();
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'งานจะดีขึ้นไหม'])->assertOk();
+
+        $start = collect(Http::recorded())->filter(fn ($p) => str_ends_with($p[0]->url(), '/server/chat/start'))->first();
+        $this->assertNotNull($start, 'ต้องเปิดห้อง Thaiprompt ตอนข้อความแรก');
+        $this->assertStringContainsString('ไพ่กงล้อแห่งโชคกลับหัว', (string) ($start[0]->data()['context'] ?? ''));
+    }
 }

@@ -99,7 +99,7 @@ class FreeTarotReadingTest extends TestCase
 
         $reading = Reading::first();
         $this->assertNotNull($reading, 'ต้องมี reading ถูกสร้าง');
-        $res->assertRedirect(route('tarot.show', $reading));
+        $res->assertRedirect(route('chat.from-free', $reading));
 
         $this->assertSame('tarot_single', $reading->type);
         $this->assertTrue((bool) data_get($reading->payload, 'free'), 'payload ต้องมีธง free');
@@ -127,7 +127,7 @@ class FreeTarotReadingTest extends TestCase
 
         $this->assertSame(1, Reading::count(), 'ห้ามแจกไพ่ฟรีใบที่สอง');
         $this->assertSame(1, FreeReadingClaim::count());
-        $second->assertRedirect(route('tarot.show', $first->id));
+        $second->assertRedirect(route('chat.from-free', $first->id));
     }
 
     public function test_เข้าหน้าฟรีซ้ำหลังใช้สิทธิ์แล้ว_เด้งไปผลเดิม(): void
@@ -137,7 +137,7 @@ class FreeTarotReadingTest extends TestCase
         $reading = Reading::first();
 
         $this->actingAs($user)->get(route('tarot.free'))
-            ->assertRedirect(route('tarot.show', $reading->id));
+            ->assertRedirect(route('chat.from-free', $reading->id));
     }
 
     public function test_a_i_ล้มต้องคืนสิทธิ์ฟรีและไม่ทิ้ง_reading_ค้าง(): void
@@ -263,5 +263,73 @@ class FreeTarotReadingTest extends TestCase
         $this->assertSame(1, Reading::count(), 'แถวค้างต้องไม่บล็อกลูกค้าถาวร');
         $this->assertSame(1, FreeReadingClaim::count(), 'ต้องใช้แถวเดิมซ้ำ ไม่ชน unique');
         $this->assertNotNull(FreeReadingClaim::first()->reading_id);
+    }
+    /**
+     * 🎁 (2026-11-09) ดูฟรีจบ → ห้องแม่หมอทันที: คำทำนายเป็นข้อความแรก + คำชวนคุยต่อพร้อมการ์ดแพ็กเกจ
+     *   ห้ามออกบิลเอง (บิลออกเมื่อลูกค้ากดสแกนจ่ายเท่านั้น) และห้ามยิง Thaiprompt ตอนเปิดห้อง
+     */
+    public function test_free_reading_lands_in_the_chat_room_with_the_reading_and_packages(): void
+    {
+        $user = $this->member();
+        $this->actingAs($user)->post(route('tarot.free.cast'));
+        $reading = Reading::first();
+
+        $this->actingAs($user)->get(route('chat.from-free', $reading))
+            ->assertRedirect(route('chat.index', ['room' => 'maemor']));
+
+        $room = \App\Models\ChatConversation::where('user_id', $user->id)->sole();
+        $this->assertNull($room->reading_id, 'ห้องขายต่อต้องไม่ผูกไพ่ (ห้องผูกไพ่มีนาฬิกาถามต่อและซ่อนแพ็กเกจ)');
+        $msgs = $room->messages()->orderBy('id')->get();
+        $this->assertCount(2, $msgs);
+        $this->assertSame(trim((string) $reading->result), $msgs[0]->content);
+        $this->assertSame('general', $msgs[1]->offer_topic, 'คำชวนต่อต้องมีการ์ดแพ็กเกจ');
+
+        $page = $this->actingAs($user)->get(route('chat.index', ['room' => 'maemor']))->assertOk();
+        // ข้อความในห้องส่งให้ Alpine เป็น JSON (@js) — ตรวจจากข้อมูลของหน้าแทนการหาข้อความใน HTML
+        $this->assertSame($room->id, $page->viewData('conversation')->id, 'ต้องเปิดห้องที่เพิ่งวางคำทำนาย');
+        $this->assertStringContainsString('ไพ่ใบนี้บอกว่าช่วงนี้ของเธอกำลังเปลี่ยนผ่าน', $page->viewData('conversation')->messages->first()->content);
+        $this->assertNotEmpty($page->viewData('offerCards')['offers'], 'การ์ดแพ็กเกจต้องขึ้นใต้คำชวน');
+        $this->assertContains('เรื่องงานจะลงตัวเมื่อไร', $page->viewData('aiSuggestions'));
+
+        $this->assertDatabaseCount('wallet_transactions', 0);
+        Http::assertNotSent(fn ($req) => str_contains($req->url(), '/chat/'));
+    }
+
+    public function test_opening_the_free_room_again_does_not_repeat_the_messages(): void
+    {
+        $user = $this->member();
+        $this->actingAs($user)->post(route('tarot.free.cast'));
+        $reading = Reading::first();
+
+        $this->actingAs($user)->get(route('chat.from-free', $reading));
+        $this->actingAs($user)->get(route('chat.from-free', $reading));
+
+        $this->assertSame(1, \App\Models\ChatConversation::where('user_id', $user->id)->count());
+        $this->assertSame(2, \App\Models\ChatMessage::count());
+    }
+
+    public function test_someone_elses_free_reading_cannot_open_a_room(): void
+    {
+        $owner = $this->member();
+        $this->actingAs($owner)->post(route('tarot.free.cast'));
+        $reading = Reading::first();
+
+        $this->actingAs($this->member())->get(route('chat.from-free', $reading))->assertForbidden();
+        $this->assertSame(0, \App\Models\ChatConversation::count());
+    }
+
+    public function test_a_paid_reading_on_the_free_link_goes_to_its_result_page(): void
+    {
+        $user = $this->member();
+        $this->actingAs($user)->post(route('tarot.free.cast'));
+        $reading = Reading::first();
+        $payload = (array) $reading->payload;
+        $payload['free'] = false;
+        $reading->payload = $payload;
+        $reading->save();
+
+        $this->actingAs($user)->get(route('chat.from-free', $reading))
+            ->assertRedirect(route('tarot.show', $reading));
+        $this->assertSame(0, \App\Models\ChatConversation::count());
     }
 }

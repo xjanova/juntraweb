@@ -77,31 +77,18 @@
       </script>
     @elseif ($reading->isFailed())
       @php
-        $failure = (array) data_get($reading->payload, 'failure', []);
         $cost = (float) data_get($reading->payload, 'cost', 0);
       @endphp
       <div class="panel" style="padding:28px;text-align:center">
-        @if (! empty($failure['crisis']) && ! empty($failure['message']))
-          {{-- คำถามส่อสัญญาณวิกฤต — แสดงคำปลอบจาก Thaiprompt แทนข้อความ "ไม่สำเร็จ" --}}
-          <div class="eyebrow" style="display:inline-flex">แม่หมออยู่ตรงนี้นะคะ</div>
-          <div style="font-family:var(--thai);color:var(--ink);line-height:1.9;max-width:52ch;margin:12px auto 0;text-align:left">
-            <x-reading-prose :text="$failure['message']" />
-          </div>
+        <div class="eyebrow" style="display:inline-flex">ดูดวงไม่สำเร็จ</div>
+        <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:48ch;margin:12px auto 20px">
+          ขออภัยค่ะ แม่หมอดูดวงชุดนี้ไม่สำเร็จ
           @if ($cost > 0)
-            <p style="font-size:12.5px;color:var(--ink-dim);margin-top:14px">เครดิต ฿{{ number_format($cost, 0) }} คืนเข้ากระเป๋าของลูกแล้วค่ะ</p>
+            — เครดิต ฿{{ number_format($cost, 0) }} คืนเข้ากระเป๋าของลูกเรียบร้อยแล้ว
           @endif
-          <a href="{{ route('chat.index') }}" class="btn btn-primary" style="margin-top:18px">คุยกับแม่หมอ</a>
-        @else
-          <div class="eyebrow" style="display:inline-flex">ดูดวงไม่สำเร็จ</div>
-          <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:48ch;margin:12px auto 20px">
-            ขออภัยค่ะ แม่หมอดูดวงชุดนี้ไม่สำเร็จ
-            @if ($cost > 0)
-              — เครดิต ฿{{ number_format($cost, 0) }} คืนเข้ากระเป๋าของลูกเรียบร้อยแล้ว
-            @endif
-            ลองถามใหม่อีกครั้งได้เลยนะคะ
-          </p>
-          <a href="{{ route('deep.index') }}" class="btn btn-primary">ถามใหม่อีกครั้ง</a>
-        @endif
+          ลองถามใหม่อีกครั้งได้เลยนะคะ
+        </p>
+        <a href="{{ route('deep.index') }}" class="btn btn-primary">ถามใหม่อีกครั้ง</a>
       </div>
     @else
       <div class="panel" style="padding:28px">

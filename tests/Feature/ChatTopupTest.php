@@ -100,6 +100,29 @@ class ChatTopupTest extends TestCase
         $this->assertGreaterThanOrEqual($price, $balance, 'จ่ายตามยอดที่ขาดแล้วต้องพอเปิดแพ็กเกจ');
     }
 
+    /**
+     * 🧾 (2026-11-09) แตะแพ็กเกจบนโต๊ะตอนเครดิตไม่พอ ต้องไม่ออกบิลทันที — วางการ์ดให้กด "สแกนจ่าย" เองก่อน
+     *   เคสจริง: ลูกค้าแตะ "เปิดไพ่ ฿39" ครั้งเดียว ได้บิล TUP-1ZZNSYZX ใน 10 วินาทีหลังเข้าห้อง
+     *   บิลสร้างได้ทางเดียวคือ chooseAmount() ซึ่งเรียกจาก payAndOpen() — โต๊ะต้องไม่เรียก payAndOpen ตรง ๆ
+     */
+    public function test_table_package_without_credit_asks_before_creating_a_bill(): void
+    {
+        $user = $this->member();
+
+        $html = $this->actingAs($user)->get('/chat')->assertOk()->getContent();
+
+        preg_match('/openTable\(o\) \{(.*?)\n    \},/s', $html, $m);
+        $this->assertNotEmpty($m, 'หา openTable() ในหน้าแชทไม่เจอ');
+        $this->assertStringNotContainsString('payAndOpen', $m[1], 'แตะแพ็กเกจบนโต๊ะห้ามออกบิลทันที');
+        $this->assertStringContainsString('this.confirmPay(o)', $m[1]);
+
+        preg_match('/confirmPay\(o\) \{(.*?)\n    \},/s', $html, $c);
+        $this->assertNotEmpty($c, 'หา confirmPay() ในหน้าแชทไม่เจอ');
+        $this->assertStringNotContainsString('chooseAmount', $c[1], 'การ์ดยืนยันต้องไม่สร้างบิลเอง');
+        $this->assertStringNotContainsString('payAndOpen', $c[1]);
+        $this->assertStringContainsString("kind: 'confirm_pay'", $c[1]);
+    }
+
     /** หน้าแชทต้องส่งขั้นต่ำ/สูงสุดเติมเงินให้ JS — ยอดที่ขาดต่ำกว่าขั้นต่ำต้องปัดขึ้น ไม่ใช่โดนปฏิเสธ */
     public function test_chat_page_offers_pay_and_open_with_topup_limits(): void
     {

@@ -74,7 +74,7 @@ class MaeMorUpstream
     }
 
     /**
-     * @return array{reply:string,kind:string,offer_topic:?string,suggestions:list<string>,crisis:bool,crisis_room:?bool}|null  null = ไม่มีคำตอบจริง (ผู้เรียกลองห้องใหม่/ถอยไปทางสำรอง)
+     * @return array{reply:string,kind:string,offer_topic:?string,suggestions:list<string>}|null  null = ไม่มีคำตอบจริง (ผู้เรียกลองห้องใหม่/ถอยไปทางสำรอง)
      */
     public function send(User $user, string $session, string $text, bool $grounded = false, ?string $context = null, ?string $persona = null, int $timeout = 45): ?array
     {
@@ -96,10 +96,6 @@ class MaeMorUpstream
                 'kind'        => in_array($kind, ['reply', 'guard', 'offer'], true) ? $kind : 'reply',
                 'offer_topic' => $kind === 'offer' ? ChatReadingIntent::normalizeTopic($res['data']['offer_topic'] ?? null) : null,
                 'suggestions' => self::cleanSuggestions($res['data']['suggestions'] ?? null),
-                // 🤍 (2026-11-06) คำปลอบลูกค้าที่ส่งสัญญาณอยากทำร้ายตัวเอง (kind ยังเป็น guard) — ห้ามคิดเงินเทิร์นนี้
-                'crisis'      => (bool) ($res['data']['crisis'] ?? false),
-                // ห้องอยู่ในโหมดวิกฤต · null = Thaiprompt รุ่นก่อนไม่ได้บอก (ไม่แตะค่าที่จำไว้)
-                'crisis_room' => array_key_exists('crisis_room', $res['data']) ? (bool) $res['data']['crisis_room'] : null,
             ];
         }
 
@@ -116,7 +112,7 @@ class MaeMorUpstream
             return null;
         }
 
-        return ['reply' => $reply, 'kind' => 'reply', 'offer_topic' => null, 'suggestions' => [], 'crisis' => false, 'crisis_room' => null];
+        return ['reply' => $reply, 'kind' => 'reply', 'offer_topic' => null, 'suggestions' => []];
     }
 
     /**
