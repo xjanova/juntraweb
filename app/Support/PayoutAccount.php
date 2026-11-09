@@ -57,7 +57,8 @@ class PayoutAccount
                 'promptpay_id' => (string) $remote['promptpay_id'],
                 'name'         => (string) ($remote['account_name'] ?: 'แม่หมอจันทรา'),
                 'source'       => 'maemor',
-                'transfer'     => self::transfer($remote['transfer_account'] ?? null),
+                // เลขบัญชีของบัญชีเดียวกับ QR (endpoint ส่งมาอยู่แล้ว) — ต้องเปิดตัวจับ SMS ไว้เท่านั้น
+                'transfer'     => ! empty($remote['sms_checker_enabled']) ? self::transfer($remote) : null,
             ];
             self::rememberSnapshot($account);
 
@@ -107,10 +108,11 @@ class PayoutAccount
        ============================================================ */
 
     /**
-     * 🏦 (2026-11-09) เลขบัญชีให้โอนตรง จาก transfer_account ของ Thaiprompt — ข้อมูลไม่ครบ = null
+     * 🏦 (2026-11-09) เลขบัญชีให้โอนตรง = บัญชีเดียวกับ QR — ข้อมูลไม่ครบ = null
      *   เจ้าของ: "ให้แจ้งเลขบัญชีธนาคารด้วย" → "ต้องเป็นบัญชีกสิกร ไม่ใช่ไทยพาณิชย์"
-     *   Thaiprompt เลือกบัญชีดูดวงใบเดียวกับ QR และส่งเฉพาะบัญชีที่ตัวจับ SMS เปิดอยู่
-     *   โอนเข้าใบนี้ด้วยยอดเศษสตางค์ = บิลตัดเอง
+     *   → "แก้ที่ จันทรา.online ห้องแชทอย่างเดียวก่อน" (ไม่แตะ Thaiprompt)
+     *   /juntra/payment/account ส่งเลขบัญชีของบัญชีที่ทำ QR (บัญชีที่ติ๊กไว้ให้ดูดวง) มาอยู่แล้ว
+     *   ผู้เรียกต้องเช็ค sms_checker_enabled ก่อน — โอนเข้าใบที่ตัวจับ SMS ดูอยู่ด้วยยอดเศษสตางค์ = บิลตัดเอง
      *
      * @return array{bank_code:string,bank_name:string,account_number:string,display_number:string,account_name:string}|null
      */

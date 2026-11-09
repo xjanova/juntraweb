@@ -244,20 +244,19 @@ class ChatTopupTest extends TestCase
      * 🏦 (2026-11-09) การ์ดสแกนจ่ายในแชทแสดงเลขบัญชีให้โอนตรงด้วย แล้วเงินที่โอนเข้าบัญชีนั้นต้องเข้า wallet
      *   เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารด้วย" → "ต้องเป็นบัญชีกสิกร ไม่ใช่ไทยพาณิชย์"
      *   และ "ตรวจด้วยว่าเงินเข้าระบบ sms checker ... แล้วเงินเข้ากระเป๋าวอลเลตปกติไหม"
-     *   บัญชีโอนตรง = บัญชีดูดวงใบเดียวกับ QR (Thaiprompt เลือกให้) — SMS จับด้วยยอดเศษสตางค์
+     *   บัญชีโอนตรง = บัญชีเดียวกับ QR จากฟิลด์เดิมของ /payment/account — SMS จับด้วยยอดเศษสตางค์
      */
     public function test_chat_bill_shows_the_transfer_account_and_a_transfer_to_it_lands_in_the_wallet(): void
     {
+        // รูปแบบเดียวกับที่ Thaiprompt ตอบอยู่บน prod วันนี้ (ไม่ต้องรอฝั่งนั้นแก้)
         Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
-            'promptpay_id'     => '0811111111',
-            'account_name'     => 'จันทราพยากรณ์',
-            'bank_name'        => 'ธนาคารกสิกรไทย',
-            'transfer_account' => [
-                'bank_code'      => 'KBANK',
-                'bank_name'      => 'ธนาคารกสิกรไทย',
-                'account_number' => '2323775349',
-                'account_name'   => 'จันทราพยากรณ์',
-            ],
+            'promptpay_id'        => '0811111111',
+            'promptpay_type'      => 'phone',
+            'account_name'        => 'จันทราพยากรณ์',
+            'account_number'      => '2323775349',
+            'bank_code'           => 'KBANK',
+            'bank_name'           => 'ธนาคารกสิกรไทย',
+            'sms_checker_enabled' => true,
         ]], 200)]);
         Cache::flush();
         $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
@@ -297,12 +296,15 @@ class ChatTopupTest extends TestCase
         $this->actingAs($user)->get('/wallet')->assertOk()->assertSee($tx->reference_code);
     }
 
-    /** Thaiprompt ไม่ส่งบัญชีโอนตรง (ไม่มีบัญชีไหนเปิดตัวจับ SMS) = แสดงแค่ QR เหมือนเดิม */
-    public function test_chat_bill_without_a_transfer_account_shows_only_the_qr(): void
+    /** บัญชีที่ทำ QR ไม่ได้เปิดตัวจับ SMS = โอนแล้วบิลไม่ตัดเอง → ไม่โชว์เลขบัญชี แสดงแค่ QR */
+    public function test_chat_bill_shows_only_the_qr_when_the_account_has_no_sms_checking(): void
     {
         Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
-            'promptpay_id' => '0811111111',
-            'account_name' => 'จันทราพยากรณ์',
+            'promptpay_id'        => '0811111111',
+            'account_name'        => 'จันทราพยากรณ์',
+            'account_number'      => '2323775349',
+            'bank_name'           => 'ธนาคารกสิกรไทย',
+            'sms_checker_enabled' => false,
         ]], 200)]);
         Cache::flush();
         $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
