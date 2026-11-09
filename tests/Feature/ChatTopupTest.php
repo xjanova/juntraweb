@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Tests\Feature\Concerns\SmsCheckerDeviceRequests;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,7 @@ use Tests\TestCase;
 class ChatTopupTest extends TestCase
 {
     use RefreshDatabase;
+    use SmsCheckerDeviceRequests;
 
     protected function setUp(): void
     {
@@ -236,6 +238,78 @@ class ChatTopupTest extends TestCase
         // เลข PromptPay ฝังอยู่ใน EMVCo payload — 0811111111 → 0066811111111
         $this->assertStringContainsString('0066811111111', (string) $res->json('qr_payload'));
         $this->assertStringNotContainsString('0066899999999', (string) $res->json('qr_payload'));
+    }
+
+    /**
+     * 🏦 (2026-11-09) การ์ดสแกนจ่ายในแชทแสดงเลขบัญชีให้โอนตรงด้วย แล้วเงินที่โอนเข้าบัญชีนั้นต้องเข้า wallet
+     *   เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารสวยๆ ของไทยพาณิชย์ด้วย"
+     *   และ "ตรวจด้วยว่าเงินเข้าระบบ sms checker ... แล้วเงินเข้ากระเป๋าวอลเลตปกติไหม"
+     *   QR เป็นบัญชีกสิกร แต่บัญชีโอนตรงเป็นไทยพาณิชย์ — SMS จับด้วยยอดเศษสตางค์ ไม่ดูธนาคาร
+     */
+    public function test_chat_bill_shows_the_transfer_account_and_a_transfer_to_it_lands_in_the_wallet(): void
+    {
+        Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
+            'promptpay_id'     => '0811111111',
+            'account_name'     => 'จันทราพยากรณ์',
+            'bank_name'        => 'ธนาคารกสิกรไทย',
+            'transfer_account' => [
+                'bank_code'      => 'SCB',
+                'bank_name'      => 'ธนาคารไทยพาณิชย์',
+                'account_number' => '5552545514',
+                'account_name'   => 'บุญณราช อุปเสน',
+            ],
+        ]], 200)]);
+        Cache::flush();
+        $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
+
+        $res = $this->actingAs($user)->postJson('/chat/topup', ['amount' => 39])
+            ->assertOk()
+            ->assertJsonPath('transfer.bank_name', 'ธนาคารไทยพาณิชย์')
+            ->assertJsonPath('transfer.account_number', '5552545514')
+            ->assertJsonPath('transfer.display_number', '555-2-54551-4')
+            ->assertJsonPath('transfer.account_name', 'บุญณราช อุปเสน');
+        $txId = (int) $res->json('id');
+        $payable = number_format((float) $res->json('payable'), 2, '.', '');
+
+        // รีเฟรชหน้าแล้วเปิดบิลเดิม = เลขบัญชีเดิมจากบิล ไม่ไปถาม Thaiprompt ใหม่
+        Http::fake(['*' => Http::response([], 503)]);
+        $this->actingAs($user)->getJson(route('chat.topup.resume', ['tx' => $txId]))
+            ->assertOk()
+            ->assertJsonPath('transfer.account_number', '5552545514');
+
+        // SMS ไทยพาณิชย์ยอดตรงเข้ามา → บิลตัด เงินเข้า wallet
+        $req = $this->notifyRequest($this->device('auto'), [
+            'bank' => 'SCB', 'type' => 'credit', 'amount' => $payable,
+            'sender_or_receiver' => 'ลูกค้า', 'reference_number' => 'SCB-REF-1',
+            'sms_timestamp' => (int) round(microtime(true) * 1000) + 1000,
+        ]);
+        $this->postJson('/api/v1/sms-payment/notify', $req['body'], $req['headers'])
+            ->assertOk()
+            ->assertJsonPath('data.matched', true);
+
+        $tx = WalletTransaction::findOrFail($txId);
+        $this->assertSame('success', $tx->status);
+        $this->assertSame((float) $payable, app(WalletService::class)->balance($user));
+
+        // หน้าแชทเห็นว่าจ่ายแล้ว และประวัติ wallet มีรายการเติมเงินใบนี้
+        $this->actingAs($user)->getJson(route('chat.topup.status', ['tx' => $txId]))
+            ->assertOk()->assertJsonPath('paid', true);
+        $this->actingAs($user)->get('/wallet')->assertOk()->assertSee($tx->reference_code);
+    }
+
+    /** Thaiprompt ไม่ส่งบัญชีโอนตรง (ไม่มีบัญชีไหนเปิดตัวจับ SMS) = แสดงแค่ QR เหมือนเดิม */
+    public function test_chat_bill_without_a_transfer_account_shows_only_the_qr(): void
+    {
+        Http::fake(['*/juntra/payment/account' => Http::response(['data' => [
+            'promptpay_id' => '0811111111',
+            'account_name' => 'จันทราพยากรณ์',
+        ]], 200)]);
+        Cache::flush();
+        $user = User::factory()->create(['thaiprompt_token' => 'tok-'.Str::random(6)]);
+
+        $this->actingAs($user)->postJson('/chat/topup', ['amount' => 39])
+            ->assertOk()
+            ->assertJsonPath('transfer', null);
     }
 
     /** upstream ล่ม = ต้องยังเติมเงินได้ด้วยค่าที่ตั้งไว้เอง ไม่ใช่ตายทั้งระบบ */

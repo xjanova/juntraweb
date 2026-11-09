@@ -557,6 +557,22 @@
   display: block; margin-top: 4px;
 }
 
+/* 🏦 เลขบัญชีให้โอนตรง — ตัวเลขใหญ่อ่านง่าย กดค้างแล้วเลือกทั้งเลขได้ทีเดียว */
+.pay-transfer {
+  text-align: center; margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(244, 207, 106, .3);
+}
+.pay-transfer-bank { font-size: 14px; font-weight: 600; margin-top: 4px; }
+.pay-transfer-no {
+  font-family: var(--display, serif);
+  font-size: 24px; font-weight: 700; letter-spacing: .04em; line-height: 1.25;
+  color: var(--gold-2, var(--gold, #f4cf6a));
+  user-select: all; -webkit-user-select: all;
+}
+
 .pay-wait {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   margin-top: 14px; font-size: 13px;

@@ -536,6 +536,15 @@
                         เข้าบัญชี <strong x-text="m.pay.promptpay_name"></strong>
                       </div>
 
+                      {{-- 🏦 (2026-11-09) เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารด้วย"
+                           บัญชีนี้ตัวจับ SMS ดูอยู่ (Thaiprompt ส่งมาเฉพาะใบแบบนั้น) โอนยอดเดียวกันเป๊ะ = บิลตัดเอง --}}
+                      <div class="pay-transfer" x-show="m.pay.transfer">
+                        <div class="pay-sub">หรือโอนเข้าบัญชีนี้ด้วยยอดเดียวกัน</div>
+                        <div class="pay-transfer-bank" x-text="m.pay.transfer?.bank_name"></div>
+                        <div class="pay-transfer-no" x-text="m.pay.transfer?.display_number"></div>
+                        <div class="pay-sub" x-text="m.pay.transfer?.account_name"></div>
+                      </div>
+
                       <div class="pay-sub" style="text-align:center;margin-top:8px" x-show="m.pay.then && !m.pay.superseded">
                         จ่ายแล้ว{{ $P['self'] }}พาไป<span x-text="m.pay.then?.offer.kind === 'deep' ? 'ดูดวง' : 'เลือกไพ่'"></span>
                         <strong x-text="m.pay.then?.offer.label"></strong> ให้เองเลยค่ะ
@@ -553,6 +562,9 @@
                       <div class="pay-actions">
                         <button type="button" class="chip" @click="copyAmount(m, $event)">
                           <span class="chip-icon">📋</span> คัดลอกยอด
+                        </button>
+                        <button type="button" class="chip" x-show="m.pay.transfer" @click="copyAccount(m)">
+                          <span class="chip-icon">🏦</span> คัดลอกเลขบัญชี
                         </button>
                         {{-- หา input ที่อยู่ในกล่องเดียวกัน แทน x-ref เพราะ x-ref
                              ผูกชื่อแบบคงที่ ใช้กับรายการที่วนซ้ำไม่ได้ --}}
@@ -1666,6 +1678,18 @@ document.addEventListener('alpine:init', () => {
         setTimeout(() => { m.pay.notice = ''; }, 2000);
       } catch (_) {
         m.pay.notice = 'กดค้างที่ตัวเลขเพื่อคัดลอกได้นะคะ';
+      }
+    },
+
+    async copyAccount(m) {
+      const no = m.pay.transfer?.account_number;
+      if (!no) return;
+      try {
+        await navigator.clipboard.writeText(no);
+        m.pay.notice = 'คัดลอกเลขบัญชีแล้วค่ะ';
+        setTimeout(() => { m.pay.notice = ''; }, 2000);
+      } catch (_) {
+        m.pay.notice = 'กดค้างที่เลขบัญชีเพื่อคัดลอกได้นะคะ';
       }
     },
 

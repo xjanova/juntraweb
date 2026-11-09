@@ -35,7 +35,9 @@ class PayoutAccount
 
 
     /**
-     * @return array{promptpay_id:string,name:string,source:'maemor'|'snapshot'|'local'}|null
+     * transfer = เลขบัญชีให้โอนตรง (บัญชีหลักที่ตัวจับ SMS ดูอยู่) — null = แสดงแค่ QR
+     *
+     * @return array{promptpay_id:string,name:string,source:'maemor'|'snapshot'|'local',transfer:?array}|null
      */
     public static function resolve(?User $user = null): ?array
     {
@@ -55,6 +57,7 @@ class PayoutAccount
                 'promptpay_id' => (string) $remote['promptpay_id'],
                 'name'         => (string) ($remote['account_name'] ?: 'แม่หมอจันทรา'),
                 'source'       => 'maemor',
+                'transfer'     => self::transfer($remote['transfer_account'] ?? null),
             ];
             self::rememberSnapshot($account);
 
@@ -69,6 +72,7 @@ class PayoutAccount
                 'promptpay_id' => $snapshot['promptpay_id'],
                 'name'         => $snapshot['name'],
                 'source'       => 'snapshot',
+                'transfer'     => $snapshot['transfer'],
             ];
         }
 
@@ -78,6 +82,8 @@ class PayoutAccount
                 'promptpay_id' => $localId,
                 'name'         => (string) Setting::get('promptpay_name', config('pricing.promptpay_name', '')),
                 'source'       => 'local',
+                // ตั้งเลขพร้อมเพย์เองในเว็บ = ไม่รู้ว่าตัวจับ SMS ดูบัญชีไหน ห้ามเดาเลขบัญชีให้ลูกค้าโอน
+                'transfer'     => null,
             ];
         }
 
@@ -101,32 +107,70 @@ class PayoutAccount
        ============================================================ */
 
     /**
+     * 🏦 (2026-11-09) เลขบัญชีให้โอนตรง จาก transfer_account ของ Thaiprompt — ข้อมูลไม่ครบ = null
+     *   เจ้าของ: "มันแจ้งแต่ qrcode ให้แจ้งเลขบัญชีธนาคารสวยๆ ของไทยพาณิชย์ด้วย"
+     *   Thaiprompt ส่งเฉพาะบัญชีที่ตัวจับ SMS เปิดอยู่ โอนเข้าใบนี้ด้วยยอดเศษสตางค์ = บิลตัดเอง
+     *
+     * @return array{bank_code:string,bank_name:string,account_number:string,display_number:string,account_name:string}|null
+     */
+    private static function transfer(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+        $digits = preg_replace('/\D/', '', (string) ($raw['account_number'] ?? ''));
+        if (strlen($digits) < 10 || strlen($digits) > 15) {
+            return null;
+        }
+
+        return [
+            'bank_code'      => (string) ($raw['bank_code'] ?? ''),
+            'bank_name'      => (string) ($raw['bank_name'] ?? ''),
+            'account_number' => $digits,
+            'display_number' => self::displayNumber($digits),
+            'account_name'   => (string) ($raw['account_name'] ?? ''),
+        ];
+    }
+
+    /** เลขบัญชี 10 หลักแบบที่ธนาคารไทยพิมพ์บนสมุด 3-1-5-1 (ยาวกว่านั้นแสดงตามจริง) */
+    private static function displayNumber(string $digits): string
+    {
+        if (strlen($digits) !== 10) {
+            return $digits;
+        }
+
+        return substr($digits, 0, 3).'-'.$digits[3].'-'.substr($digits, 4, 5).'-'.$digits[9];
+    }
+
+    /**
      * เก็บบัญชีที่ดึงมาได้ไว้เป็น "ใบล่าสุดที่ยืนยันแล้ว" ให้ตอน upstream ล่ม
      *
      * เขียนเฉพาะตอนบัญชีเปลี่ยนจริง — resolve() ถูกเรียกทุกครั้งที่มีคนเปิดหน้า
      * เติมเงิน ถ้าเขียนทุกครั้งจะกลายเป็น write ลง settings ทุก request
      *
-     * @param  array{promptpay_id:string,name:string}  $account
+     * @param  array{promptpay_id:string,name:string,transfer:?array}  $account
      */
     private static function rememberSnapshot(array $account): void
     {
         $current = self::snapshot();
         if ($current
             && $current['promptpay_id'] === $account['promptpay_id']
-            && $current['name'] === $account['name']) {
+            && $current['name'] === $account['name']
+            && $current['transfer'] == $account['transfer']) {
             return;
         }
 
         Setting::put(self::SNAPSHOT_KEY, json_encode([
             'promptpay_id' => $account['promptpay_id'],
             'name'         => $account['name'],
+            'transfer'     => $account['transfer'],
             // เวลาที่ "เห็นบัญชีใบนี้ครั้งแรก" ไม่ใช่เวลาที่ตรวจสอบล่าสุด
             // (ถ้าบัญชีไม่เปลี่ยน เราไม่เขียนซ้ำ) — มีไว้ให้ไล่ย้อนตอนดีบักบนโปรดักชัน
             'saved_at'     => now()->toIso8601String(),
         ], JSON_UNESCAPED_UNICODE), 'payment');
     }
 
-    /** @return array{promptpay_id:string,name:string}|null */
+    /** @return array{promptpay_id:string,name:string,transfer:?array}|null */
     private static function snapshot(): ?array
     {
         $raw = (string) Setting::get(self::SNAPSHOT_KEY, '');
@@ -142,6 +186,8 @@ class PayoutAccount
         return [
             'promptpay_id' => (string) $data['promptpay_id'],
             'name'         => (string) ($data['name'] ?? 'แม่หมอจันทรา'),
+            // สำเนาเก่าก่อน 2026-11-09 ไม่มีคีย์นี้ = แสดงแค่ QR
+            'transfer'     => is_array($data['transfer'] ?? null) ? $data['transfer'] : null,
         ];
     }
 }
