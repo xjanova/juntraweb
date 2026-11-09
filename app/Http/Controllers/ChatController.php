@@ -23,6 +23,7 @@ use App\Support\Markdown;
 use App\Support\Pricing;
 use App\Support\ReadingQaClock;
 use App\Support\ReadingRoomLock;
+use App\Support\SiteHelp;
 use App\Support\TarotSpreads;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
@@ -534,7 +535,12 @@ class ChatController extends Controller
             };
         }
         if ($user && ($bill = ChatTopupController::pendingBill($user)) !== null) {
-            return "ยังมีบิลเติมเงินเลขที่ {$bill->reference_code} รอชำระอยู่นะคะ จ่ายบิลนี้ให้เรียบร้อยก่อน แล้ว{$self}เปิดไพ่ให้ต่อได้เลยค่ะ";
+            // 🧭 (2026-11-10) แชทจริง: ลูกค้าถาม "ชำระตรงไหนค่ะ" แล้วได้ประโยคนี้ซ้ำ 8 ครั้งโดยไม่รู้ว่าต้องกดอะไร
+            //    → บอกทางจ่ายต่อ และทางยกเลิกถ้าไม่ใช้บิลนี้แล้ว (ชื่อปุ่มตรงกับหน้าเว็บ)
+            return "ยังมีบิลเติมเงินเลขที่ {$bill->reference_code} ยอด ฿" . number_format((float) $bill->amount, 2) . ' รอชำระอยู่นะคะ '
+                . 'จ่ายต่อได้ที่ปุ่ม "ดู QR จ่ายต่อ" ในแถบบิลด้านบนห้องนี้ (โอนยอดนี้ให้ตรงเป๊ะ ระบบตรวจให้เอง) '
+                . 'ถ้าไม่ใช้บิลนี้แล้ว ยกเลิกได้ที่เมนู "วอลเลต" → "สถานะการเติมเงิน" → "รายละเอียด →" → "ยกเลิกรายการนี้" '
+                . "จ่ายหรือยกเลิกแล้ว{$self}เปิดไพ่ให้ต่อได้เลยค่ะ";
         }
 
         return null;
@@ -595,10 +601,17 @@ class ChatController extends Controller
         //    รวมไปด้วย → ข้อความที่ 10 (ซึ่งควรฟรี) จะโดนคิดเงิน
         $cost = ChatPolicy::costFor($user);
 
+        // 🧭 (2026-11-10) ถามวิธีใช้เว็บ/แจ้งปัญหา (เติมเงิน บิล ย้อนดู เงินไม่เข้า) = ไม่คิดเงิน ไม่ติดเพดานคุยฟรี
+        //    ลูกค้าที่ติดปัญหาการจ่ายเงินต้องถามได้เสมอ — ไม่ใช่โดน "เครดิตไม่พอ" ปิดปากตอนถามว่าเติมเงินยังไง
+        $helpTurn = SiteHelp::isHelp($data['message']);
+        if ($helpTurn) {
+            $cost = 0.0;
+        }
+
         // 🆓 (2026-07-24) โหมดคุยฟรี — เพดานข้อความต่อวัน กันต้นทุน AI บานปลาย
         //   ครบเพดานแล้วแม่หมอชวนไปเปิดไพ่แบบเจาะลึกแทน (เตะเบาๆ ไม่ใช่ error แข็งๆ)
         //   ⚠️ exhausted() บล็อกเฉพาะโหมดฟรีล้วน — โหมดคิดเงินให้ผ่านไปหักเครดิตแทน
-        if (ChatPolicy::exhausted($user)) {
+        if (! $helpTurn && ChatPolicy::exhausted($user)) {
             $this->releaseChargeLock();
             $limitMsg = ChatPolicy::limitMessage($room);
 
@@ -767,7 +780,7 @@ class ChatController extends Controller
             // (ก่อนหน้านี้ฝั่ง client เดาเอง ตัวเลขโควตาจึงเคลื่อนจากของจริง)
             $awaiting = ChatSuggestions::isAwaitingAnswer($reply);
             // ✨ พรีเมียมเสียง — ระหว่างเวลาถามต่อ ทุกคำตอบพูดออกเสียงของห้อง
-            $voiceUrl = ! $degraded && $kind !== 'offer' && $reading !== null
+            $voiceUrl = ! $degraded && $kind !== 'offer' && $kind !== 'help' && $reading !== null
                 ? $this->speakReply($reading, $conversation, (string) $reply) : null;
 
             return response()->json([
@@ -1070,9 +1083,19 @@ class ChatController extends Controller
             : null;
         $grounded = $reading !== null;
 
+        // 🧭 (2026-11-10) ถามวิธีใช้เว็บ/แจ้งปัญหา → แนบคู่มือเฉพาะหัวข้อนั้น + สถานะบัญชีจริง ให้ผู้พยากรณ์ตอบเป็นขั้นตอน
+        //    มาก่อนด่านยื่นการ์ด: "เปิดไพ่ยังไง" = ถามวิธีใช้ ไม่ใช่ขอให้ดูดวง · เรื่องที่แก้เองไม่ได้ (เงินไม่เข้า
+        //    ขอคุยกับคน เว็บค้าง) แจ้งทีมงานทาง Telegram ทันที (ครั้งเดียวต่อลูกค้าต่อหัวข้อต่อ 30 นาที)
+        $helpIds  = SiteHelp::match($message);
+        $siteHelp = $helpIds !== [] ? SiteHelp::block($helpIds, $user, $room) : '';
+        $siteHelp = $siteHelp !== '' ? $siteHelp : null;
+        if ($siteHelp !== null && ($escalate = SiteHelp::escalationFor($helpIds)) !== null) {
+            SiteHelp::escalate($user, $escalate, $message, $room);
+        }
+
         // 🌙 (2026-09-15) "คุยฟรีจนกว่าจะเริ่มการทำนาย" — ขอให้ดูดวงตรง ๆ = ยื่นการ์ดเปิดไพ่เลย
         //    ไม่ส่งไปให้ AI ทำนายฟรี · ยกเว้นห้องที่คุยต่อจากไพ่ที่จ่ายแล้ว (ถามเรื่องไพ่ชุดนั้น = คุยได้)
-        if (! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
+        if ($siteHelp === null && ! $grounded && ($topic = ChatReadingIntent::detect($message)) !== null) {
             return ['reply' => ChatOffers::invite($topic, $room, $user), 'degraded' => false, 'kind' => 'offer', 'offer_topic' => $topic];
         }
 
@@ -1081,7 +1104,7 @@ class ChatController extends Controller
             ?? $this->openUpstreamSession($user, $conversation, $context);
 
         $out = $sessionId && $left() >= 8
-            ? $this->upstream->send($user, $sessionId, $message, $grounded, $context, $persona, $left() - 3)
+            ? $this->upstream->send($user, $sessionId, $message, $grounded, $context, $persona, $left() - 3, $siteHelp)
             : null;
 
         // ลองห้องใหม่อีกรอบเฉพาะตอน "ได้คำตอบว่าง" (ห้องค้าง) และยังมีเวลาพอ — ต่อไม่ติด/หมดเวลา/เซิร์ฟเวอร์แน่น
@@ -1090,7 +1113,7 @@ class ChatController extends Controller
             Log::info('ผู้พยากรณ์ตอบว่าง — เปิดห้องใหม่แล้วลองอีกครั้ง', ['user_id' => $user->id, 'room' => $room]);
             $this->upstream->forgetSession($conversation->id);
             $newSession = $this->openUpstreamSession($user, $conversation, $context);
-            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context, $persona, $left() - 3) : null;
+            $out = $newSession ? $this->upstream->send($user, $newSession, $message, $grounded, $context, $persona, $left() - 3, $siteHelp) : null;
         }
 
         if ($out === null) {
@@ -1098,18 +1121,20 @@ class ChatController extends Controller
 
             // ทางสำรอง (AiOracle) รอได้ถึง 30 วิ — เวลาไม่พอแล้วตอบขอโทษ (ไม่คิดเงิน) ดีกว่าให้ลูกค้าเห็นหน้า error
             // ห้องที่ไม่ใช่แม่หมอก็ไม่ใช้ทางสำรอง: ทางสำรองพูดเป็นแม่หมอ บุคลิกจะไม่ตรงห้อง
-            if ($room !== ChatRooms::DEFAULT || $left() < 32) {
+            // เทิร์นช่วยใช้เว็บก็ไม่ใช้ทางสำรอง — ทางสำรองไม่เห็นคู่มือ จะเดาขั้นตอน/ชื่อปุ่มเอง
+            if ($room !== ChatRooms::DEFAULT || $left() < 32 || $siteHelp !== null) {
                 return ['reply' => ChatRooms::busyReply($room), 'degraded' => true];
             }
 
             return $this->degradedFallback($message, $context);
         }
 
+        // เทิร์นช่วยใช้เว็บ = kind 'help' (ไม่คิดเงิน ไม่ยื่นการ์ด ไม่อ่านออกเสียง) แม้ฝั่งนั้นจะตอบ reply/offer มา
         return [
             'reply'       => $out['reply'],
             'degraded'    => false,
-            'kind'        => $out['kind'],
-            'offer_topic' => $out['offer_topic'],
+            'kind'        => $siteHelp !== null ? 'help' : $out['kind'],
+            'offer_topic' => $siteHelp !== null ? null : $out['offer_topic'],
             'suggestions' => $out['suggestions'] ?? [],
         ];
     }
