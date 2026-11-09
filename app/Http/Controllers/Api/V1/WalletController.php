@@ -159,7 +159,7 @@ class WalletController extends Controller
                     'id'             => $existing->id,
                     'base_amount'    => $base,
                     'payable_amount' => abs((float) $existing->amount),
-                    'auto_confirm'   => (bool) config('smschecker.enabled'),
+                    'auto_confirm'   => \App\Support\TopupAutoApprove::sms(),
                     'promptpay'      => $this->promptpayBlock($request->user(), abs((float) $existing->amount)),
                     'slip_upload_url' => url('/wallet/topup/' . $existing->id),
                     'reused'         => true,
@@ -193,7 +193,7 @@ class WalletController extends Controller
                 'id'             => $tx->id,
                 'base_amount'    => $base,
                 'payable_amount' => (float) $payable,
-                'auto_confirm'   => (bool) config('smschecker.enabled'),
+                'auto_confirm'   => \App\Support\TopupAutoApprove::sms(),
                 'promptpay'      => $this->promptpayBlock($request->user(), (float) $payable),
                 'slip_upload_url' => url('/wallet/topup/' . $tx->id),
                 'instructions'    => config('smschecker.enabled')

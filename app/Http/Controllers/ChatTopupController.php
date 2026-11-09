@@ -156,6 +156,8 @@ class ChatTopupController extends Controller
             'reference_code' => $tx->reference_code,
             'status'  => $tx->status,
             'paid'    => $tx->status === 'success',
+            // จ่ายแล้ว = ยอดที่เครดิตจริง (อาจน้อยกว่ายอดบิลแค่เศษสตางค์ เมื่อสลิปโอนยอดกลม)
+            'credited' => $tx->status === 'success' ? (float) $tx->amount : null,
             'balance' => (float) $this->wallet->balance($user),
             // ส่งสถานะโควตา/ราคากลับไปด้วย หน้าแชทจะได้ปลดล็อกช่องพิมพ์ทันที
             // ถ้าที่บล็อกอยู่คือเรื่องเครดิตไม่พอ
@@ -225,6 +227,8 @@ class ChatTopupController extends Controller
             'paid'     => $result['paid'],
             // approve | duplicate | review — หน้าแชทจะได้บอกลูกค้าให้แนบสลิปใบใหม่เมื่อเป็น duplicate
             'decision' => $result['decision'] ?? null,
+            // ยอดที่เครดิตจริง (สลิปตัดเศษสตางค์ = ยอดที่โอนจริง ไม่ใช่ยอดบิล)
+            'credited' => $result['credited'] ?? null,
             'balance'  => (float) $this->wallet->balance($user),
             'message'  => $result['message'],
         ];
@@ -246,7 +250,7 @@ class ChatTopupController extends Controller
             'promptpay_name' => $account['name'],
             // 🏦 (2026-11-09) เลขบัญชีให้โอนตรงแทนการสแกน — null = แสดงแค่ QR
             'transfer'       => $account['transfer'] ?? null,
-            'auto_confirm'   => (bool) config('smschecker.enabled'),
+            'auto_confirm'   => \App\Support\TopupAutoApprove::sms(),
             'expires_at'     => optional($tx->expires_at)->toIso8601String(),
         ];
     }

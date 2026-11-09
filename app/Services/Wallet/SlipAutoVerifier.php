@@ -8,6 +8,7 @@ use App\Services\FortuneBot\FortuneBotClient;
 use App\Services\Thaiprompt\JuntraServerClient;
 use App\Support\Alerts\WalletAlerts;
 use App\Support\Pricing;
+use App\Support\TopupAutoApprove;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -26,7 +27,9 @@ use Illuminate\Support\Facades\Storage;
  *      และในระบบแม่หมอ (ทะเบียน slip_verifications + บิลที่ SMS ตัดไปแล้ว)
  *   3. ปลายทางเป็นบัญชีของร้านเรา — ไม่งั้นสลิปที่โอนให้คนอื่นก็ผ่านได้
  *   4. สลิปอายุไม่เกิน 3 วัน (เท่ากับบอท)
- *   5. ยอดในสลิป ≥ ยอดที่ต้องโอน (เผื่อคลาด 1 สตางค์จากการปัดเศษ)
+ *   5. ยอดในสลิป ≥ ยอดฐานที่ลูกค้าเลือก (2026-11-09: เศษสตางค์จับคู่ SMS ไม่บังคับสำหรับสลิป
+ *      — โอน ฿39.00 ให้บิล ฿39.80 ผ่าน และเครดิต ฿39.00 ตามที่โอนจริง · ต่ำกว่ายอดฐาน = รอแอดมิน)
+ *   5.5 สวิตช์ "อนุมัติอัตโนมัติด้วยสลิป" ในหน้าตั้งค่าวอลเลตเปิดอยู่ (ปิด = รอแอดมินกด)
  *   6. จองเลขอ้างอิงในทะเบียนกลางสำเร็จ (ใครจองก่อนได้ใช้ก่อน — กันส่งพร้อมกันสองระบบ)
  *
  * ผลลัพธ์มี 3 แบบ (เจ้าของกำหนด: "ถ้าเป็นสลิปที่ไม่รู้จัก ก็ให้รอแอดมินอนุมัติ เหมือนเดิม
@@ -72,6 +75,28 @@ class SlipAutoVerifier
             return null;
         }
 
+        return $this->evaluate($tx, $user, $verify, $mode);
+    }
+
+    /**
+     * 🧾 (2026-11-10) สลิปที่ลูกค้าส่งในแชทเพจ — บอท Thaiprompt ตรวจ SlipOK แล้วพักไว้
+     * ผ่านด่านเดียวกับสลิปที่แนบบนเว็บทุกด่าน (ไม่มีรูปให้อ่านซ้ำ ใช้ผลที่ตรวจแล้ว)
+     * การจองในทะเบียนกลางส่ง chat_owner ไปด้วย — Thaiprompt ผูกสลิปที่พักไว้ให้ลูกค้าคนนี้เข้าบิลนี้ได้ครั้งเดียว
+     *
+     * @return array{paid:bool,message:string,decision:string,credited?:float}
+     */
+    public function verifyChatSlip(WalletTransaction $tx, User $user, array $verify, string $chatOwner): array
+    {
+        return $this->evaluate($tx, $user, $verify, 'chat', $chatOwner);
+    }
+
+    /**
+     * ด่านทั้งหมดหลังอ่านสลิปได้แล้ว (ใช้ร่วมกันทั้งสลิปบนเว็บและสลิปจากแชท)
+     *
+     * @return array{paid:bool,message:string,decision:string,credited?:float}
+     */
+    private function evaluate(WalletTransaction $tx, User $user, array $verify, string $mode, ?string $chatOwner = null): array
+    {
         $slip = $this->slipFacts($verify);
         $payable = (float) $tx->amount;
 
@@ -112,15 +137,32 @@ class SlipAutoVerifier
         if (! $this->recentEnough($verify)) {
             return $this->review($tx, ['สลิปเก่าเกิน ' . self::MAX_SLIP_AGE_DAYS . ' วัน', 'สลิปนี้เก่าเกินกว่าที่ระบบตรวจอัตโนมัติได้ค่ะ แอดมินจะตรวจสอบให้นะคะ'], $slip);
         }
-        if ((float) $slip['amount'] + 0.01 < $payable) {
+        // 💰 (2026-11-09) เศษสตางค์ในยอดบิลมีไว้ให้ SMS จับคู่เท่านั้น — สลิประบุตัวรายการได้เองอยู่แล้ว
+        //    ลูกค้าที่โอนด้วยเลขบัญชีมักพิมพ์ยอดกลม (บิล ฿39.80 โอน ฿39.00) = จ่ายครบราคาที่เลือกแล้ว
+        //    → ยอมรับถ้า ≥ ยอดฐาน (meta.base_amount) และเครดิตตามยอดที่โอนจริง
+        //    ต่ำกว่ายอดฐาน = โอนขาดจริง → รอแอดมินเหมือนเดิม (ห้ามอนุมัติเอง)
+        $minimum = self::minimumFor($tx);
+        if ((float) $slip['amount'] + 0.01 < $minimum) {
             return $this->review($tx, [
                 sprintf('ยอดในสลิป %s น้อยกว่ายอดที่ต้องโอน %s', Pricing::format((float) $slip['amount']), Pricing::format($payable)),
                 sprintf('ยอดในสลิป %s น้อยกว่ายอดที่ต้องโอน %s ค่ะ แอดมินจะตรวจสอบให้นะคะ', Pricing::format((float) $slip['amount']), Pricing::format($payable)),
             ], $slip);
         }
+        // โอนครบ (หรือเกิน) = เครดิตตามบิล · ตัดเศษสตางค์ = เครดิตตามยอดที่โอนจริง
+        $credit = (float) $slip['amount'] + 0.01 < $payable
+            ? number_format((float) $slip['amount'], 2, '.', '')
+            : null;
+
+        // สวิตช์ในหน้าตั้งค่าวอลเลต — ปิด = สลิปผ่านครบแต่ให้แอดมินกดยืนยันเอง (ยังไม่จองเลขอ้างอิง)
+        if (! TopupAutoApprove::slip()) {
+            return $this->review($tx, [
+                'สลิปผ่านครบทุกด่าน แต่ปิดการอนุมัติอัตโนมัติด้วยสลิปไว้ (ตั้งค่าวอลเลต) — ตรวจแล้วกดอนุมัติได้เลย',
+                'ได้รับสลิปแล้วค่ะ แอดมินจะยืนยันให้เร็วที่สุดนะคะ',
+            ], $slip);
+        }
 
         // ---- จองในทะเบียนกลาง: ใครจองก่อนได้ใช้ก่อน (ส่งสลิปพร้อมกันสองระบบก็ผ่านได้ใบเดียว)
-        $claim = $this->registry->claim($tx, $slip);
+        $claim = $this->registry->claim($tx, $slip, $chatOwner);
         if ($claim['status'] === SlipRegistry::ALREADY_USED) {
             return $this->duplicate($tx, $user, $slip, 'slip_registry', (array) $claim['used_by']);
         }
@@ -132,15 +174,20 @@ class SlipAutoVerifier
         $this->remember($tx, self::APPROVE, 'ผ่านครบทุกด่าน', $slip + ['claimed' => $claim['status'] === SlipRegistry::CLAIMED, 'mode' => $mode]);
 
         try {
-            $this->wallet->confirmTopupAuto($tx, [
-                'source'      => 'slipok',
-                'trans_ref'   => $ref,
-                'slip_amount' => $slip['amount'],
-                'sender_name' => $slip['sender_name'],
-            ]);
+            $done = $this->wallet->confirmTopupAuto($tx, [
+                'source'           => $chatOwner ? 'slipok_chat' : 'slipok',
+                'auto_approved_by' => $chatOwner ? TopupAutoApprove::SLIP_CHAT : TopupAutoApprove::SLIP,
+                'trans_ref'        => $ref,
+                'slip_amount'      => $slip['amount'],
+                'sender_name'      => $slip['sender_name'],
+            ], $credit);
         } catch (\Throwable $e) {
-            // เครดิตไม่สำเร็จ (เช่นชนกับ SMS ที่เพิ่งยืนยันไปพร้อมกัน) —
-            // ปล่อยให้แอดมินดูต่อ ดีกว่ารายงานว่าสำเร็จทั้งที่เงินยังไม่เข้า
+            // ชนกับ SMS ที่เพิ่งเครดิตบิลนี้ไปพร้อมกัน = เงินเข้าแล้วครั้งเดียว บอกลูกค้าตามจริง
+            $fresh = $tx->fresh();
+            if ($fresh && $fresh->status === 'success') {
+                return ['paid' => true, 'decision' => self::APPROVE, 'credited' => (float) $fresh->amount, 'message' => 'ได้รับเงินแล้วค่ะ เติมเครดิตให้เรียบร้อย ✨'];
+            }
+            // เครดิตไม่สำเร็จด้วยเหตุอื่น — ปล่อยให้แอดมินดูต่อ ดีกว่ารายงานว่าสำเร็จทั้งที่เงินยังไม่เข้า
             Log::warning('SlipAutoVerifier: confirmTopupAuto failed', [
                 'tx_id' => $tx->id, 'err' => $e->getMessage(),
             ]);
@@ -148,7 +195,28 @@ class SlipAutoVerifier
             return ['paid' => false, 'decision' => self::REVIEW, 'message' => 'ระบบกำลังยืนยันรายการนี้อยู่ค่ะ แอดมินจะตรวจสอบให้อีกครั้งนะคะ'];
         }
 
-        return ['paid' => true, 'decision' => self::APPROVE, 'message' => 'ตรวจสลิปผ่านแล้วค่ะ เติมเครดิตให้เรียบร้อย ✨'];
+        $credited = (float) $done->amount;
+        $message  = 'ตรวจสลิปผ่านแล้วค่ะ เติมเครดิต ' . Pricing::format($credited) . ' ให้เรียบร้อย ✨';
+        $over     = round((float) $slip['amount'] - $payable, 2);
+        if ($over >= 1) {
+            // โอนเกิน: เครดิตตามบิล ส่วนเกินแอดมินจัดการ (WalletAlerts::credited แจ้งยอดเกินให้แล้ว)
+            $message .= ' · ยอดที่โอนเกินมา ' . Pricing::format($over) . ' แอดมินจะติดต่อเติมให้หรือคืนให้นะคะ';
+        }
+
+        return ['paid' => true, 'decision' => self::APPROVE, 'credited' => $credited, 'message' => $message];
+    }
+
+    /**
+     * ยอดต่ำสุดในสลิปที่ยอมให้ผ่านเอง = ยอดฐานที่ลูกค้าเลือก (ไม่รวมเศษสตางค์จับคู่)
+     * ถ้าบิลไม่มียอดฐาน หรือยอดฐานไม่สมเหตุสมผล ใช้ยอดบิลเต็มเหมือนเดิม
+     */
+    public static function minimumFor(WalletTransaction $tx): float
+    {
+        $payable = (float) $tx->amount;
+        $base    = (float) (((array) $tx->meta)['base_amount'] ?? 0);
+
+        // ยอดฐานต้องต่างจากยอดบิลแค่เศษสตางค์ (< ฿1) — กันข้อมูลแปลก ๆ ทำให้ยอมรับยอดต่ำเกิน
+        return ($base > 0 && $base <= $payable && $payable - $base < 1) ? $base : $payable;
     }
 
     /**

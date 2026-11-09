@@ -96,6 +96,14 @@ class WalletTransactionResource extends Resource
                 ->content(function (?WalletTransaction $record) {
                     if (!$record) return '—';
                     $lines = [];
+                    // 🧾 อนุมัติอัตโนมัติ (ไม่มีแอดมินกด) — TopupAutoApprove
+                    if ($auto = data_get($record->meta, 'auto_approved.label')) {
+                        $when = data_get($record->meta, 'auto_approved.at');
+                        $lines[] = e('⚡ ' . $auto . ($when ? ' เมื่อ ' . \Illuminate\Support\Carbon::parse($when)->timezone(config('app.timezone'))->format('d/m/Y H:i') : ''));
+                        if ($payable = data_get($record->meta, 'payable_amount')) {
+                            $lines[] = e('ยอดบิล ฿' . number_format((float) $payable, 2) . ' · ลูกค้าโอนตัดเศษสตางค์ เติมตามยอดที่โอนจริง');
+                        }
+                    }
                     if ($record->approved_by) {
                         $who  = optional($record->approver)->name ?? ('#' . $record->approved_by);
                         $when = optional($record->approved_at)->format('d/m/Y H:i');
@@ -164,6 +172,14 @@ class WalletTransactionResource extends Resource
                         default     => 'gray',
                     })
                     ->tooltip(fn (WalletTransaction $r) => data_get($r->meta, 'slip_check.reason'))
+                    ->toggleable(),
+                Tables\Columns\TextColumn::make('auto_approved')
+                    ->label('อนุมัติโดย')
+                    ->state(fn (WalletTransaction $r) => data_get($r->meta, 'auto_approved.label')
+                        ?? ($r->type === 'topup' && $r->status === 'success' && $r->approved_by ? 'แอดมิน' : null))
+                    ->placeholder('—')
+                    ->badge()
+                    ->color(fn ($state) => $state === 'แอดมิน' ? 'gray' : 'success')
                     ->toggleable(),
                 Tables\Columns\TextColumn::make('reference_code')->label('Ref')->copyable()->toggleable(),
                 Tables\Columns\IconColumn::make('slip_path')

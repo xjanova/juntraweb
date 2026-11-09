@@ -620,6 +620,24 @@
 .pay-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .pay-actions .chip { flex: 1 1 auto; justify-content: center; }
 
+/* 📱 (2026-11-09) วิธีจ่ายทีละขั้น — ลูกค้าส่วนใหญ่เปิดแชทบนมือถือเครื่องเดียวกับแอปธนาคาร
+   สแกน QR บนจอตัวเองไม่ได้ ต้องบอกชัด ๆ ว่ากดตรงไหน (ผู้สูงอายุอ่านทีละข้อ) */
+.pay-guide {
+  margin-top: 14px; padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(244, 207, 106, .25);
+  text-align: left;
+}
+.pay-guide + .pay-guide { margin-top: 10px; }
+.pay-guide-h { font-size: 14px; font-weight: 700; color: var(--gold-2, var(--gold, #f4cf6a)); }
+.pay-guide-h small { font-weight: 500; font-size: 11px; color: #9eddae; margin-left: 4px; }
+.pay-steps { margin: 8px 0 0; padding-left: 22px; font-size: 13.5px; line-height: 1.55; }
+.pay-steps li { margin-top: 4px; }
+.pay-steps b { color: var(--gold-2, var(--gold, #f4cf6a)); }
+.pay-guide .chip { margin-top: 10px; width: 100%; justify-content: center; }
+.pay-guide-warn { margin-top: 8px; font-size: 12.5px; color: #f4cf6a; }
+
 /* สำเร็จ — ต้องอ่านออกในแวบเดียวว่า "จ่ายผ่านแล้ว" */
 .pay-done {
   text-align: center; padding: 8px 0 2px;

@@ -6,6 +6,7 @@ use App\Models\SmsCheckerDevice;
 use App\Models\SmsPaymentNotification;
 use App\Models\WalletTransaction;
 use App\Services\Wallet\WalletService;
+use App\Support\TopupAutoApprove;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -130,14 +131,31 @@ class SmsCheckerService
                 $topup = $this->findMatchingTopup($amount, $smsTs);
                 if ($topup) {
                     $matchedTxId = $topup->id;
-                    if ($device->autoConfirms()) {
-                        $this->wallet->confirmTopupAuto($topup, [
-                            'confirmed_via'       => 'sms',
-                            'sms_notification_id' => $notification->id,
-                            'bank'                => $payload['bank'] ?? null,
-                            'sms_ref'             => $payload['reference_number'] ?? null,
-                        ]);
-                        $notification->update(['status' => 'confirmed', 'matched_transaction_id' => $topup->id]);
+                    if ($device->autoConfirms() && TopupAutoApprove::sms()) {
+                        try {
+                            $this->wallet->confirmTopupAuto($topup, [
+                                'confirmed_via'       => 'sms',
+                                'auto_approved_by'    => TopupAutoApprove::SMS,
+                                'sms_notification_id' => $notification->id,
+                                'bank'                => $payload['bank'] ?? null,
+                                'sms_ref'             => $payload['reference_number'] ?? null,
+                            ]);
+                            $notification->update(['status' => 'confirmed', 'matched_transaction_id' => $topup->id]);
+                        } catch (\RuntimeException $e) {
+                            // 🔒 ชนกับสลิป/แอดมินที่เครดิตบิลนี้ไปเสี้ยววินาทีก่อน — ห้ามเครดิตซ้ำ
+                            //    และห้ามให้ exception ล้มทั้ง transaction (บันทึก SMS จะหายไปด้วย)
+                            //    บิลจ่ายแล้ว = SMS นี้คือเงินก้อนเดียวกัน ผูกไว้กับบิลนั้น ไม่ให้เส้นอื่นหยิบไปใช้
+                            $fresh = $topup->fresh();
+                            if ($fresh && $fresh->status === 'success') {
+                                $notification->update(['status' => 'confirmed', 'matched_transaction_id' => $topup->id]);
+                            } else {
+                                $matchedTxId = null;
+                                $topup = null;
+                            }
+                            Log::info('SmsChecker: top-up already left pending when its SMS arrived', [
+                                'tx_id' => $fresh?->id, 'status' => $fresh?->status, 'notification_id' => $notification->id,
+                            ]);
+                        }
                     } else {
                         // Manual mode: stamp the match on the top-up for the admin.
                         $topup->update([
@@ -150,7 +168,7 @@ class SmsCheckerService
                         ]);
                         $notification->update(['status' => 'matched', 'matched_transaction_id' => $topup->id]);
                     }
-                    $matched = true;
+                    $matched = $matchedTxId !== null;
                 }
             }
 
@@ -211,11 +229,12 @@ class SmsCheckerService
 
         if ($tx) {
             $sms = $this->claimableSmsFor($tx);
-            if ($sms && config('smschecker.enabled') && $device->autoConfirms()) {
+            if ($sms && TopupAutoApprove::sms() && $device->autoConfirms()) {
                 try {
                     $confirmed = $this->confirmWithEvidence($tx, $sms, [
-                        'confirmed_via' => 'sms',
-                        'via'           => 'orders_match',
+                        'confirmed_via'    => 'sms',
+                        'auto_approved_by' => TopupAutoApprove::SMS,
+                        'via'              => 'orders_match',
                         'device_id'     => $device->device_id,
                     ]);
                     if ($confirmed) {
