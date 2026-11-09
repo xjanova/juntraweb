@@ -8,6 +8,9 @@
   $topics      = $topics ?? [];
   $awaiting    = $awaiting ?? false;
   $readonly    = $readonly ?? false;
+  // 🧑‍💼 (2026-11-09) adminMode = แอดมินเปิดห้องนี้จากหลังบ้าน (เห็นเหมือนลูกค้า + ปุ่มเทคบอท/คุยแทน) · held = แอดมินคุมห้องอยู่
+  $adminMode   = $adminMode ?? null;
+  $held        = (bool) ($held ?? false);
   $isFree      = ($cost ?? 0) <= 0;
   $exhausted   = $isFree && $dailyLimit > 0 && $dailyLeft <= 0;
 
@@ -43,7 +46,7 @@
   // คำถามของการ์ด = ข้อความล่าสุดของลูกค้าก่อนหน้านั้น (ส่งต่อไปหน้าเลือกไพ่ ไม่ต้องพิมพ์ซ้ำ)
   $lastAsked = null;
   // การ์ดคำนวณมาจาก controller แล้ว (offerCardsFor) เฉพาะข้อความชวนล่าสุด — ไม่ query ต่อข้อความในวิว
-  $initialMessages = $conversation->messages->map(function ($m) use (&$lastAsked, $readonly, $offerCards) {
+  $initialMessages = $conversation->messages->map(function ($m) use (&$lastAsked, $readonly, $offerCards, $adminMode) {
       if ($m->role === 'user') {
           $lastAsked = $m->content;
       }
@@ -56,8 +59,15 @@
           ? trim((string) preg_replace('/\h*(?:\[+\h*\]+|\{+\h*\}+)\h*/u', ' ', (string) $m->content))
           : $m->content;
 
+      // 🧑‍💼 ข้อความของแอดมิน: ลูกค้าเห็น "คุยแทน" เป็นผู้พยากรณ์พูด · หลังบ้านเห็นแยกชัดทุกข้อความ
+      $fromAdmin = $m->fromAdmin();
+
       return [
-          'role'     => $m->role === 'assistant' ? 'assistant' : 'user',
+          'mid'      => $m->id,
+          'role'     => $m->role === 'user' ? 'user'
+              : ($fromAdmin && ($adminMode || $m->admin_as === \App\Models\ChatMessage::AS_ADMIN) ? 'admin' : 'assistant'),
+          'author'   => $adminMode && $fromAdmin ? (optional($m->admin)->name ?: 'แอดมิน') : null,
+          'asOracle' => $adminMode && $m->admin_as === \App\Models\ChatMessage::AS_ORACLE,
           'html'     => \App\Support\Markdown::safe($content),
           'text'     => $content,
           'time'     => optional($m->created_at)->format('H:i'),
@@ -98,19 +108,24 @@
          qaOverText: @js(\App\Support\ReadingQaClock::overMessage($room)),
          qaWrap: @js($qaWrap ?? null),
          freshUrl: @js(route('chat.index', ['room' => $room, 'fresh' => 1])),
-         idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
+         idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) && ! $adminMode ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
          topics: @js($topics),
          awaiting: @js((bool) $awaiting),
          menuOpen: @js((bool) ($menuOpen ?? false)),
          dailyLimit: @js((int) $dailyLimit),
          dailyLeft: @js((int) $dailyLeft),
-         blocked: @js((bool) $exhausted),
-         autosend: @js($autosend ?? null),
+         blocked: @js((bool) $exhausted && ! $held && ! $adminMode),
+         autosend: @js($adminMode ? null : ($autosend ?? null)),
          sendUrl: @js(route('chat.send')),
+         {{-- 🧑‍💼 ข้อความใหม่จากแอดมิน (ลูกค้า) / ทุกข้อความใหม่ของห้อง (หลังบ้าน) --}}
+         feedUrl: @js($adminMode['feedUrl'] ?? (! $readonly && $conversation->user_id ? route('chat.feed', $conversation) : null)),
+         lastId: @js((int) ($conversation->messages->max('id') ?? 0)),
+         held: @js($held),
+         admin: @js($adminMode),
          transcribeUrl: @js(route('chat.transcribe')),
          tarotBeginUrl: @js(route('tarot.begin')),
          topupUrl: @js(route('wallet.topup')),
-         canTopupInChat: @js((bool) ($gate['allowed'] ?? false) && !($readonly ?? false)),
+         canTopupInChat: @js((bool) ($gate['allowed'] ?? false) && !($readonly ?? false) && ! $adminMode),
          topupCreateUrl: @js(route('chat.topup.store')),
          topupStatusUrl: @js(route('chat.topup.status', ['tx' => '__ID__'])),
          topupSlipUrl: @js(route('chat.topup.slip', ['tx' => '__ID__'])),
@@ -441,13 +456,39 @@
           @endif
         </div>
 
+        @if ($adminMode)
+          {{-- 🧑‍💼 (2026-11-09) แถบของแอดมิน — ลูกค้าไม่เห็นแถบนี้ · เห็นห้องเหมือนลูกค้าทุกอย่างนอกจากแถบนี้ --}}
+          <div class="admin-bar" role="region" aria-label="ควบคุมห้องของแอดมิน">
+            <div class="admin-bar-row">
+              <span class="admin-chip" :class="adminState.paused ? 'is-human' : 'is-bot'"
+                    x-text="adminState.paused ? '🧑‍💼 แอดมินคุมห้อง' + (adminState.by ? ' · ' + adminState.by : '') : '🤖 บอทตอบเองอยู่'"></span>
+              <span class="admin-chip" :class="adminState.live && 'is-live'"
+                    x-text="adminState.live ? '● ลูกค้าเปิดห้องอยู่' : '○ ลูกค้าไม่ได้เปิดห้อง'"></span>
+            </div>
+            <div class="admin-bar-row">
+              <button type="button" class="admin-btn is-take" x-show="!adminState.paused" :disabled="adminBusy" @click="adminToggle('take')">✋ เทคบอท</button>
+              <button type="button" class="admin-btn is-release" x-show="adminState.paused" x-cloak :disabled="adminBusy" @click="adminToggle('release')">🤖 คืนให้บอท</button>
+              <div class="admin-voice" role="group" aria-label="ลูกค้าเห็นว่าใครพูด">
+                <button type="button" :class="adminAs === 'oracle' && 'is-on'" :aria-pressed="(adminAs === 'oracle').toString()" @click="adminAs = 'oracle'">🔮 คุยแทน{{ $P['short'] }}</button>
+                <button type="button" :class="adminAs === 'admin' && 'is-on'" :aria-pressed="(adminAs === 'admin').toString()" @click="adminAs = 'admin'">🧑‍💼 พูดเป็นแอดมิน</button>
+              </div>
+            </div>
+            <div class="admin-note">
+              {{ $adminMode['userLabel'] }} ·
+              <span x-text="adminState.idle_minutes > 0 ? 'เงียบ ' + adminState.idle_minutes + ' นาที บอทกลับมาตอบเอง' : 'ไม่คืนบอทเอง ต้องกด คืนให้บอท'"></span>
+            </div>
+          </div>
+        @endif
+
         <div class="chat-log" x-ref="log" @scroll="onScroll"
              role="log" aria-live="polite" aria-relevant="additions"
              aria-label="บทสนทนากับ{{ $P['name'] }}">
 
           <template x-for="m in messages" :key="m.id">
-            <div class="msg" :class="'is-' + (m.state === 'system' ? 'system' : (m.role === 'user' ? 'user' : 'ai'))">
-              <div class="msg-head" x-show="m.role === 'assistant' && m.state !== 'system'" x-text="persona.name">{{ $P['name'] }}</div>
+            <div class="msg" :class="'is-' + (m.state === 'system' ? 'system' : (m.role === 'user' ? 'user' : (m.role === 'admin' ? 'ai is-admin' : 'ai')))">
+              <div class="msg-head" x-show="(m.role === 'assistant' || m.role === 'admin') && m.state !== 'system'"
+                   x-text="m.role !== 'admin' ? persona.name
+                     : (m.author ? '🧑‍💼 ' + m.author + (m.asOracle ? ' · คุยแทน' + persona.short : ' · แอดมิน') : '🧑‍💼 แอดมิน')">{{ $P['name'] }}</div>
               <div class="msg-body" x-show="m.kind !== 'topup'" x-html="m.html"></div>
 
               {{-- ═══ การ์ดแพ็กเกจเปิดไพ่ ═══════════════════════════════
@@ -847,14 +888,16 @@
                 maxlength="2000"
                 :disabled="blocked"
                 :title="blocked ? (blockedReason || 'วันนี้คุยครบโควตาแล้วค่ะ') : ''"
-                :placeholder="blocked
+                :placeholder="cfg.admin
+                    ? (adminAs === 'oracle' ? 'พิมพ์ตอบแทน' + persona.short + ' — ลูกค้าเห็นเป็น' + persona.short + 'พูด' : 'พิมพ์ตอบในนามแอดมิน')
+                    : (blocked
                     ? (blockedReason || 'วันนี้คุยครบแล้ว — พรุ่งนี้มาคุยกันใหม่นะคะ')
-                    : 'พิมพ์คุยกับ' + persona.short + 'ได้เลย... (Shift+Enter ขึ้นบรรทัดใหม่)'"
+                    : 'พิมพ์คุยกับ' + persona.short + 'ได้เลย... (Shift+Enter ขึ้นบรรทัดใหม่)')"
                 autocomplete="off"
                 aria-label="ข้อความถึง{{ $P['short'] }}"></textarea>
 
               {{-- 🎙️ (2026-11-07) กดพูดแทนพิมพ์ — ได้ข้อความลงช่องพิมพ์ ลูกค้าตรวจแล้วกดส่งเอง · ซ่อนถ้าเครื่องนี้ใช้ไมค์ไม่ได้ --}}
-              <button type="button" class="chat-mic" x-show="mic.supported" x-cloak
+              <button type="button" class="chat-mic" x-show="mic.supported && !cfg.admin" x-cloak
                       :class="{ 'is-on': mic.state === 'listening', 'is-busy': mic.state === 'working' }"
                       :disabled="thinking || blocked || mic.state === 'working'"
                       @click="micToggle()"
@@ -969,6 +1012,16 @@ document.addEventListener('alpine:init', () => {
       rating: (cfg.qaWrap && cfg.qaWrap.rating) || 0,
       reviewed: !!(cfg.qaWrap && cfg.qaWrap.reviewed),
     },
+    // 🧑‍💼 (2026-11-09) แอดมินคุมห้อง: held = บอทหยุด (ลูกค้าพิมพ์ได้แม้โควตา/เครดิตหมด) · lastId = ข้อความล่าสุดที่หน้าจอมี
+    held: !!cfg.held,
+    heldBlock: null,
+    lastId: cfg.lastId || 0,
+    feedTimer: null,
+    feedBusy: false,
+    // หลังบ้าน: สถานะห้อง · พูดเป็นใคร (oracle = คุยแทนผู้พยากรณ์ · admin = ป้ายแอดมิน)
+    adminState: (cfg.admin && cfg.admin.state) || { paused: false, live: false, idle_minutes: 0 },
+    adminAs: 'oracle',
+    adminBusy: false,
     // 💤 ลูกค้าเงียบนาน → ผู้พยากรณ์ทักตาม (ข้อความในหน้าเว็บ ไม่ถาม AI ไม่คิดเงิน)
     lastActive: Date.now(),
     nudges: 0,
@@ -996,7 +1049,8 @@ document.addEventListener('alpine:init', () => {
     payTimer: null,
     // ห้องพยากรณ์: แพ็กเกจบนโต๊ะ (ทำตัวเหมือนข้อความที่มีการ์ด — ใช้ startOffer/payAndOpen ตัวเดิม) · แผ่นแชทมือถือกางอยู่ไหม
     table: { offerBusy: false, question: '', menu: !!cfg.menuOpen },
-    sheet: false,
+    // 🧑‍💼 หลังบ้านกางแชทไว้ก่อน (กรอบในหลังบ้านแคบ = เลย์เอาต์มือถือ แชทพับอยู่ใต้โต๊ะ)
+    sheet: !!cfg.admin,
 
     // 🎙️ ไมค์: เบราว์เซอร์ถอดเองก่อน (ฟรี) · ถอดเองไม่ได้ → อัดเสียง ≤ 25 วิ ส่งให้เซิร์ฟเวอร์ถอด
     mic: { supported: false, mode: null, state: 'idle', note: '', rec: null, media: null, chunks: [], stopTimer: null, base: '' },
@@ -1155,6 +1209,123 @@ document.addEventListener('alpine:init', () => {
       clearInterval(this.clockTimer);
       clearInterval(this.billTimer);
       clearInterval(this.payTimer);   // ออกจากหน้าแล้วต้องเลิก poll
+      clearTimeout(this.feedTimer);
+      this.feedTimer = false;   // false = ออกจากหน้าแล้ว รอบที่ค้างอยู่ไม่ตั้งเวลาต่อ
+    },
+
+    /* ---------- 🧑‍💼 (2026-11-09) แอดมินคุมห้อง ---------- */
+    /** ถามหาข้อความใหม่เป็นระยะ — แอดมินคุมห้อง/หลังบ้าน ทุก 3 วิ · ปกติทุก 12 วิ · แท็บที่ซ่อนอยู่ไม่ถาม */
+    startFeed() {
+      if (!cfg.feedUrl) return;
+      const tick = async () => {
+        if (!document.hidden) await this.pollFeed();
+        if (this.feedTimer === false) return;   // ออกจากหน้าแล้ว
+        this.feedTimer = setTimeout(tick, (cfg.admin || this.held) ? 3000 : 12000);
+      };
+      this.feedTimer = setTimeout(tick, cfg.admin ? 1500 : 5000);
+    },
+    async pollFeed() {
+      // ระหว่างส่งข้อความอยู่ไม่ถาม — กันฟองข้อความเดียวกันขึ้นซ้ำ (ข้อความที่เพิ่งส่งยังไม่มี mid)
+      if (this.feedBusy || this.thinking) return;
+      this.feedBusy = true;
+      try {
+        const url = cfg.feedUrl + (cfg.feedUrl.includes('?') ? '&' : '?') + 'after=' + this.lastId;
+        const r = await fetch(url, {
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        (j.messages || []).forEach((m) => this.addFromServer(m));
+        if (j.state) this.adminState = j.state;
+        this.setHeld(j.state ? !!j.state.paused : !!j.held);
+      } catch (_) {
+        // เครือข่ายสะดุด — รอบหน้าถามใหม่เอง
+      } finally {
+        this.feedBusy = false;
+      }
+    },
+    addFromServer(m) {
+      if (!m || !m.mid || this.messages.some((x) => x.mid === m.mid)) return;
+      this.lastId = Math.max(this.lastId, m.mid);
+      this.messages.push(Object.assign({ id: ++this.seq }, m));
+      this.lastActive = Date.now();
+      this.scrollToBottom();
+    },
+    /** ลูกค้า: แอดมินคุมห้อง = เปิดช่องพิมพ์ชั่วคราว (โควตา/เครดิตหมดก็ตอบแอดมินได้) · คืนบอทแล้วกลับสถานะเดิม */
+    setHeld(h) {
+      if (h === this.held) return;
+      this.held = h;
+      if (cfg.admin) return;
+      if (h && this.blocked) {
+        this.heldBlock = this.blockedReason || '';
+        this.blocked = false;
+      } else if (!h && this.heldBlock !== null) {
+        this.blocked = true;
+        this.blockedReason = this.heldBlock;
+        this.heldBlock = null;
+      }
+    },
+    /** หลังบ้าน: พิมพ์ในห้อง = บอทหยุดทันที · ลูกค้าเห็นภายในไม่กี่วินาที */
+    async adminSend(text) {
+      const a = cfg.admin;
+      const asOracle = this.adminAs === 'oracle';
+      const mine = this.push('admin', this.escape(text).replace(/\n/g, '<br>'), 'ok', text, { author: a.me, asOracle });
+      this.draft = '';
+      this.$nextTick(() => this.autoGrow());
+      this.thinking = true;
+      try {
+        const r = await fetch(a.sayUrl, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ message: text, as: asOracle ? 'oracle' : 'admin' }),
+        });
+        let j = {};
+        try { j = await r.json(); } catch (_) { /* ไม่ใช่ JSON */ }
+        if (!r.ok || !j.message) {
+          mine.state = 'failed';
+          this.say(r.status === 419 ? 'เซสชันหมดอายุ — รีเฟรชหน้าแล้วลองใหม่' : (j.error || j.message || 'ส่งไม่สำเร็จ ลองใหม่อีกครั้ง'));
+          return;
+        }
+        mine.mid = j.message.mid;
+        this.lastId = Math.max(this.lastId, j.message.mid);
+        if (j.state) this.adminState = j.state;
+      } catch (e) {
+        mine.state = 'failed';
+        this.say('เครือข่ายมีปัญหา ข้อความยังไม่ถึงลูกค้า — กด "ลองส่งใหม่" ได้เลย');
+      } finally {
+        this.thinking = false;
+        this.$refs.input?.focus();
+      }
+    },
+    /** ปุ่มเทคบอท (take) / คืนให้บอท (release) */
+    async adminToggle(what) {
+      if (this.adminBusy) return;
+      this.adminBusy = true;
+      try {
+        const r = await fetch(what === 'take' ? cfg.admin.takeUrl : cfg.admin.releaseUrl, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+          },
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.state) this.adminState = j.state;
+        else this.say('ทำไม่สำเร็จ ลองใหม่อีกครั้ง');
+      } catch (_) {
+        this.say('เครือข่ายมีปัญหา ลองใหม่อีกครั้ง');
+      } finally {
+        this.adminBusy = false;
+      }
     },
 
     /** วินาทีที่เหลือถึงเวลา ts (epoch วินาทีของเซิร์ฟเวอร์) */
@@ -1285,7 +1456,7 @@ document.addEventListener('alpine:init', () => {
     },
     /** ลูกค้าเงียบนาน → ทักตาม 1 ครั้ง (ห้องคุยทั่วไป) / 2 ครั้ง (ระหว่างเวลาถามต่อ ครั้งที่สองชวนกด "พอแล้ว") */
     idleTick() {
-      if (!cfg.idleNudge || this.thinking || this.blocked || document.hidden || this.draft.trim()) return;
+      if (!cfg.idleNudge || this.held || this.thinking || this.blocked || document.hidden || this.draft.trim()) return;
       const last = this.messages[this.messages.length - 1];
       // การ์ดยืนยันจ่ายรอลูกค้าตัดสินใจเอง — ไม่ทักซ้ำ
       if (!last || last.role !== 'assistant' || last.kind === 'topup' || last.kind === 'confirm_pay') return;
@@ -1391,6 +1562,8 @@ document.addEventListener('alpine:init', () => {
       this.$watch('draft', () => { this.lastActive = Date.now(); });
       this.startClock();
       this.watchBill();
+      // 🧑‍💼 ข้อความจากแอดมิน (ลูกค้า) / ทุกข้อความใหม่ของห้อง (หลังบ้าน)
+      this.startFeed();
       // คำถามที่ติดมาจากหน้าผลไพ่ — ยิงครั้งเดียวให้คำตอบขึ้นเลยโดยไม่ต้องพิมพ์ซ้ำ
       // (เซิร์ฟเวอร์ pull() ออกจาก session แล้ว รีเฟรชจึงไม่ยิงซ้ำ/ไม่คิดเงินซ้ำ)
       if (cfg.autosend && String(cfg.autosend).trim()) {
@@ -1755,6 +1928,7 @@ document.addEventListener('alpine:init', () => {
     async send(overrideText = null, reuseIdem = null) {
       const text = (overrideText !== null ? overrideText : this.draft).trim();
       if (!text || this.thinking || this.blocked) return;
+      if (cfg.admin) { this.adminSend(text); return; }   // 🧑‍💼 หลังบ้าน: ส่งในนามแอดมิน ไม่ผ่านบอท
 
       // ใช้คีย์เดิมเมื่อ "ลองใหม่" ข้อความเดิม — เซิร์ฟเวอร์จึงกันการตัดเงินซ้ำ
       // ได้จริง (ของเดิมสุ่มคีย์ใหม่ทุกครั้ง ตัวกันซ้ำจึงไม่เคยทำงานเลย)
@@ -1847,6 +2021,12 @@ document.addEventListener('alpine:init', () => {
 
         // สำเร็จ — ใช้ตัวเลขและสถานะจากเซิร์ฟเวอร์ ไม่เดาเอง
         mine.state = 'ok';
+        // 🧑‍💼 แอดมินคุมห้องอยู่ — ข้อความถึงแอดมินแล้ว คำตอบมาทาง feed (ไม่มีฟองคำตอบจากบอท ไม่คิดเงิน)
+        if (j.held) {
+          this.setHeld(true);
+          this.lastActive = Date.now();
+          return;
+        }
         if (typeof j.daily_left === 'number') this.dailyLeft = j.daily_left;
         if (typeof j.daily_limit === 'number') this.dailyLimit = j.daily_limit;
         this.awaiting = !!j.awaiting;

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AccountController;
+use App\Http\Controllers\AdminChatController;
 use App\Http\Controllers\AuspiciousController;
 use App\Http\Controllers\Auth\ThaipromptController;
 use App\Http\Controllers\ChatController;
@@ -168,6 +169,11 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
     Route::get('/from-free/{reading}', 'fromFreeReading')
         ->middleware('auth')
         ->name('from-free');
+    // 🧑‍💼 (2026-11-09) หน้าห้องถามหาข้อความใหม่จากแอดมิน (แอดมินคุมห้อง/คุยแทนผู้พยากรณ์)
+    Route::get('/feed/{conversation}', 'feed')
+        ->middleware(['auth', 'throttle:40,1'])
+        ->whereNumber('conversation')
+        ->name('feed');
     Route::get('/conversation/{conversation}', 'show')
         ->middleware('auth')
         ->name('show');
@@ -181,6 +187,20 @@ Route::prefix('chat')->name('chat.')->controller(ChatController::class)->group(f
         ->where('any', '.*')
         ->name('continue.invalid');
 });
+
+// 🧑‍💼 (2026-11-09) แอดมินคุยกับลูกค้าในห้องผู้พยากรณ์ — หน้าห้องแบบเดียวกับที่ลูกค้าเห็น + ปุ่มเทคบอท/คุยแทน
+//    หลังบ้าน /admin → แชทผู้พยากรณ์ (App\Filament\Pages\ChatConsole) ฝังหน้านี้ไว้ · role admin เท่านั้น
+Route::middleware(['auth', \App\Http\Middleware\EnsureAdmin::class])
+    ->prefix('admin-chat')->name('admin-chat.')
+    ->controller(AdminChatController::class)
+    ->whereNumber('conversation')
+    ->group(function () {
+        Route::get('/{conversation}', 'room')->name('room');
+        Route::get('/{conversation}/feed', 'feed')->middleware('throttle:120,1')->name('feed');
+        Route::post('/{conversation}/say', 'say')->middleware('throttle:60,1')->name('say');
+        Route::post('/{conversation}/take', 'take')->middleware('throttle:60,1')->name('take');
+        Route::post('/{conversation}/release', 'release')->middleware('throttle:60,1')->name('release');
+    });
 
 // เติมเงินจบในห้องแชท (สแกน QR แล้วเครดิตเข้าเอง) — ให้ลูกค้าไม่ต้องเดินออก
 // จากบทสนทนาเหมือนบอท FB/LINE. throttle:topup ใช้ตัวเดียวกับหน้าเติมเงินปกติ
