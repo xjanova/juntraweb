@@ -104,9 +104,16 @@ class ChatTopupController extends Controller
         $meta = (array) $tx->meta;
         $account = ! empty($meta['promptpay_id'])
             ? ['promptpay_id' => (string) $meta['promptpay_id'], 'name' => (string) ($meta['promptpay_name'] ?? ''), 'source' => 'bill',
-                // บิลก่อน 2026-11-09 ไม่ได้จดเลขบัญชีไว้ = แสดงแค่ QR (ไม่ไปถาม Thaiprompt ใหม่ระหว่างรอเงินเข้า)
                 'transfer' => is_array($meta['transfer'] ?? null) ? $meta['transfer'] : null]
             : PayoutAccount::resolve($user);
+        // บิลก่อน 2026-11-09 ไม่ได้จดเลขบัญชีไว้ — ยืมบัญชีปัจจุบันมาแสดง เฉพาะเมื่อยังเป็นพร้อมเพย์เดียวกับในบิล
+        // (เงินโอนเข้าบัญชีอื่นที่ระบบ SMS ไม่ได้ดู จะไม่ตัดบิล จึงห้ามโชว์บัญชีที่ไม่ใช่ของบิลนี้)
+        if ($account && ($account['source'] ?? '') === 'bill' && ! array_key_exists('transfer', $meta)) {
+            $current = PayoutAccount::resolve($user);
+            if ($current && ($current['promptpay_id'] ?? '') === $account['promptpay_id']) {
+                $account['transfer'] = $current['transfer'] ?? null;
+            }
+        }
         if (! $account) {
             return response()->json(['error' => 'ระบบเติมเงินยังไม่พร้อมชั่วคราว กรุณาติดต่อแอดมินค่ะ', 'reason_code' => 'promptpay_unset'], 503);
         }
