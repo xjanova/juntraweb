@@ -134,6 +134,9 @@ class ChatSiteHelpTest extends TestCase
             'ทันเวลา' => ['งานจะเสร็จทันเวลาไหม'],
             'ห้องนอน' => ['ย้ายเตียงไปห้องไหนดี'],
             'ขอดูดวง' => ['ดูดวงความรักให้หน่อยค่ะ'],
+            'แฟนทักทางไลน์' => ['แฟนเก่าทักมาทางไลน์ จะกลับมาเหมือนเดิมได้ไหม'],
+            'ชีวิตยุ่งยาก' => ['ชีวิตช่วงนี้ยุ่งยากมากเลยค่ะ'],
+            'งงใจตัวเอง' => ['งงกับความรู้สึกตัวเองมาก'],
         ];
     }
 
@@ -158,6 +161,10 @@ class ChatSiteHelpTest extends TestCase
             ['ขอคุยกับแอดมินหน่อย', 'contact_admin'],
             ['เว็บ ค้าง กดไม่ได้เลย', 'site_bug'],
             ['เปิดไพ่ยังไงคะ', 'open_cards'],
+            ['ไม่คุ้นกับระบบเว็บเลยค่ะ', 'prefer_line'],
+            ['ใช้เว็บไม่เป็น ดูทางไลน์ได้ไหม', 'prefer_line'],
+            ['ไม่ค่อยสะดวกเหมือนเดิม', 'prefer_line'],
+            ['อยากกลับไปดูในเพจแบบเดิม', 'prefer_line'],
         ];
     }
 
@@ -251,6 +258,36 @@ class ChatSiteHelpTest extends TestCase
         $this->assertStringContainsString($ref, $reply);
         $this->assertStringContainsString('"ดู QR จ่ายต่อ"', $reply);
         $this->assertStringContainsString('"ยกเลิกรายการนี้"', $reply);
+    }
+
+    public function test_a_customer_who_struggles_with_the_web_is_offered_the_real_line_bot_without_alerting_the_team(): void
+    {
+        Setting::put('telegram_bot_token', '123456789:AAHfakeTokenForTestsOnly_abcdefghij', 'telegram', true);
+        Setting::put('telegram_chat_id', '555000111', 'telegram');
+        Setting::put('telegram_alerts_enabled', '1', 'telegram');
+        $user = $this->member();
+
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ไม่คุ้นกับระบบเว็บเลยค่ะ งงไปหมด', 'room' => 'maemor'])
+            ->assertOk()->assertJsonPath('kind', 'help');
+
+        $help = (string) ($this->sendCalls()[0]['site_help'] ?? '');
+        $this->assertStringContainsString('## ' . $this->title('prefer_line'), $help);
+        // LINE OA จริงจาก config/business.php (ตัวเดียวกับ line_bot_basic_id ของบอทแม่หมอบน Thaiprompt) — ห้ามแต่ง
+        $line = (array) config('business.social.line');
+        $this->assertStringContainsString((string) $line['url'], $help);
+        $this->assertStringContainsString((string) $line['label'], $help);
+        $this->assertStringNotContainsString('{line}', $help);
+        // งงเว็บไม่ใช่เว็บพัง — ไม่แจ้งทีมงาน
+        $this->assertFalse(Cache::has('alert:throttle:' . sha1("site-help:prefer_line:u{$user->id}")));
+        $this->assertFalse(Cache::has('alert:throttle:' . sha1("site-help:site_bug:u{$user->id}")));
+    }
+
+    public function test_line_is_not_pushed_into_ordinary_how_to_answers(): void
+    {
+        $block = SiteHelp::block(SiteHelp::match('ชำระตรงไหนค่ะ'), $this->member());
+
+        $this->assertStringNotContainsString((string) config('business.social.line.url'), $block);
+        $this->assertStringNotContainsString($this->title('prefer_line'), $block);
     }
 
     public function test_the_switch_turns_the_guide_off(): void
