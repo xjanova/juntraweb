@@ -74,7 +74,11 @@ document.addEventListener('alpine:init', () => {
 
       [a, b].forEach((v) => {
         v.muted = true;
-        v.addEventListener('ended', () => { if (v === this.front) this.next(); });
+        // 🕯️ (2026-11-10) เจ้าของ: "ให้ดูสุขุม ไม่ใช่เต้น ดุกดิ๊กดูไม่ขลังเลย" → เล่นช้ากว่าจริง
+        //   (load() คืนค่า playbackRate เป็น defaultPlaybackRate ทุกครั้ง จึงตั้งที่ default)
+        v.defaultPlaybackRate = 0.72;
+        v.playbackRate = 0.72;
+        v.addEventListener('ended', () => { if (v === this.front) this.rest(); });
         v.addEventListener('error', () => this.fail(v));
       });
 
@@ -150,6 +154,8 @@ document.addEventListener('alpine:init', () => {
     },
 
     resume() {
+      if (this._rest) return;                       // กำลังพักนิ่งอยู่ — ไม่ต้องรีบเล่น
+      if (this.front?.ended) { this.rest(); return; } // ถูกหยุดระหว่างพัก → พักต่อก่อนค่อยขยับ
       if (this.front) { this.play(this.front); return; }
       const i = this.pick();
       if (i < 0) return;
@@ -159,7 +165,15 @@ document.addEventListener('alpine:init', () => {
       this.play(this.front);
     },
 
-    pause() { this.front?.pause(); },
+    pause() { this.front?.pause(); clearTimeout(this._rest); this._rest = 0; },
+
+    // จบคลิปแล้ว (เฟรมสุดท้าย = ภาพนิ่งของห้อง) ส่วนใหญ่พักนิ่งค้างไว้ 5–12 วิ ก่อนขยับครั้งต่อไป
+    //   เดิมเล่นต่อกันรัว ๆ ไม่มีพัก ผู้พยากรณ์เลยดูขยับตลอดเวลา
+    rest() {
+      clearTimeout(this._rest);
+      const ms = Math.random() < 0.7 ? 5000 + Math.random() * 7000 : 0;
+      this._rest = setTimeout(() => { this._rest = 0; if (this.visible && !document.hidden) this.next(); }, ms);
+    },
 
     play(v) {
       v.currentTime = v.ended ? 0 : v.currentTime;
