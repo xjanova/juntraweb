@@ -16,9 +16,14 @@
 
 // ลำดับความสำคัญ — สถานะที่อยู่ซ้ายชนะ (กำลังคิดสำคัญกว่าลูกค้ากำลังพิมพ์)
 const PRIORITY = ['think', 'talk', 'reveal', 'listen'];
-// น้ำหนักการสุ่มของท่า "รอ" — กระพริบตา/เอียงศีรษะบ่อยสุด เหลือบมองแทรกเป็นระยะ
-const IDLE_WEIGHT = { wait: 3, glance: 2 };
-const HURRY_RATE = 1.8;
+// น้ำหนักการสุ่มของท่า "รอ" (ชื่อท่า → น้ำหนัก ไม่ระบุ = 1) — แม่หมอเหลือท่ารอท่าเดียว (นั่งนิ่ง หายใจ กะพริบตา)
+const IDLE_WEIGHT = { wait: 3 };
+// 🕯️ (2026-11-10) เจ้าของ: "ให้ดูสุขุม ไม่ใช่เต้น ดุกดิ๊กดูไม่ขลังเลย"
+//   เล่นช้ากว่าจริง · เร่งกลับท่าตั้งต้นแค่นิดเดียว (เดิม 1.8 เท่า = สะบัดหัวกลับ) · ส่วนใหญ่พักนิ่งที่ภาพตั้งต้น
+const PLAY_RATE = 0.72;
+const HURRY_RATE = 1.15;
+const REST_CHANCE = 0.7;               // จบท่ารอแล้ว พักนิ่งกี่เปอร์เซ็นต์ของครั้ง
+const REST_MS = [5000, 12000];         // พักนาน 5–12 วิ
 
 /** เครื่องนี้เล่นคลิปพื้นใสได้ไหม (และควรเล่นไหม) */
 export function posesSupported() {
@@ -55,6 +60,7 @@ export function attachPoses(actor, data) {
         v.disablePictureInPicture = true;
         v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.setAttribute('aria-hidden', 'true'); v.tabIndex = -1;
         v.style.height = `${(scale * 100).toFixed(2)}%`;
+        v.defaultPlaybackRate = PLAY_RATE;
         actor.appendChild(v);
         return v;
     });
@@ -125,7 +131,7 @@ export function attachPoses(actor, data) {
         const v = back().dataset.clip === clip.name ? back() : (st.front || vids[0]);
         st.front = v; st.cur = clip; st.hurrying = false;
         load(v, clip);
-        v.playbackRate = 1;
+        v.playbackRate = PLAY_RATE;
         try { v.currentTime = 0; } catch (_) { /* ยังไม่มีข้อมูล — เริ่มที่ 0 อยู่แล้ว */ }
         const p = v.play();
         if (p && p.catch) {
@@ -150,11 +156,11 @@ export function attachPoses(actor, data) {
         const v = e.currentTarget;
         if (v !== st.front) return;
         st.hurrying = false;
-        // ท่ารอ: บางครั้งพักที่ภาพนิ่งสั้น ๆ (CSS หายใจทำงานต่อ) ไม่ให้ขยับตลอดเวลาแบบหุ่น
+        // ท่ารอ: ส่วนใหญ่พักนิ่งที่ภาพตั้งต้นนาน ๆ (CSS หายใจทำงานต่อ) — นิ่งสุขุม ไม่ขยับตลอดเวลาแบบหุ่น
         const m = mood();
-        if (m === 'idle' && !st.pulses.length && Math.random() < 0.35) {
+        if (m === 'idle' && !st.pulses.length && Math.random() < REST_CHANCE) {
             hideAll();
-            st.rest = setTimeout(start, 1200 + Math.random() * 2600);
+            st.rest = setTimeout(start, REST_MS[0] + Math.random() * (REST_MS[1] - REST_MS[0]));
             return;
         }
         start();
