@@ -74,7 +74,7 @@ final class ReadingCooldown
         $name = TarotSpreads::get($spreadKey)['name_th'] ?? 'ไพ่ชุดนี้';
         $days = self::days($spreadKey);
 
-        return "ครูบาอาจารย์ห้ามเปิด{$name}ซ้ำภายใน {$days} วันค่ะลูก — ลูกเปิดไปเมื่อ "
+        return "ครูบาอาจารย์ห้ามเปิด{$name}ซ้ำภายใน {$days} วันค่ะ — คุณเปิดไปเมื่อ "
             .self::thaiDate($blocking->created_at).' คำทำนายเดิมยังใช้ได้อยู่ '
             .'เปิดใหม่ได้ตั้งแต่ '.self::thaiDate(self::availableAt($blocking, $spreadKey))
             .' (ยังไม่มีการหักเครดิต)';

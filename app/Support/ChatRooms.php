@@ -119,10 +119,10 @@ final class ChatRooms
         return (string) (self::get(self::normalize($key))['self'] ?? 'แม่หมอ');
     }
 
-    /** คำที่ผู้พยากรณ์ห้องนี้ใช้เรียกลูกค้า (บุษบา → คุณ · แม่หมอ/คุณไสย → ลูก) */
+    /** คำที่ผู้พยากรณ์ห้องนี้ใช้เรียกลูกค้า — ทุกห้องเรียก "คุณ" (เจ้าของสั่ง 2026-11-10 เลิกใช้ "ลูก") */
     public static function customer(string $key): string
     {
-        return (string) (self::get(self::normalize($key))['customer'] ?? 'ลูก');
+        return (string) (self::get(self::normalize($key))['customer'] ?? 'คุณ');
     }
 
     /**

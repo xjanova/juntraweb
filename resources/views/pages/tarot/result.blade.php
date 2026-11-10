@@ -250,11 +250,11 @@
       <div class="panel reading-wait" style="margin-top:44px;text-align:center" role="status" aria-live="polite"
            data-status-url="{{ route('tarot.status', $reading) }}">
         <div class="reading-wait-moon" aria-hidden="true"></div>
-        <div class="eyebrow" style="display:inline-flex;margin-top:18px">แม่หมอกำลังอ่านไพ่ของลูก</div>
+        <div class="eyebrow" style="display:inline-flex;margin-top:18px">แม่หมอกำลังอ่านไพ่ของคุณ</div>
         <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:46ch;margin:10px auto 0">
           แม่หมอกำลังเพ่งไพ่ทั้ง {{ $count }} ใบทีละตำแหน่ง ใช้เวลาประมาณ 15 วินาทีถึง 1 นาที
           <span class="reading-wait-elapsed" style="color:var(--gold)"></span><br>
-          ปิดหน้านี้ได้ คำทำนายจะรออยู่ในประวัติการดูดวงของลูก
+          ปิดหน้านี้ได้ คำทำนายจะรออยู่ในประวัติการดูดวงของคุณ
         </p>
       </div>
       <script>
@@ -284,7 +284,7 @@
         <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:48ch;margin:12px auto 20px">
           ขออภัยค่ะ แม่หมออ่านไพ่ชุดนี้ไม่สำเร็จ
           @if ((float) data_get($reading->payload, 'cost', 0) > 0)
-            — เครดิต ฿{{ number_format((float) data_get($reading->payload, 'cost'), 0) }} คืนเข้ากระเป๋าของลูกเรียบร้อยแล้ว
+            — เครดิต ฿{{ number_format((float) data_get($reading->payload, 'cost'), 0) }} คืนเข้ากระเป๋าของคุณเรียบร้อยแล้ว
           @endif
           ลองเปิดไพ่ใหม่อีกครั้งได้เลยนะคะ
         </p>

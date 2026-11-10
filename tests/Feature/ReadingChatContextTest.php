@@ -158,7 +158,7 @@ class ReadingChatContextTest extends TestCase
 
         $this->assertStringContainsString('แพ็กเกจ: พยากรณ์ 12 เดือน (ไพ่ 12 ใบ)', $ctx);
         $this->assertStringContainsString('เปิดไพ่เมื่อ: 5 ต.ค. 2569', $ctx);
-        $this->assertStringContainsString('คำถามของลูก: ปีหน้าการเงินของหนูจะเป็นยังไง', $ctx);
+        $this->assertStringContainsString('คำถามของลูกค้า: ปีหน้าการเงินของหนูจะเป็นยังไง', $ctx);
         foreach ($months as $i => $month) {
             $n = $i + 1;
             $this->assertStringContainsString("{$n}. เดือนที่ {$n} · {$month}: ไพ่ทดสอบ {$n} (Test Card {$n})", $ctx);

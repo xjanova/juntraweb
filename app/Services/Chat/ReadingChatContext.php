@@ -84,7 +84,7 @@ final class ReadingChatContext
         $lines[] = "แพ็กเกจ: {$spreadName} (ไพ่ {$cards->count()} ใบ)";
         $lines[] = 'เปิดไพ่เมื่อ: '.self::thaiDate($reading);
         $question = trim((string) $reading->question);
-        $lines[] = 'คำถามของลูก: '.($question !== '' ? $question : 'ไม่ได้ระบุ (ดูภาพรวม)');
+        $lines[] = 'คำถามของลูกค้า: '.($question !== '' ? $question : 'ไม่ได้ระบุ (ดูภาพรวม)');
         $lines[] = '';
         $lines[] = 'ไพ่ที่เปิดได้ตามตำแหน่ง:';
         foreach ($cards as $rc) {
@@ -106,7 +106,7 @@ final class ReadingChatContext
             );
         }
         $lines[] = '';
-        $lines[] = 'คำพยากรณ์ฉบับเต็มที่ลูกได้รับไปแล้ว:';
+        $lines[] = 'คำพยากรณ์ฉบับเต็มที่ลูกค้าได้รับไปแล้ว:';
 
         $head = implode("\n", $lines)."\n";
         $result = trim((string) $reading->result);

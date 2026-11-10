@@ -124,7 +124,7 @@ class DeepReadingTest extends TestCase
         Bus::assertDispatchedAfterResponse(InterpretDeepReading::class, fn ($job) => $job->readingId === $reading->id);
 
         $this->actingAs($user)->get(route('deep.show', $reading))
-            ->assertOk()->assertSee('แม่หมอกำลังดูดวงให้ลูก')->assertSee(route('deep.status', $reading), false);
+            ->assertOk()->assertSee('แม่หมอกำลังดูดวงให้คุณ')->assertSee(route('deep.status', $reading), false);
         $this->actingAs($user)->getJson(route('deep.status', $reading))->assertOk()->assertJsonPath('status', 'reading');
         $this->actingAs(User::factory()->create())->getJson(route('deep.status', $reading))->assertForbidden();
     }
@@ -172,7 +172,7 @@ class DeepReadingTest extends TestCase
         $this->assertSame('1990-08-12', $sent[0]['birth_date']);
 
         $this->actingAs($user)->get(route('deep.show', $reading))
-            ->assertOk()->assertSee('คำทำนายของแม่หมอ')->assertDontSee('แม่หมอกำลังดูดวงให้ลูก');
+            ->assertOk()->assertSee('คำทำนายของแม่หมอ')->assertDontSee('แม่หมอกำลังดูดวงให้คุณ');
     }
 
     /** ข้อเดียว = ไม่ต้องมีหัวข้อคำถามซ้ำ */
@@ -215,7 +215,7 @@ class DeepReadingTest extends TestCase
         $this->assertSame(Reading::STATUS_FAILED, $reading->status);
         $this->assertEqualsWithDelta(100.0, $this->balance($user), 0.01, 'ระบบล่มแล้วต้องคืนเครดิตให้ครบ');
         $this->actingAs($user)->get(route('deep.show', $reading))
-            ->assertOk()->assertSee('ดูดวงไม่สำเร็จ')->assertSee('คืนเข้ากระเป๋าของลูกเรียบร้อยแล้ว');
+            ->assertOk()->assertSee('ดูดวงไม่สำเร็จ')->assertSee('คืนเข้ากระเป๋าของคุณเรียบร้อยแล้ว');
         $this->actingAs($user)->getJson(route('deep.status', $reading))->assertJsonPath('status', 'failed');
     }
 
