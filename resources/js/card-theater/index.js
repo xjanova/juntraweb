@@ -420,7 +420,9 @@ function createTheater(root, cfg, useGL) {
     // ผู้พยากรณ์ยืนหลังโต๊ะ สะโพกจมหลังขอบโต๊ะ — หัวไม่ชนแถบขั้นตอน
     function placeActor() {
         const ty = tableY();
-        const hgt = Math.max(60, Math.min(H * (portrait ? 0.44 : 0.5), ty - (portrait ? 118 + safeTop : 124)));
+        // แถบบน/แถบขั้นตอนเลื่อนลงตามแถบสถานะของเครื่องทั้งสองทิศจอ (.ct-top / .ct-steps ใช้ safe-area-inset-top)
+        // — แนวนอนเคยไม่บวก safeTop → iPad ในแอป LINE/Facebook แนวนอนโดนแถบขั้นตอนทับหัว
+        const hgt = Math.max(60, Math.min(H * (portrait ? 0.44 : 0.5), ty - (portrait ? 118 : 124) - safeTop));
         Object.assign(el.actor.style, { top: `${ty - hgt}px`, height: `${hgt}px`, width: `${Math.round(Math.min(W, hgt * 0.9))}px` });
     }
     function oracle(mode) {
