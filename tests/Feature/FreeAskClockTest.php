@@ -9,6 +9,7 @@ use App\Models\Setting;
 use App\Models\TarotCard;
 use App\Models\User;
 use App\Support\FreeAskClock;
+use App\Support\OracleMedia;
 use App\Support\SiteHelp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -125,6 +126,28 @@ class FreeAskClockTest extends TestCase
         $this->assertSame(2, $free['minutes']);
         $this->assertFalse($free['started'], 'ยังไม่ถาม = ยังไม่เริ่มนับ');
         $this->assertStringContainsString('2 นาที', $room->messages()->orderBy('id')->get()[1]->content);
+        $this->assertSame('free_picks', $this->stageGreet($page), 'เปิดเสียงไว้ = แม่หมอพูดแนะนำไพ่หมวดอื่นทันทีที่เข้าห้อง');
+    }
+
+    public function test_every_room_has_a_voice_line_for_the_picks_and_for_time_up(): void
+    {
+        foreach (['maemor', 'busaba', 'kunsai'] as $persona) {
+            $lines = config("oracle_media.rooms.{$persona}.voice");
+            $voice = OracleMedia::voice($persona);
+            foreach (['free_picks', 'free_time_up'] as $key) {
+                $this->assertArrayHasKey($key, $voice, "ห้อง {$persona} ต้องมีไฟล์เสียง {$key}");
+                $this->assertMatchesRegularExpression('/ไพ่ชุดเต็ม/u', $lines[$key], 'ต้องบอกว่าไพ่ชุดเต็มเห็นมากกว่าไพ่ใบเดียว');
+                $this->assertDoesNotMatchRegularExpression('/ลูก/u', $lines[$key], 'เรียกลูกค้าว่า "คุณ" ไม่ใช่ "ลูก"');
+            }
+        }
+    }
+
+    /** ประโยคทักของเวทีผู้พยากรณ์ในหน้า (x-data ของ <x-oracle-stage>) */
+    private function stageGreet($page): ?string
+    {
+        preg_match('/(?<![a-z_])greet(?:\\\\u0022|&quot;|")\s*:\s*(?:\\\\u0022|&quot;|")([a-z_]+)/', $page->getContent(), $m);
+
+        return $m[1] ?? null;
     }
 
     public function test_first_question_starts_the_clock_and_mae_mor_sees_the_card_and_time_left(): void
@@ -183,6 +206,7 @@ class FreeAskClockTest extends TestCase
         $page = $this->actingAs($user)->get(route('chat.index', ['room' => 'maemor']));
         $this->assertSame($keys, array_column($page->viewData('offerCards')['offers'], 'key'));
         $this->assertTrue($page->viewData('freeAsk')['over']);
+        $this->assertSame('free_time_up', $this->stageGreet($page), 'รีเฟรชหลังหมดเวลา = เสียงบอกว่าทำไมไพ่ชุดเต็มเห็นมากกว่า');
     }
 
     public function test_help_questions_still_get_a_real_answer_after_free_time(): void
@@ -242,5 +266,6 @@ class FreeAskClockTest extends TestCase
 
         $this->assertNull($page->viewData('freeAsk'));
         $this->assertSame([], $page->viewData('freePicks'));
+        $this->assertSame('room_greet', $this->stageGreet($page), 'ห้องธรรมดายังทักด้วยประโยคเดิม');
     }
 }

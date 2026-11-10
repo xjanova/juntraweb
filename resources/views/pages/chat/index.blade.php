@@ -112,6 +112,7 @@
          freePicks: @js(array_values($freePicks ?? [])),
          freeWarnText: @js(\App\Support\FreeAskClock::warnText($room)),
          freeOverText: @js(\App\Support\FreeAskClock::overText($room)),
+         freeVoice: @js(isset(\App\Support\OracleMedia::voice($room)['free_time_up'])),
          freshUrl: @js(route('chat.index', ['room' => $room, 'fresh' => 1])),
          idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) && ! $adminMode ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
          topics: @js($topics),
@@ -426,8 +427,9 @@
       <aside class="mor-portrait">
         <div class="mor-glow" aria-hidden="true"></div>
         {{-- 🎬 คลิป idle เงียบ + ปุ่มลำโพง (เสียงประโยคประจำ เล่นเมื่อลูกค้ากดเปิดเท่านั้น) --}}
+        {{-- 🎁 ห้องของไพ่ฟรี: ทักด้วยเสียงแนะนำไพ่หมวดอื่น + ทำไมไพ่ชุดเต็มเห็นมากกว่า (เจ้าของ 2026-11-11) --}}
         <x-oracle-stage :persona="$room" :poster="$P['image']" :alt="$P['name']" sound class="mor-stage"
-                        :greet="($fromReading ?? false) ? 'followup_ask' : 'room_greet'" />
+                        :greet="! empty($freePicks) ? (($freeAsk['over'] ?? false) ? 'free_time_up' : 'free_picks') : (($fromReading ?? false) ? 'followup_ask' : 'room_greet')" />
         <div class="mor-plate">
           <div style="font-family:var(--thai);font-size:11px;color:var(--gold)">{{ $P['eyebrow'] }}</div>
           <div style="font-family:var(--thai);font-weight:700;font-size:18px;margin-top:2px">{{ $P['name'] }} <x-ai-badge /></div>
@@ -1471,7 +1473,8 @@ document.addEventListener('alpine:init', () => {
       const offers = (deep.length ? deep : this.freePicks.slice(0, 1));
       this.push('assistant', this.escape(cfg.freeOverText), 'ok', cfg.freeOverText,
         offers.length ? { offers, question: (([...this.messages].reverse().find((x) => x.role === 'user' && x.text) || {}).text || '') } : null);
-      if (offers.length) this.voice('offer_cards', false);
+      // 🔊 เสียงประจำห้องบอกว่าทำไมไพ่ชุดเต็มเห็นมากกว่า (ครั้งเดียวต่อห้อง) — ไม่มีไฟล์ก็ใช้ประโยคชวนเปิดไพ่เดิม
+      if (offers.length) this.voice(cfg.freeVoice ? 'free_time_up' : 'offer_cards', !!cfg.freeVoice);
       this.scrollToBottom(true);
     },
     /** announce = ครบเวลาพอดีระหว่างรอคำตอบ → ชวนต่อท้ายคำตอบ (คำตอบที่เป็นการ์ดชวนอยู่แล้ว = ไม่ชวนซ้ำ) */
