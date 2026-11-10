@@ -94,6 +94,12 @@ class WalletController extends Controller
             // banking app. A dynamic per-amount QR is shown on the status page
             // once the amount is locked in.
             'promptpayQr'    => $promptpayId ? PromptPayQr::svgDataUri($promptpayId) : null,
+            // 🏦 (2026-11-11) เจ้าของ: "ทำหน้านี้ใหม่ให้สวยงาม และเพิ่มกสิกรด้วย"
+            // บัญชีกสิกรไทยของบัญชีเดียวกับ QR (Thaiprompt ส่งมาเฉพาะตอนเปิดตัวจับ SMS)
+            // null = ไม่โชว์ช่องทางกสิกรเลย — ห้ามเดาเลขบัญชีให้ลูกค้าโอน
+            'transfer'       => $payout['transfer'] ?? null,
+            // ตัวจับ SMS เปิดอยู่ = ยอดที่ต้องโอนจะมีเศษสตางค์เฉพาะรายการ → เครดิตเข้าเอง
+            'autoMatch'      => (bool) config('smschecker.enabled'),
         ]);
     }
 
@@ -104,10 +110,23 @@ class WalletController extends Controller
 
         $data = $request->validate([
             'amount' => "required|numeric|min:$min|max:$max",
-            'method' => 'required|in:promptpay,manual',
+            'method' => 'required|in:promptpay,kbank,manual',
             'slip'   => 'nullable|image|max:4096',
             'note'   => 'nullable|string|max:255',
         ]);
+
+        // 🏦 'kbank' = โอนเข้าเลขบัญชีกสิกรไทย ซึ่งเป็น "บัญชีเดียวกับ QR พร้อมเพย์"
+        // ตัวจับ SMS เห็นเงินเข้าเหมือนกันทุกประการ → ภายในต้องเป็น method 'promptpay'
+        // (SmsCheckerService จับคู่เฉพาะ method='promptpay') ช่องทางที่ลูกค้าเลือกจดไว้ใน meta.channel
+        $channel  = $data['method'];
+        $transfer = null;
+        if ($channel !== 'manual') {
+            $transfer = PayoutAccount::resolve($request->user())['transfer'] ?? null;
+            if ($channel === 'kbank' && ! $transfer) {
+                return back()->withInput()->withErrors(['method' => 'ช่องทางโอนเข้าบัญชีกสิกรไทยยังไม่พร้อมชั่วคราว — สแกน QR พร้อมเพย์แทนได้เลยค่ะ']);
+            }
+            $data['method'] = 'promptpay';
+        }
 
         // A slip attached at submit time = the customer ALREADY paid the plain
         // typed amount → charge it as-is under 'promptpay_slip', which SMS
@@ -164,6 +183,12 @@ class WalletController extends Controller
         if (!empty($data['note'])) {
             $meta['note'] = $data['note'];
         }
+        if ($channel !== 'manual') {
+            // จดบัญชีที่โชว์ให้ลูกค้าโอนไว้กับรายการ (เหมือนบิลในห้องแชท) — หน้าสถานะจะโชว์
+            // บัญชีของรายการนี้ ไม่ใช่บัญชีใหม่ที่แอดมินอาจสลับไปทีหลัง
+            $meta['channel']  = $channel;
+            $meta['transfer'] = $transfer;
+        }
         if ($meta) {
             $tx->update(['meta' => array_merge((array) $tx->meta, $meta)]);
         }
@@ -182,7 +207,9 @@ class WalletController extends Controller
             ->route('wallet.topup.show', $tx)
             ->with('status', $slipPath
                 ? 'ส่งคำขอเติมเงินเรียบร้อย — แอดมินกำลังตรวจสอบสลิป'
-                : 'สร้างรายการแล้ว — สแกน QR ด้านล่างโอนยอดให้ตรงเป๊ะ ระบบจะเครดิตให้อัตโนมัติเมื่อเงินเข้า');
+                : ($channel === 'kbank'
+                    ? 'สร้างรายการแล้ว — โอนเข้าบัญชีกสิกรไทยด้านล่างด้วยยอดนี้ให้ครบรวมสตางค์ ระบบจะเครดิตให้อัตโนมัติเมื่อเงินเข้า'
+                    : 'สร้างรายการแล้ว — สแกน QR ด้านล่างโอนยอดให้ตรงเป๊ะ ระบบจะเครดิตให้อัตโนมัติเมื่อเงินเข้า'));
     }
 
     /** Cancel one of the requester's own still-pending top-ups. */
@@ -254,8 +281,27 @@ class WalletController extends Controller
             ? PromptPayQr::svgDataUri($promptpayId, (float) $tx->amount)
             : null;
 
+        // 🏦 เลขบัญชีกสิกรสำหรับโอนยอดนี้ — ใช้ใบที่จดไว้กับรายการก่อน (ตอนสร้างรายการ)
+        // รายการเก่าก่อน 2026-11-11 ไม่ได้จด = ใช้บัญชีปัจจุบัน เหมือนที่ QR ข้างบนทำอยู่แล้ว
+        $meta     = (array) $tx->meta;
+        $transfer = null;
+        if ($qr && in_array($tx->method, ['promptpay', 'promptpay_slip'], true)) {
+            $transfer = array_key_exists('transfer', $meta)
+                ? (is_array($meta['transfer']) ? $meta['transfer'] : null)
+                : ($payout['transfer'] ?? null);
+        }
+
         return view('pages.wallet.topup-show', [
             'tx'      => $tx,
+            'transfer'      => $transfer,
+            'channel'       => ($meta['channel'] ?? null) === 'kbank' && $transfer ? 'kbank' : 'promptpay',
+            'methodLabel'   => match (true) {
+                ($meta['channel'] ?? null) === 'kbank' => 'โอนเข้าบัญชีกสิกรไทย',
+                $tx->method === 'promptpay'            => 'พร้อมเพย์ (สแกน QR)',
+                $tx->method === 'promptpay_slip'       => 'พร้อมเพย์ + แนบสลิป',
+                $tx->method === 'manual'               => 'ช่องทางอื่น (แอดมินตรวจ)',
+                default                                => $tx->method ?: '—',
+            },
             // Use the auth-gated route, not a direct disk URL — the slip lives
             // on the private disk so direct disk URLs would 404 anyway.
             'slipUrl'       => $tx->slip_path ? route('wallet.topup.slip', $tx) : null,
