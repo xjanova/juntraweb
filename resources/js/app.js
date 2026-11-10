@@ -1,9 +1,13 @@
 import './bootstrap';
 import Alpine from 'alpinejs';
 import heroSlides from './hero-slides';
+import { pwaInstall, pushSettings } from './pwa';
 
 window.Alpine = Alpine;
 Alpine.data('heroSlides', heroSlides);
+// 📱 (2026-11-11) ติดตั้งเว็บเป็นแอป + เปิดแจ้งเตือน
+Alpine.data('pwaInstall', pwaInstall);
+Alpine.data('pushSettings', pushSettings);
 
 document.addEventListener('DOMContentLoaded', () => {
     const wrap = document.getElementById('twinkle');

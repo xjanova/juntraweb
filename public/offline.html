@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0612">
+<meta name="robots" content="noindex">
+<title>ยังไม่มีอินเทอร์เน็ต — จันทราพยากรณ์</title>
+<!-- หน้านี้ service worker เก็บไว้ในเครื่อง โชว์ตอนเปิดแอปแล้วหลุดเน็ต · ห้ามพึ่งไฟล์จากเน็ต (ฟอนต์/CSS) -->
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; min-height: 100%; background: #0a0612; color: #f3e9ff;
+    font-family: "Sarabun", "Noto Sans Thai", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center;
+    padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+    box-sizing: border-box;
+    background: radial-gradient(ellipse at 50% 20%, #2a1259 0%, #0a0612 60%); }
+  .card { max-width: 380px; text-align: center; }
+  img { width: 112px; height: 112px; border-radius: 26px; box-shadow: 0 0 40px rgba(244, 207, 106, .25); }
+  h1 { font-size: 22px; font-weight: 600; color: #f4cf6a; margin: 22px 0 10px; }
+  p { font-size: 15px; line-height: 1.75; color: #c8b8de; margin: 0 0 26px; }
+  button { font: inherit; font-size: 16px; min-height: 48px; padding: 0 28px; border-radius: 999px; cursor: pointer;
+    color: #1a0f05; background: linear-gradient(180deg, #f7dc8c, #e0b54f); border: 0; }
+  button:focus-visible { outline: 2px solid #f4cf6a; outline-offset: 3px; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <img src="/images/pwa/icon-192.png" alt="" width="112" height="112">
+    <h1>ยังเชื่อมต่ออินเทอร์เน็ตไม่ได้</h1>
+    <p>แม่หมอรอคุณอยู่ตรงนี้นะคะ ลองเปิด Wi-Fi หรือข้อมูลมือถือ แล้วแตะปุ่มด้านล่างอีกครั้ง</p>
+    <button type="button" onclick="location.reload()">ลองใหม่อีกครั้ง</button>
+  </main>
+  <script>window.addEventListener('online', function () { location.reload(); });</script>
+</body>
+</html>

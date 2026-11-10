@@ -130,6 +130,9 @@ class DeepReadingFinisher
         if ($txId = data_get($reading->payload, 'wallet_tx_id')) {
             WalletTransaction::whereKey($txId)->update(['reference_id' => $reading->id]);
         }
+
+        // 🔔 ดูดวงเชิงลึกใช้เวลาหลายนาที ลูกค้ามักปิดหน้าไปก่อน — แจ้งเมื่อเสร็จ (ไม่โยน exception)
+        app(\App\Services\Push\PushNotifier::class)->readingReady($reading->id);
     }
 
     /**
