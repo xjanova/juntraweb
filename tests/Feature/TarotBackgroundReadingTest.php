@@ -83,7 +83,7 @@ class TarotBackgroundReadingTest extends TestCase
 
         // While แม่หมอ reads: the page shows the drawn cards and a waiting state that polls the status.
         $this->actingAs($u)->get(route('tarot.show', $reading))
-            ->assertOk()->assertSee('แม่หมอกำลังอ่านไพ่ของลูก')->assertSee(route('tarot.status', $reading), false)
+            ->assertOk()->assertSee('แม่หมอกำลังอ่านไพ่ของคุณ')->assertSee(route('tarot.status', $reading), false)
             ->assertDontSee('ถามแม่หมอต่อจากไพ่ชุดนี้');
         $this->actingAs($u)->getJson(route('tarot.status', $reading))->assertOk()->assertJsonPath('status', 'reading');
         $this->actingAs(User::factory()->create())->getJson(route('tarot.status', $reading))->assertForbidden();

@@ -138,7 +138,7 @@ class ChatController extends Controller
         ]);
 
         // Greet via upstream when possible so mobile + web feel identical.
-        $greeting = 'สวัสดีค่ะลูก แม่หมอจันทราอยู่ตรงนี้แล้ว · อยากปรึกษาเรื่องอะไรเป็นพิเศษวันนี้คะ?';
+        $greeting = 'สวัสดีค่ะ แม่หมอจันทราอยู่ตรงนี้แล้ว · อยากปรึกษาเรื่องอะไรเป็นพิเศษวันนี้คะ?';
         $start = $this->upstream->start($user, $reading ? ReadingChatContext::for($reading) : null, persona: ChatRooms::upstreamPersona($persona));
         if (!empty($start['greeting'])) {
             $greeting = $start['greeting'];

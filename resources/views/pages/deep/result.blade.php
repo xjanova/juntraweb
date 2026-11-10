@@ -17,7 +17,7 @@
       </h1>
       <p class="lede" style="margin:0 auto">
         @if ($reading->isInProgress())
-          แม่หมอรับคำถามของลูกแล้ว กำลังดูดวงให้อยู่ค่ะ
+          แม่หมอรับคำถามของคุณแล้ว กำลังดูดวงให้อยู่ค่ะ
         @elseif ($reading->isFailed())
           รายการนี้ไม่ได้คิดเงินค่ะ
         @else
@@ -47,11 +47,11 @@
       <div class="panel deep-wait" style="padding:28px;text-align:center" role="status" aria-live="polite"
            data-status-url="{{ route('deep.status', $reading) }}">
         <div class="reading-wait-moon" aria-hidden="true"></div>
-        <div class="eyebrow" style="display:inline-flex;margin-top:18px">แม่หมอกำลังดูดวงให้ลูก</div>
+        <div class="eyebrow" style="display:inline-flex;margin-top:18px">แม่หมอกำลังดูดวงให้คุณ</div>
         <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:46ch;margin:10px auto 0">
           แม่หมอกำลังเปิดผังดวงและตอบทีละคำถาม ({{ count($questions) }} ข้อ) ใช้เวลาประมาณ 1-3 นาที
           <span class="deep-wait-elapsed" style="color:var(--gold)"></span><br>
-          ปิดหน้านี้ได้ คำทำนายจะรออยู่ในประวัติการดูดวงของลูก
+          ปิดหน้านี้ได้ คำทำนายจะรออยู่ในประวัติการดูดวงของคุณ
         </p>
       </div>
       <script>
@@ -84,7 +84,7 @@
         <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:48ch;margin:12px auto 20px">
           ขออภัยค่ะ แม่หมอดูดวงชุดนี้ไม่สำเร็จ
           @if ($cost > 0)
-            — เครดิต ฿{{ number_format($cost, 0) }} คืนเข้ากระเป๋าของลูกเรียบร้อยแล้ว
+            — เครดิต ฿{{ number_format($cost, 0) }} คืนเข้ากระเป๋าของคุณเรียบร้อยแล้ว
           @endif
           ลองถามใหม่อีกครั้งได้เลยนะคะ
         </p>

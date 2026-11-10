@@ -123,7 +123,7 @@ final class ReadingTheater
             'id'       => $reading->id,
             'persona'  => $persona,
             'oracle'   => (string) ($room['short'] ?? 'แม่หมอ'),
-            'customer' => (string) ($room['customer'] ?? 'ลูก'),
+            'customer' => (string) ($room['customer'] ?? 'คุณ'),
             'spread'   => $spread,
             'layout'   => $layout,
             'cards'    => $cards,

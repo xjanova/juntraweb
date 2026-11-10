@@ -385,7 +385,7 @@
         </div>
         <p style="font-family:var(--thai);font-size:15px;color:var(--ink-dim);max-width:520px;margin:0 auto 20px;line-height:1.7">
           @if ($gate['code'] === 'guest')
-            เข้าสู่ระบบครั้งเดียว {{ $P['self'] }}จะจดจำเรื่องราวของ{{ $roomCfg['customer'] ?? 'ลูก' }}ไว้เสมอ — สมาชิกจากบอท Facebook / LINE ของแม่หมอ เข้าใช้ได้ทันทีไม่ต้องสมัครใหม่
+            เข้าสู่ระบบครั้งเดียว {{ $P['self'] }}จะจดจำเรื่องราวของ{{ $roomCfg['customer'] ?? 'คุณ' }}ไว้เสมอ — สมาชิกจากบอท Facebook / LINE ของแม่หมอ เข้าใช้ได้ทันทีไม่ต้องสมัครใหม่
           @else
             {{ $gate['reason'] }}
           @endif

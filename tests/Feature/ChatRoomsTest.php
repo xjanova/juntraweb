@@ -327,7 +327,7 @@ class ChatRoomsTest extends TestCase
         Setting::put('chat_daily_limit', '10', 'chat', false);
 
         $this->assertSame(
-            'วันนี้ลูกคุยกับแม่หมอครบ 10 ข้อความแล้วค่ะ ✨ พรุ่งนี้แม่หมอรอฟังเรื่องราวต่อนะคะ — หรือถ้าอยากรู้ลึกถึงดวงชะตา ให้แม่หมอเปิดไพ่ดูแบบเจาะจงได้เลยค่ะ 🔮',
+            'วันนี้คุณคุยกับแม่หมอครบ 10 ข้อความแล้วค่ะ ✨ พรุ่งนี้แม่หมอรอฟังเรื่องราวต่อนะคะ — หรือถ้าอยากรู้ลึกถึงดวงชะตา ให้แม่หมอเปิดไพ่ดูแบบเจาะจงได้เลยค่ะ 🔮',
             ChatPolicy::limitMessage(),
         );
         $busaba = ChatPolicy::limitMessage('busaba');
@@ -356,8 +356,8 @@ class ChatRoomsTest extends TestCase
         $this->assertSame(config('chat_rooms.rooms.busaba.no_offer'), $line);
         $this->assertStringNotContainsString('การ์ดด้านล่าง', $line);
 
-        // ห้องแม่หมอคงคำชวนเดิมทุกตัวอักษร
-        $this->assertStringStartsWith('ได้เลยค่ะลูก แม่หมอจะเปิดไพ่ดูเรื่องหัวใจให้นะคะ', ChatOffers::invite('love', 'maemor', $user));
+        // ห้องแม่หมอ — คำชวนเรียก "คุณ" (เจ้าของสั่ง 2026-11-10 เลิกใช้ "ลูก")
+        $this->assertStringStartsWith('ได้เลยค่ะ แม่หมอจะเปิดไพ่ดูเรื่องหัวใจให้นะคะ', ChatOffers::invite('love', 'maemor', $user));
     }
 
     public function test_a_room_without_its_oracle_answers_busy_for_free_and_keeps_the_free_quota(): void

@@ -24,15 +24,15 @@
     </h1>
 
     <p class="lede" style="font-size:16px;color:var(--ink);margin:0 0 20px;line-height:1.7">
-      ลูก <em style="font-style:normal;color:var(--gold)">{{ $user->name ?? 'ลูกศิษย์' }}</em>
+      คุณ <em style="font-style:normal;color:var(--gold)">{{ $user->name ?? 'สมาชิก' }}</em>
       เชื่อมต่อบัญชี Thaiprompt กับ จันทราพยากรณ์ เรียบร้อยแล้ว — กลับสู่แอพเพื่อดูข้อมูลสายงานและเปิดใช้งานคุณสมบัติพรีเมียมได้เลย
     </p>
 
     <div class="panel" style="padding:20px;margin:24px 0;text-align:left">
       <div class="eyebrow" style="display:inline-flex;margin-bottom:10px">ขั้นตอนต่อไป</div>
       <ol style="margin:0;padding-left:22px;color:var(--ink-dim);font-size:14px;line-height:1.8">
-        <li>กลับไปที่แอพ จันทราพยากรณ์ บนมือถือของลูก</li>
-        <li>เปิดเมนูสายงาน Affiliate — ลูกจะเห็นข้อมูลทีมและคอมมิชชั่นทันที</li>
+        <li>กลับไปที่แอพ จันทราพยากรณ์ บนมือถือของคุณ</li>
+        <li>เปิดเมนูสายงาน Affiliate — คุณจะเห็นข้อมูลทีมและคอมมิชชั่นทันที</li>
         <li>หากยังเห็นหน้าเดิมอยู่ ให้กดปุ่มรีเฟรช (🔄) ที่มุมขวาบน</li>
       </ol>
     </div>
