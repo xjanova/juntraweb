@@ -38,7 +38,7 @@
         </dd>
 
         <dt style="color:var(--ink-dim)">วิธีการ</dt>
-        <dd style="margin:0">{{ $tx->method ?: '—' }}</dd>
+        <dd style="margin:0">{{ $methodLabel ?? ($tx->method ?: '—') }}</dd>
 
         <dt style="color:var(--ink-dim)">ส่งคำขอเมื่อ</dt>
         <dd style="margin:0">{{ $tx->created_at->format('d/m/Y H:i:s') }} · <span style="color:var(--ink-dim)">{{ $tx->created_at->diffForHumans() }}</span></dd>
@@ -60,18 +60,76 @@
       </dl>
 
       @if (!empty($promptpayQr))
-        <div style="margin-top:24px;text-align:center;border-top:1px solid var(--line);padding-top:24px">
-          <div class="eyebrow" style="display:inline-flex;margin-bottom:10px">สแกนเพื่อจ่าย ฿{{ number_format($tx->amount, 2) }}</div>
-          <div><img src="{{ $promptpayQr }}" alt="PromptPay QR" style="width:220px;height:220px;background:#fff;border-radius:14px;padding:10px"></div>
-          @if (!empty($promptpayName))<div style="color:var(--ink-dim);font-size:13px;margin-top:8px">{{ $promptpayName }}</div>@endif
-          <div style="font-size:12px;color:var(--ink-faint);margin-top:6px">
+        @php($payable = number_format($tx->amount, 2, '.', ''))
+        {{-- 🏦 (2026-11-11) โอนได้สองทาง: สแกน QR ที่ใส่ยอดแล้ว หรือโอนเข้าเลขบัญชีกสิกรไทย (บัญชีเดียวกัน)
+             เปิดที่ช่องทางที่ลูกค้าเลือกไว้ตอนสร้างรายการ --}}
+        <div class="tp-show-pay"
+             x-data="{ channel: @js($channel), copied: '',
+                       async copy(t, k) { try { await navigator.clipboard.writeText(t); this.copied = k; } catch (_) { this.copied = 'fail'; }
+                                          setTimeout(() => { this.copied = '' }, 2200); } }">
+          <div style="text-align:center">
+            <div class="eyebrow" style="display:inline-flex;margin-bottom:4px">ยอดที่ต้องโอน</div>
+          </div>
+          <div class="tp-show-amt">
+            <b>฿{{ number_format($tx->amount, 2) }}</b>
+            <button type="button" class="chip" @click="copy(@js($payable), 'amt')">
+              <span class="chip-icon" aria-hidden="true">📋</span>
+              <span x-text="copied === 'amt' ? 'คัดลอกแล้ว' : 'คัดลอกยอด'">คัดลอกยอด</span>
+            </button>
+          </div>
+
+          @if (!empty($transfer))
+            <div class="tp-channels" role="radiogroup" aria-label="ช่องทางโอน" style="margin-top:14px">
+              <label class="tp-channel" :class="channel === 'promptpay' && 'is-on'">
+                <input type="radio" value="promptpay" x-model="channel" @checked($channel === 'promptpay')>
+                <span class="tp-logo tp-logo-pp" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
+                </span>
+                <span class="tp-channel-txt"><b>สแกน QR</b><small>ยอดขึ้นเอง</small></span>
+              </label>
+              <label class="tp-channel" :class="channel === 'kbank' && 'is-on'">
+                <input type="radio" value="kbank" x-model="channel" @checked($channel === 'kbank')>
+                <span class="tp-logo tp-logo-kbank" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14M8 12.5 15.5 5M10.6 10.2 16 19"/></svg>
+                </span>
+                <span class="tp-channel-txt"><b>กสิกรไทย</b><small>โอนเข้าเลขบัญชี</small></span>
+              </label>
+            </div>
+          @endif
+
+          <div class="tp-account" x-show="channel !== 'kbank'" @if ($channel === 'kbank') x-cloak @endif>
+            <div class="tp-qr"><img src="{{ $promptpayQr }}" alt="QR พร้อมเพย์ ยอด ฿{{ number_format($tx->amount, 2) }}" width="220" height="220" style="width:220px;height:220px"></div>
+            @if (!empty($promptpayName))<div style="color:var(--ink-dim);font-size:13px">{{ $promptpayName }}</div>@endif
+          </div>
+
+          @if (!empty($transfer))
+            <div class="tp-account" x-show="channel === 'kbank'" @if ($channel !== 'kbank') x-cloak @endif>
+              <div class="tp-bankcard">
+                <div class="tp-bankcard-top">
+                  <span class="tp-logo tp-logo-kbank tp-logo-sm" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14M8 12.5 15.5 5M10.6 10.2 16 19"/></svg>
+                  </span>
+                  <span class="tp-bankcard-bank">{{ $transfer['bank_name'] ?: 'ธนาคารกสิกรไทย' }}</span>
+                </div>
+                <div class="tp-bankcard-no">{{ $transfer['display_number'] ?? $transfer['account_number'] }}</div>
+                <div class="tp-bankcard-name">ชื่อบัญชี {{ $transfer['account_name'] ?: $promptpayName }}</div>
+              </div>
+              <button type="button" class="btn btn-ghost tp-copy-btn" @click="copy(@js($transfer['account_number']), 'acct')">
+                <span aria-hidden="true">🏦</span>
+                <span x-text="copied === 'acct' ? 'คัดลอกเลขบัญชีแล้ว' : 'คัดลอกเลขบัญชี'">คัดลอกเลขบัญชี</span>
+              </button>
+            </div>
+          @endif
+
+          <p class="tp-copy-fail" style="text-align:center" x-show="copied === 'fail'" x-cloak>คัดลอกไม่ได้ — กดค้างที่ตัวเลขเพื่อคัดลอกได้นะคะ</p>
+          <p class="tp-show-note">
             @if (config('smschecker.enabled'))
-              โอนยอด <b style="color:var(--gold)">฿{{ number_format($tx->amount, 2) }}</b> ให้ตรงเป๊ะ —
-              ระบบจะเครดิตเข้าวอลเลตอัตโนมัติเมื่อเงินเข้า (หรืออัปโหลดสลิปให้แอดมินตรวจก็ได้)
+              โอนยอด <b>฿{{ number_format($tx->amount, 2) }}</b> ให้ครบรวมสตางค์ —
+              ระบบจะเครดิตเข้าวอลเลตอัตโนมัติเมื่อเงินเข้า · ถ้าโอนยอดกลม แนบสลิปด้านล่าง ระบบตรวจแล้วเติมให้
             @else
               โอนแล้วอัปโหลดสลิป — แอดมินจะอนุมัติเครดิตให้
             @endif
-          </div>
+          </p>
         </div>
       @endif
 
