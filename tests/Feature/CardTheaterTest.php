@@ -123,7 +123,9 @@ class CardTheaterTest extends TestCase
         $this->actingAs($u)->post('/tarot/begin', ['spread' => 'celtic']);
         $this->get('/tarot/pick')->assertSee('name="birth_date"', false);
 
-        $this->post('/tarot/begin', ['spread' => 'three']);
+        // ไพ่ 3 ใบเป็นของห้องบุษบา — เริ่มไพ่ห้องแม่หมอค้างไว้ ห้องล็อกกันไว้ (ReadingRoomLock) จึงเริ่มใหม่ใน session ใหม่
+        $this->flushSession();
+        $this->actingAs($u)->post('/tarot/begin', ['spread' => 'three']);
         $this->get('/tarot/pick')->assertDontSee('name="birth_date"', false);
     }
 

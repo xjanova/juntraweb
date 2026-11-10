@@ -173,7 +173,9 @@ class ChatRoomsTest extends TestCase
 
         $this->assertSame('busaba', \App\Support\OracleMedia::personaFor('quick'));
         $this->assertSame('kunsai', \App\Support\OracleMedia::personaFor('kunsai'));
-        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('three'));
+        // 🌸 (2026-11-11) ไพ่ 3 ใบเป็นของบุษบาแล้ว · 12 เดือนยังเป็นแม่หมอ
+        $this->assertSame('busaba', \App\Support\OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('year'));
     }
 
     public function test_closed_room_notice_shows_once_on_the_picker(): void
@@ -406,5 +408,65 @@ class ChatRoomsTest extends TestCase
         Setting::put('pricing_tarot_kunsai', '150', 'pricing', false);
         $migration->up();
         $this->assertSame('150', Setting::where('key', 'pricing_tarot_kunsai')->value('value'));
+    }
+
+    /** 🌸 (2026-11-11, owner) "ไพ่ 1 ใบ ไม่ถึง 9 ใบเป็นของ บุษบาทั้งหมด" — ห้อง หน้าตา เสียง และคำทำนายเป็นบุษบา */
+    public function test_every_spread_under_nine_cards_belongs_to_busaba_once_her_room_is_open(): void
+    {
+        // ห้องบุษบายังปิด → ไพ่ 1/3/5 ใบยังขายและอ่านในห้องแม่หมอ (ไม่มีบุษบาโผล่ในห้องที่เปิดไม่ได้)
+        $this->assertSame('maemor', ChatRooms::personaForSpread('love'));
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('single'));
+
+        $this->allRoomsOpen();
+        session(['chat_room' => 'maemor']);
+        foreach (['single', 'three', 'quick', 'love', 'career', 'decision'] as $spread) {
+            $this->assertLessThan(9, \App\Support\TarotSpreads::cardCount($spread), $spread);
+            $this->assertSame('busaba', ChatRooms::personaForSpread($spread), $spread);
+            $this->assertSame('busaba', ChatOffers::menuRoomOf($spread), $spread);
+            // หน้าเลือกไพ่/ผลทำนายพูดด้วยเสียงบุษบา แม้ลูกค้าจะเพิ่งมาจากห้องแม่หมอ
+            $this->assertSame('busaba', \App\Support\OracleMedia::personaFor($spread), $spread);
+        }
+        foreach (['celtic', 'year'] as $spread) {
+            $this->assertSame('maemor', ChatRooms::personaForSpread($spread), $spread);
+        }
+        $this->assertSame('kunsai', ChatRooms::personaForSpread('kunsai'));
+
+        // เปิดห้องบุษบาจากห้องอื่นแล้ว 12 เดือนยังเป็นแม่หมอ (เดิมใช้ห้องใน session → เสียงบุษบาอ่านไพ่แม่หมอ)
+        session(['chat_room' => 'busaba']);
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('year'));
+
+        // เมนูไพ่ของแต่ละห้อง — แบบประจำห้องขึ้นก่อน
+        $this->assertSame(
+            ['tarot_quick', 'tarot_single', 'tarot_three', 'tarot_love', 'tarot_career', 'tarot_decision'],
+            array_column(ChatOffers::roomMenu('busaba'), 'key'),
+        );
+        $this->assertSame(['tarot_celtic', 'tarot_year', 'deep'], array_column(ChatOffers::roomMenu('maemor'), 'key'));
+
+        // ห้องบุษบาปิดทีละห้อง → ทุกแบบกลับไปห้องแม่หมอ ยกเว้น "ดูไว" ที่บุษบาอ่านเสมอ
+        config(['chat_rooms.closed' => ['busaba']]);
+        $this->assertSame('maemor', ChatRooms::personaForSpread('love'));
+        $this->assertSame('maemor', ChatOffers::menuRoomOf('love'));
+        $this->assertSame('busaba', ChatRooms::personaForSpread('quick'));
+    }
+
+    /** ห้องแม่หมอไม่ยื่นการ์ดไพ่ของห้องบุษบา — กดไปแล้วกลายเป็นคำทำนายของบุษบาในห้องแม่หมอ */
+    public function test_mae_mor_fallback_cards_skip_busabas_spreads(): void
+    {
+        $this->allRoomsOpen();
+        $user = $this->member();
+        // แพ็กเกจประจำห้อง (Celtic) ติดข้อห้ามเปิดซ้ำ → ถอยไปการ์ดตามเรื่อง
+        Setting::put('tarot_celtic_cooldown_days', '7', 'pricing', false);
+        Cache::flush();
+        \App\Models\Reading::create(['user_id' => $user->id, 'session_token' => 's', 'type' => 'tarot_celtic', 'question' => 'q', 'result' => 'r']);
+        $cards = ChatOffers::forRoom('maemor', 'love', $user);
+
+        foreach ($cards as $c) {
+            if ($c['kind'] === 'tarot') {
+                $this->assertSame('maemor', ChatOffers::menuRoomOf((string) $c['spread']), $c['key']);
+            }
+        }
+        $this->assertNotContains('tarot_celtic', array_column($cards, 'key'));
+        $this->assertNotContains('tarot_love', array_column($cards, 'key'));
+        $this->assertNotContains('tarot_three', array_column($cards, 'key'));
     }
 }

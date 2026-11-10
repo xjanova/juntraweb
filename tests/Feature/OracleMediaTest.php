@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\Setting;
 use App\Support\ChatRooms;
 use App\Support\OracleMedia;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
@@ -210,12 +212,22 @@ class OracleMediaTest extends TestCase
         $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
         $this->assertSame('maemor', OracleMedia::personaFor('three'));
 
+        // 🌸 (2026-11-11) เสียงตามคนเขียนคำทำนาย ไม่ใช่ห้องใน session
+        //   ห้องบุษบายังปิด → ไพ่ 3 ใบอ่านโดยแม่หมอ แม้ session จะค้างห้องบุษบาไว้
         session(['chat_room' => 'busaba']);
-        $this->assertSame('busaba', OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', OracleMedia::personaFor('three'));
         $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
 
+        //   ห้องบุษบาเปิด → ไพ่ 3 ใบเป็นเสียงบุษบา แม้เข้ามาจากห้องแม่หมอ · 12 เดือนยังเป็นแม่หมอ
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Cache::flush();
+        session(['chat_room' => 'maemor']);
+        $this->assertSame('busaba', OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', OracleMedia::personaFor('year'));
+
         session(['chat_room' => 'ไม่มีห้องนี้']);
-        $this->assertSame('maemor', OracleMedia::personaFor('three'));
+        $this->assertSame('busaba', OracleMedia::personaFor('single'));
     }
 
     /** ปุ่มลำโพงลอยบนหน้าเลือกไพ่/ผล: ไม่มีไฟล์ = ไม่มีปุ่ม · ส่งเฉพาะประโยคที่มีไฟล์ · ไม่เล่นเอง */

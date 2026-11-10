@@ -98,9 +98,13 @@
       'key' => $k, 'name' => $m['name_th'], 'en' => $m['name_en'], 'eyebrow' => $m['eyebrow'],
       'tagline' => $m['tagline'], 'count' => count($m['positions']),
       'price' => \App\Support\Pricing::for(\App\Support\TarotSpreads::priceKey($k)),
+      // 🌸 (2026-11-11) ผู้พยากรณ์ที่อ่านไพ่ชุดนี้ — ไพ่ไม่ถึง 9 ใบเป็นของบุษบา (config/chat_rooms.php)
+      'reader' => \App\Support\ChatRooms::short(\App\Support\ChatRooms::personaForSpread($k)),
       // ภาพประจำแพ็กเกจชุดเดียวกับหน้าไพ่ — ไม่มีไฟล์ = การ์ดไอคอนแบบเดิม
       'art' => file_exists(public_path("images/juntra/art/tarot/{$k}.webp")) ? "images/juntra/art/tarot/{$k}.webp" : null,
   ])->values();
+  // ภาพการ์ดบริการอื่น (ครอป 16:9 จากภาพหัวหน้าชุดเดียวกัน) — ไม่มีไฟล์ = การ์ดไอคอนแบบเดิม
+  $cardArt = fn (string $name) => file_exists(public_path("images/juntra/art/cards/{$name}.webp")) ? "images/juntra/art/cards/{$name}.webp" : null;
 @endphp
 @push('head')
 <style>
@@ -111,13 +115,19 @@
   .service:hover .service-art img { transform: scale(1.05); }
   /* ป้ายราคาลอยบนภาพ — ต้องมีพื้นให้อ่านออก */
   .service.has-art .price-tag { z-index: 1; background: rgba(15,8,28,.72); backdrop-filter: blur(4px); }
+  /* 🖱️ (2026-11-11, owner "ควรกดได้ทั้งการ์ด") — ลิงก์ของการ์ดยืดคลุมทั้งใบ (stretched link)
+     ลิงก์ยังเป็นตัวเดียว ไม่ซ้อนลิงก์ · โฟกัสด้วยคีย์บอร์ดได้ขอบทองทั้งใบ */
+  #services .service { cursor: pointer; }
+  #services .service .arrow::after { content: ""; position: absolute; inset: 0; z-index: 2; border-radius: inherit; }
+  #services .service .arrow:focus-visible { outline: none; }
+  #services .service:has(.arrow:focus-visible) { outline: 2px solid var(--gold-2, #f0d58a); outline-offset: 3px; transform: translateY(-6px); }
 </style>
 @endpush
 <section class="section" id="services">
   <div class="section-head reveal">
     <div class="section-eyebrow">Tarot · {{ $homeSpreads->count() }} แพ็กเกจ</div>
     <h2 class="section-title" style="padding:30px 0 7px">เลือกไพ่ที่ตรงกับคำถามของท่าน</h2>
-    <p class="section-sub">ทุกแพ็กเกจแม่หมออ่านไพ่ทีละตำแหน่ง ฟันธงให้ชัด และจัดคำทำนายเป็นการ์ดอ่านง่าย — หักเครดิตเมื่อเปิดไพ่เท่านั้น</p>
+    <p class="section-sub">แม่หมอจันทราและน้องบุษบาอ่านไพ่ทีละตำแหน่ง ฟันธงให้ชัด และจัดคำทำนายเป็นการ์ดอ่านง่าย — หักเครดิตเมื่อเปิดไพ่เท่านั้น</p>
   </div>
 
   <div class="services">
@@ -134,21 +144,29 @@
         <h3>{{ $s['name'] }}</h3>
         <div class="duration">{{ $s['count'] }} ใบ · {{ $s['en'] }}</div>
         <p>{{ $s['tagline'] }}</p>
-        <a href="{{ route('tarot.index', ['spread' => $s['key']]) }}#pick" class="arrow">เปิดไพ่แบบนี้ →</a>
+        <a href="{{ route('tarot.index', ['spread' => $s['key']]) }}#pick" class="arrow" aria-label="เปิด{{ $s['name'] }} กับ{{ $s['reader'] }}">เปิดไพ่กับ{{ $s['reader'] }} →</a>
       </div>
     @endforeach
 
-    <div class="service reveal">
+    <div class="service reveal {{ $cardArt('tarot-free') ? 'has-art' : '' }}">
       <span class="price-tag">ฟรี</span>
-      <div class="icon"><x-glyph name="sparkle" :size="30" /></div>
+      @if ($art = $cardArt('tarot-free'))
+        <div class="service-art" aria-hidden="true"><img src="{{ asset($art) }}" alt="" width="800" height="450" loading="lazy" decoding="async"></div>
+      @else
+        <div class="icon"><x-glyph name="sparkle" :size="30" /></div>
+      @endif
       <h3>ดูดวงฟรี 1 ใบ</h3>
       <div class="duration">Free Card · สมาชิกใหม่</div>
       <p>ลองให้แม่หมอเปิดไพ่ 1 ใบ ทำนายสั้น ๆ ฟรี ก่อนตัดสินใจเปิดไพ่ชุดเต็ม</p>
       <a href="{{ route('tarot.free') }}" class="arrow">รับคำทำนายฟรี →</a>
     </div>
-    <div class="service reveal">
+    <div class="service reveal {{ $cardArt('chat') ? 'has-art' : '' }}">
       <span class="price-tag">ฟรี</span>
-      <div class="icon"><x-glyph name="moon" :size="30" /></div>
+      @if ($art = $cardArt('chat'))
+        <div class="service-art" aria-hidden="true"><img src="{{ asset($art) }}" alt="" width="800" height="450" loading="lazy" decoding="async"></div>
+      @else
+        <div class="icon"><x-glyph name="moon" :size="30" /></div>
+      @endif
       <h3>คุยกับแม่หมอ</h3>
       <div class="duration">Chat · ระบบเดียวกับบอทแม่หมอ</div>
       <p>เล่าเรื่องที่ค้างใจได้ฟรีเหมือนแชทกับแม่หมอในเฟซบุ๊ก/ไลน์ อยากให้ทำนายเมื่อไหร่ แม่หมอแนะนำแพ็กเกจให้</p>
@@ -157,8 +175,12 @@
 
     {{-- บริการอื่น — แสดงเฉพาะที่เปิดอยู่ --}}
     @serviceopen('horoscope')
-      <div class="service reveal">
-        <div class="icon"><x-glyph name="moon" :size="30" /></div>
+      <div class="service reveal {{ $cardArt('horoscope') ? 'has-art' : '' }}">
+        @if ($art = $cardArt('horoscope'))
+          <div class="service-art" aria-hidden="true"><img src="{{ asset($art) }}" alt="" width="800" height="450" loading="lazy" decoding="async"></div>
+        @else
+          <div class="icon"><x-glyph name="moon" :size="30" /></div>
+        @endif
         <h3>ดวงรายวัน</h3>
         <div class="duration">Moon Horoscope</div>
         <p>พยากรณ์ตามฤกษ์จันทรคติ ครอบคลุม ความรัก การเงิน การงาน และสุขภาพ ทั้ง 12 ราศี</p>
@@ -166,8 +188,12 @@
       </div>
     @endserviceopen
     @serviceopen('auspicious')
-      <div class="service reveal">
-        <div class="icon"><x-glyph name="calendar" :size="30" /></div>
+      <div class="service reveal {{ $cardArt('auspicious') ? 'has-art' : '' }}">
+        @if ($art = $cardArt('auspicious'))
+          <div class="service-art" aria-hidden="true"><img src="{{ asset($art) }}" alt="" width="800" height="450" loading="lazy" decoding="async"></div>
+        @else
+          <div class="icon"><x-glyph name="calendar" :size="30" /></div>
+        @endif
         <h3>ฤกษ์มงคล</h3>
         <div class="duration">Auspicious Time</div>
         <p>หาฤกษ์เปิดร้าน แต่งงาน ขึ้นบ้านใหม่ ตามตำแหน่งดวงจันทร์และยามอัฐกาล</p>
@@ -175,8 +201,12 @@
       </div>
     @endserviceopen
     @serviceopen('numerology')
-      <div class="service reveal">
-        <div class="icon"><x-glyph name="numerology" :size="30" /></div>
+      <div class="service reveal {{ $cardArt('numerology') ? 'has-art' : '' }}">
+        @if ($art = $cardArt('numerology'))
+          <div class="service-art" aria-hidden="true"><img src="{{ asset($art) }}" alt="" width="800" height="450" loading="lazy" decoding="async"></div>
+        @else
+          <div class="icon"><x-glyph name="numerology" :size="30" /></div>
+        @endif
         <h3>เลขศาสตร์</h3>
         <div class="duration">Numerology</div>
         <p>คำนวณเลขชะตา เลขนาม จากชื่อและวันเกิด</p>
