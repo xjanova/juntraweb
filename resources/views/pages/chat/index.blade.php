@@ -107,6 +107,11 @@
          qaEndUrl: @js(route('chat.qa.end')),
          qaOverText: @js(\App\Support\ReadingQaClock::overMessage($room)),
          qaWrap: @js($qaWrap ?? null),
+         {{-- 🎁 (2026-11-11) ห้องของไพ่ฟรี: นาฬิกาถามฟรี 2 นาที + ป้ายไพ่หมวดอื่น (App\Support\FreeAskClock) --}}
+         freeAsk: @js($freeAsk ?? null),
+         freePicks: @js(array_values($freePicks ?? [])),
+         freeWarnText: @js(\App\Support\FreeAskClock::warnText($room)),
+         freeOverText: @js(\App\Support\FreeAskClock::overText($room)),
          freshUrl: @js(route('chat.index', ['room' => $room, 'fresh' => 1])),
          idleNudge: @js(($gate['allowed'] ?? false) && ! ($readonly ?? false) && ! $adminMode ? (int) config('reading_qa.idle_nudge_seconds', 90) : 0),
          topics: @js($topics),
@@ -187,6 +192,15 @@
             <button type="button" class="or-btn or-enough" x-show="!qa.over" x-cloak :disabled="qaBusy"
                     @click="endQa()" x-text="qaConfirm ? 'แตะอีกครั้งเพื่อจบ' : 'พอแล้ว'"
                     aria-label="พอแล้ว — จบการถามต่อก่อนหมดเวลา">พอแล้ว</button>
+          @endif
+          {{-- 🎁 (2026-11-11) เวลาถามฟรีหลังไพ่ฟรี 1 ใบ — เริ่มนับที่คำถามแรก ตามนาฬิกาเซิร์ฟเวอร์ --}}
+          @if (! empty($freeAsk))
+            <span class="or-pill or-qa" role="timer" aria-live="off"
+                  :class="freeAsk.started && !freeAsk.over && left(freeAsk.ends_at) <= 60 && 'is-low'"
+                  title="เวลาถามฟรีต่อจากไพ่ใบนี้ · เริ่มนับเมื่อถามคำถามแรก">
+              <small x-text="freeAsk.over ? 'ถามฟรี' : (freeAsk.started ? 'ถามฟรีอีก' : 'ถามฟรีได้')">ถามฟรีได้</small>
+              <b x-text="'⏳ ' + (freeAsk.over ? 'ครบแล้ว' : (freeAsk.started ? clock(freeAsk.ends_at) : freeAsk.minutes + ' นาที'))">⏳ {{ $freeAsk['minutes'] }} นาที</b>
+            </span>
           @endif
           @if (\App\Support\OracleMedia::voice($room))
             <button type="button" class="or-btn or-icon"
@@ -834,6 +848,27 @@
               </div>
             </template>
 
+            {{-- 🎁 (2026-11-11) ห้องของไพ่ฟรี — ป้ายไพ่หมวดอื่นแทนปุ่ม "ถามต่อจากเรื่องนี้" (เจ้าของสั่ง)
+                 กดแล้วไปทางเดียวกับแพ็กเกจบนโต๊ะ (openTable) — เครดิตไม่พอ = การ์ดสแกนจ่ายในห้อง ยังไม่ออกบิลเอง --}}
+            <template x-if="!blocked && freePicks.length">
+              <div class="free-picks" role="group" :aria-label="'เลือกเรื่องที่อยากให้' + persona.self + 'เปิดไพ่ชุดเต็ม'">
+                <div class="chat-suggest-label">
+                  <span x-text="freeAsk && freeAsk.over
+                    ? '🔮 อยากรู้เรื่องไหนต่อ ให้' + persona.self + 'เปิดไพ่ชุดเต็มดูให้นะคะ'
+                    : '🔮 อยากให้' + persona.self + 'เปิดไพ่เรื่องไหนต่อคะ'"></span>
+                </div>
+                <div class="chip-row" style="margin-bottom:8px">
+                  <template x-for="o in freePicks" :key="'f' + o.key">
+                    <button type="button" class="chip chip-ai" :disabled="thinking || !!table.offerBusy"
+                            :title="o.label + (o.blurb ? ' — ' + o.blurb : '')" @click="openTable(o)">
+                      <span class="chip-icon" x-text="o.pick_icon" aria-hidden="true"></span>
+                      <span x-text="table.offerBusy === o.key ? 'กำลังพาไป…' : o.pick_topic"></span>
+                      <small class="opacity-70" x-text="priceLabel(o.price)"></small>
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
             {{-- 2. แม่หมอกำลังรอคำตอบ → ยุบไว้ก่อน --}}
             {{-- 2a. ✨ ผู้พยากรณ์ถามกลับ + AI คิดตัวเลือกคำตอบมาให้ → กดตอบได้เลย --}}
             <template x-if="!blocked && awaiting && !suggestOpen && aiSuggestions.length">
@@ -871,8 +906,10 @@
                     </div>
                   </div>
                 </template>
+                <template x-if="!(freeAsk && freeAsk.over)">
+                <div>
                 <div class="chat-suggest-label">
-                  <span x-text="messages.some(m => m.role === 'user') ? 'ถามต่อได้เลย' : 'เริ่มจากคำถามเหล่านี้ก็ได้ค่ะ'"></span>
+                  <span x-text="freeAsk ? 'หรือถามต่อจากไพ่ใบนี้ได้เลย' : (messages.some(m => m.role === 'user') ? 'ถามต่อได้เลย' : 'เริ่มจากคำถามเหล่านี้ก็ได้ค่ะ')"></span>
                 </div>
                 <div class="chip-row">
                   <template x-for="(s, i) in suggestions" :key="i">
@@ -891,6 +928,8 @@
                     <span x-text="showTopics ? 'ปิดหมวดคำถาม' : 'หมวดคำถาม'"></span>
                   </button>
                 </div>
+                </div>
+                </template>
 
                 {{-- ตั้งใจไม่ใส่ x-transition: ถ้า transition ไม่จบ (แท็บพื้นหลัง /
                      เบราว์เซอร์ไม่วาดเฟรม) อิลิเมนต์จะค้างที่ opacity:0 = ผู้ใช้กด
@@ -1049,6 +1088,10 @@ document.addEventListener('alpine:init', () => {
     billTimer: null,
     // ⏳ นาฬิกาถามต่อ (null = ห้องคุยทั่วไป) · ยืนยัน "พอแล้ว" ด้วยการแตะสองครั้ง
     qa: cfg.qa || null,
+    // 🎁 นาฬิกาถามฟรีของห้องที่เริ่มจากไพ่ฟรี (null = ห้องอื่น) · ป้ายไพ่หมวดอื่น
+    freeAsk: cfg.freeAsk || null,
+    freePicks: Array.isArray(cfg.freePicks) ? cfg.freePicks : [],
+    freeWarned: false,
     qaBusy: false,
     qaConfirm: false,
     qaWarned: false,
@@ -1388,6 +1431,7 @@ document.addEventListener('alpine:init', () => {
     },
     /** ทุกวินาที: เวลาถามต่อหมด → ปิดห้อง · เหลือ 1 นาที → เตือนครั้งเดียว · แล้วดูว่าลูกค้าเงียบไปนานไหม */
     qaTick() {
+      this.freeTick();
       const q = this.qa;
       if (q && q.started && !q.over && q.ends_at) {
         const l = this.left(q.ends_at);
@@ -1399,6 +1443,44 @@ document.addEventListener('alpine:init', () => {
         if (l === 0) this.qaOver(true);
       }
       this.idleTick();
+    },
+    /**
+     * 🎁 ถามฟรีหลังไพ่ฟรี: เหลือ 1 นาที → เตือนครั้งเดียว · ครบเวลา → ผู้พยากรณ์ชวนเปิดไพ่ชุดเต็มพร้อมการ์ด (ครั้งเดียว)
+     * ไม่ปิดช่องพิมพ์ — พิมพ์ต่อได้ เซิร์ฟเวอร์ตอบคำชวน + การ์ดที่ตรงเรื่อง (ไม่ถาม AI ไม่คิดเงิน)
+     */
+    freeTick() {
+      const f = this.freeAsk;
+      if (!f || !f.started || f.over || !f.ends_at) return;
+      const l = this.left(f.ends_at);
+      if (l <= 60 && l > 0 && !this.freeWarned && !this.thinking) {
+        this.freeWarned = true;
+        this.push('assistant', this.escape(cfg.freeWarnText), 'ok', cfg.freeWarnText, { kind: 'nudge' });
+        this.scrollToBottom();
+      }
+      if (l === 0 && !this.thinking) this.freeOver(true);
+    },
+    freeOver(announce = false) {
+      if (!this.freeAsk || this.freeAsk.over) return;
+      this.freeAsk.over = true;
+      this.suggestOpen = false;
+      // คำชวนเปิดไพ่ไม่ใช่คำถามที่รอคำตอบ — ไม่ขึ้นแถบ "กำลังรอคำตอบ" ใต้ป้ายไพ่หมวดอื่น
+      this.awaiting = false;
+      if (!announce) return;
+      // การ์ดในคำชวน = ชุดเจาะลึกก่อน (ตรงกับที่เซิร์ฟเวอร์ยื่นเมื่อหมดเวลา) · ป้ายหมวดอื่นยังอยู่ด้านล่าง
+      const deep = this.freePicks.filter((o) => o.spread === 'celtic');
+      const offers = (deep.length ? deep : this.freePicks.slice(0, 1));
+      this.push('assistant', this.escape(cfg.freeOverText), 'ok', cfg.freeOverText,
+        offers.length ? { offers, question: (([...this.messages].reverse().find((x) => x.role === 'user' && x.text) || {}).text || '') } : null);
+      if (offers.length) this.voice('offer_cards', false);
+      this.scrollToBottom(true);
+    },
+    /** announce = ครบเวลาพอดีระหว่างรอคำตอบ → ชวนต่อท้ายคำตอบ (คำตอบที่เป็นการ์ดชวนอยู่แล้ว = ไม่ชวนซ้ำ) */
+    setFree(f, serverNow, announce = false) {
+      if (serverNow) this.skew = serverNow - Math.floor(Date.now() / 1000);
+      if (!f) return;
+      const newlyOver = f.over && !(this.freeAsk && this.freeAsk.over);
+      this.freeAsk = Object.assign({}, f, { over: f.over && !newlyOver });
+      if (newlyOver) setTimeout(() => this.freeOver(announce), 700);
     },
     qaOver(announce = false) {
       if (!this.qa) return;
@@ -2159,6 +2241,7 @@ document.addEventListener('alpine:init', () => {
         if (Array.isArray(j.suggestions) && j.suggestions.length) this.suggestions = j.suggestions;
         this.aiSuggestions = Array.isArray(j.ai_suggestions) ? j.ai_suggestions.filter(q => typeof q === 'string') : [];
         this.setQa(j.qa, j.server_now);
+        this.setFree(j.free_ask, j.server_now, j.kind !== 'offer');
         this.lastActive = Date.now();
 
         // ลูกค้าขอให้ทำนาย → แนบการ์ดแพ็กเกจไปกับคำชวนของแม่หมอ (ยังไม่หักเงิน)
