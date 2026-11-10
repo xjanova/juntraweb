@@ -1643,16 +1643,20 @@
   background: radial-gradient(circle, var(--gold) 0 4.5px, transparent 5px);
 }
 
-/* โลโก้ธนาคาร (วาดเอง ไม่ใช้ไฟล์โลโก้จากภายนอก) */
+/* โลโก้ธนาคารจริง (public/images/banks — แหล่งและสัญญาอนุญาตอยู่ใน README ข้างไฟล์)
+   การ์ดช่องทาง: โลโก้อยู่บน ชื่ออยู่ล่าง — PromptPay เป็นแบนเนอร์แนวนอน วางข้างข้อความแล้วบีบจนอ่านไม่ออก */
+.tp-channel { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 12px 11px; }
+.tp-channel .tp-tick { position: absolute; top: 12px; right: 12px; margin: 0; }
 .tp-logo {
-  flex: none; display: grid; place-items: center;
-  width: 38px; height: 38px; border-radius: 12px; color: #fff;
+  flex: none; display: grid; place-items: center; overflow: hidden;
+  height: 34px; border-radius: 9px;
 }
-.tp-logo svg { width: 22px; height: 22px; }
-.tp-logo-pp { background: linear-gradient(135deg, #1e4b8f, #0f2d5c); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18); }
-.tp-logo-kbank { background: linear-gradient(135deg, #1fa64a, #0b7a32); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
-.tp-logo-sm { width: 30px; height: 30px; border-radius: 9px; }
-.tp-logo-sm svg { width: 18px; height: 18px; }
+.tp-logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* โลโก้ PromptPay มีกรอบน้ำเงินบนพื้นขาวในตัว — วางบนชิปขาวให้ขอบไม่จม */
+.tp-logo-pp { width: 92px; background: #fff; padding: 3px 4px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .5); }
+/* โลโก้กสิกรเป็นสัญลักษณ์สีขาว ออกแบบให้วางบนเขียวประจำธนาคาร #138f2d */
+.tp-logo-kbank { width: 34px; background: #138f2d; padding: 2px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
+.tp-logo-sm { width: 32px; height: 32px; }
 
 /* ข้อมูลบัญชี */
 .tp-account {
@@ -1664,10 +1668,44 @@
 .tp-account-label { font-family: var(--display); font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: var(--gold); }
 .tp-account-name { font-size: 13.5px; color: var(--ink-dim); }
 .tp-qr { display: flex; justify-content: center; margin: 14px 0; }
-.tp-qr img {
-  width: 200px; height: 200px; padding: 10px; border-radius: 16px; background: #fff;
+/* กรอบแบบป้าย QR ตามร้านค้า: แถบ Thai QR Payment น้ำเงินด้านบน + QR บนพื้นขาว */
+.tp-qr-frame {
+  width: 220px; border-radius: 16px; overflow: hidden; background: #fff;
   box-shadow: 0 0 0 4px rgba(244, 207, 106, .22), 0 18px 40px -18px rgba(0, 0, 0, .7);
 }
+.tp-qr-brand { display: block; width: 100%; height: auto; background: #113566; }
+.tp-qr-code { display: block; width: 100%; height: auto; padding: 10px; background: #fff; }
+
+/* 🔊 ปุ่มฟังคำอธิบายเรื่องเศษสตางค์ */
+.tp-voice { margin: 8px 0 10px; }
+.tp-voice-btn {
+  width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 10px 14px 10px 10px; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(244, 207, 106, .14), rgba(176, 124, 255, .08));
+  color: var(--ink); font-family: var(--thai);
+  transition: border-color .25s, box-shadow .25s;
+  -webkit-tap-highlight-color: transparent;
+}
+.tp-voice-btn:hover, .tp-voice-btn.is-playing { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(244, 207, 106, .35); }
+.tp-voice-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.tp-voice-ico {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  color: #1a0d3d; background: linear-gradient(135deg, var(--gold-2, #f6e3a8), var(--gold-deep, #c89a3c));
+}
+.tp-voice-ico svg { width: 16px; height: 16px; }
+.tp-voice-txt { min-width: 0; flex: 1; }
+.tp-voice-txt b { display: block; font-size: 14px; font-weight: 600; }
+.tp-voice-txt small { display: block; font-size: 11.5px; color: var(--ink-dim); }
+.tp-voice-wave { display: flex; align-items: center; gap: 3px; height: 18px; opacity: .35; }
+.tp-voice-wave i { display: block; width: 3px; height: 6px; border-radius: 2px; background: var(--gold); }
+.tp-voice-btn.is-playing .tp-voice-wave { opacity: 1; }
+.tp-voice-btn.is-playing .tp-voice-wave i { animation: tp-wave .9s ease-in-out infinite; }
+.tp-voice-btn.is-playing .tp-voice-wave i:nth-child(2) { animation-delay: .15s; }
+.tp-voice-btn.is-playing .tp-voice-wave i:nth-child(3) { animation-delay: .3s; }
+.tp-voice-btn.is-playing .tp-voice-wave i:nth-child(4) { animation-delay: .45s; }
+@keyframes tp-wave { 0%, 100% { height: 5px; } 50% { height: 17px; } }
+.tp-voice-fail { margin: 6px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-dim); }
 .tp-number-row { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
 .tp-number {
   font-family: var(--display); font-size: 22px; letter-spacing: .06em; color: var(--ink);
@@ -1855,11 +1893,14 @@
   .tp-lede { font-size: 15px; }
   .tp-channels { gap: 8px; }
   .tp-channel { padding: 11px 10px; gap: 8px; }
-  .tp-logo { width: 34px; height: 34px; border-radius: 10px; }
+  .tp-logo { height: 30px; }
+  .tp-logo-pp { width: 82px; }
+  .tp-logo-kbank { width: 30px; }
   .tp-tick { display: none; }
-  .tp-qr img { width: 180px; height: 180px; }
+  .tp-qr-frame { width: 200px; }
   .tp-amount-box input { font-size: 28px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .tp-channel, .tp-bundle, .tp-drop { transition: none; }
+  .tp-channel, .tp-bundle, .tp-drop, .tp-voice-btn { transition: none; }
+  .tp-voice-btn.is-playing .tp-voice-wave i { animation: none; height: 12px; }
 }

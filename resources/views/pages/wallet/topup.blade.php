@@ -89,9 +89,7 @@
           <div class="tp-channels" role="radiogroup" aria-label="ช่องทางโอน">
             <label class="tp-channel" :class="channel === 'promptpay' && 'is-on'">
               <input type="radio" name="method" value="promptpay" form="topup-form" x-model="channel" @checked($channel === 'promptpay')>
-              <span class="tp-logo tp-logo-pp" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
-              </span>
+              <span class="tp-logo tp-logo-pp"><img src="{{ asset('images/banks/promptpay.png') }}" alt="PromptPay พร้อมเพย์" width="643" height="216"></span>
               <span class="tp-channel-txt"><b>พร้อมเพย์</b><small>สแกน QR ด้วยแอปธนาคาร</small></span>
               <span class="tp-tick" aria-hidden="true"></span>
             </label>
@@ -99,9 +97,7 @@
             @if ($hasKbank)
               <label class="tp-channel" :class="channel === 'kbank' && 'is-on'">
                 <input type="radio" name="method" value="kbank" form="topup-form" x-model="channel" @checked($channel === 'kbank')>
-                <span class="tp-logo tp-logo-kbank" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14M8 12.5 15.5 5M10.6 10.2 16 19"/></svg>
-                </span>
+                <span class="tp-logo tp-logo-kbank"><img src="{{ asset('images/banks/kbank.svg') }}" alt="ธนาคารกสิกรไทย" width="128" height="128"></span>
                 <span class="tp-channel-txt"><b>กสิกรไทย</b><small>โอนเข้าเลขบัญชี</small></span>
                 <span class="tp-tick" aria-hidden="true"></span>
               </label>
@@ -115,7 +111,12 @@
               <span class="tp-account-name">{{ $promptpayName ?: 'แม่หมอจันทรา' }}</span>
             </div>
             @if (!empty($promptpayQr))
-              <div class="tp-qr"><img src="{{ $promptpayQr }}" alt="QR พร้อมเพย์ {{ $promptpayName }}" width="200" height="200"></div>
+              <div class="tp-qr">
+                <div class="tp-qr-frame">
+                  <img class="tp-qr-brand" src="{{ asset('images/banks/thai-qr-payment.png') }}" alt="Thai QR Payment" width="547" height="216">
+                  <img class="tp-qr-code" src="{{ $promptpayQr }}" alt="QR พร้อมเพย์ {{ $promptpayName }}" width="200" height="200">
+                </div>
+              </div>
             @endif
             <div class="tp-number-row">
               <span class="tp-number">{{ $promptpayId }}</span>
@@ -131,9 +132,7 @@
             <div class="tp-account tp-account-kbank" x-show="channel === 'kbank'" @if ($channel !== 'kbank') x-cloak @endif>
               <div class="tp-bankcard">
                 <div class="tp-bankcard-top">
-                  <span class="tp-logo tp-logo-kbank tp-logo-sm" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14M8 12.5 15.5 5M10.6 10.2 16 19"/></svg>
-                  </span>
+                  <span class="tp-logo tp-logo-kbank tp-logo-sm"><img src="{{ asset('images/banks/kbank.svg') }}" alt="" width="128" height="128"></span>
                   <span class="tp-bankcard-bank">{{ $transfer['bank_name'] ?: 'ธนาคารกสิกรไทย' }}</span>
                 </div>
                 <div class="tp-bankcard-no">{{ $transfer['display_number'] }}</div>
@@ -151,6 +150,9 @@
           {{-- วิธีโอนให้เครดิตเข้าเอง --}}
           <div class="tp-howto">
             <div class="tp-howto-h">วิธีโอนให้เครดิตเข้าเอง</div>
+            @if ($autoMatch)
+              @include('partials.topup-why-satang')
+            @endif
             <ol>
               <li>ใส่ยอดในฟอร์ม แล้วกด <b>สร้างรายการเติมเงิน</b></li>
               @if ($autoMatch)

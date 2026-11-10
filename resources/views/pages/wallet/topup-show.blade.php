@@ -82,23 +82,19 @@
             <div class="tp-channels" role="radiogroup" aria-label="ช่องทางโอน" style="margin-top:14px">
               <label class="tp-channel" :class="channel === 'promptpay' && 'is-on'">
                 <input type="radio" value="promptpay" x-model="channel" @checked($channel === 'promptpay')>
-                <span class="tp-logo tp-logo-pp" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
-                </span>
+                <span class="tp-logo tp-logo-pp"><img src="{{ asset('images/banks/promptpay.png') }}" alt="PromptPay พร้อมเพย์" width="643" height="216"></span>
                 <span class="tp-channel-txt"><b>สแกน QR</b><small>ยอดขึ้นเอง</small></span>
               </label>
               <label class="tp-channel" :class="channel === 'kbank' && 'is-on'">
                 <input type="radio" value="kbank" x-model="channel" @checked($channel === 'kbank')>
-                <span class="tp-logo tp-logo-kbank" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14M8 12.5 15.5 5M10.6 10.2 16 19"/></svg>
-                </span>
+                <span class="tp-logo tp-logo-kbank"><img src="{{ asset('images/banks/kbank.svg') }}" alt="ธนาคารกสิกรไทย" width="128" height="128"></span>
                 <span class="tp-channel-txt"><b>กสิกรไทย</b><small>โอนเข้าเลขบัญชี</small></span>
               </label>
             </div>
           @endif
 
           <div class="tp-account" x-show="channel !== 'kbank'" @if ($channel === 'kbank') x-cloak @endif>
-            <div class="tp-qr"><img src="{{ $promptpayQr }}" alt="QR พร้อมเพย์ ยอด ฿{{ number_format($tx->amount, 2) }}" width="220" height="220" style="width:220px;height:220px"></div>
+            <div class="tp-qr"><div class="tp-qr-frame"><img class="tp-qr-brand" src="{{ asset('images/banks/thai-qr-payment.png') }}" alt="Thai QR Payment" width="547" height="216"><img class="tp-qr-code" src="{{ $promptpayQr }}" alt="QR พร้อมเพย์ ยอด ฿{{ number_format($tx->amount, 2) }}" width="220" height="220"></div></div>
             @if (!empty($promptpayName))<div style="color:var(--ink-dim);font-size:13px">{{ $promptpayName }}</div>@endif
           </div>
 
@@ -106,9 +102,7 @@
             <div class="tp-account" x-show="channel === 'kbank'" @if ($channel !== 'kbank') x-cloak @endif>
               <div class="tp-bankcard">
                 <div class="tp-bankcard-top">
-                  <span class="tp-logo tp-logo-kbank tp-logo-sm" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14M8 12.5 15.5 5M10.6 10.2 16 19"/></svg>
-                  </span>
+                  <span class="tp-logo tp-logo-kbank tp-logo-sm"><img src="{{ asset('images/banks/kbank.svg') }}" alt="" width="128" height="128"></span>
                   <span class="tp-bankcard-bank">{{ $transfer['bank_name'] ?: 'ธนาคารกสิกรไทย' }}</span>
                 </div>
                 <div class="tp-bankcard-no">{{ $transfer['display_number'] ?? $transfer['account_number'] }}</div>
@@ -122,6 +116,9 @@
           @endif
 
           <p class="tp-copy-fail" style="text-align:center" x-show="copied === 'fail'" x-cloak>คัดลอกไม่ได้ — กดค้างที่ตัวเลขเพื่อคัดลอกได้นะคะ</p>
+          @if (config('smschecker.enabled'))
+            <div style="max-width:460px;margin:14px auto 0">@include('partials.topup-why-satang')</div>
+          @endif
           <p class="tp-show-note">
             @if (config('smschecker.enabled'))
               โอนยอด <b>฿{{ number_format($tx->amount, 2) }}</b> ให้ครบรวมสตางค์ —

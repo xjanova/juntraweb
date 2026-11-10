@@ -72,7 +72,26 @@ class TopupKbankChannelTest extends TestCase
             ->assertSee('ธนาคารกสิกรไทย')
             ->assertSee('232-3-77534-9')
             ->assertSee('จันทราพยากรณ์')
-            ->assertSee('คัดลอกเลขบัญชี');
+            ->assertSee('คัดลอกเลขบัญชี')
+            // โลโก้จริง + เสียงอธิบายเรื่องเศษสตางค์ (ไฟล์ต้องอยู่จริง ไม่ใช่ลิงก์ตาย)
+            ->assertSee('images/banks/kbank.svg', false)
+            ->assertSee('images/banks/promptpay.png', false)
+            ->assertSee('media/topup/why-satang.mp3', false);
+
+        foreach (['images/banks/kbank.svg', 'images/banks/promptpay.png', 'images/banks/thai-qr-payment.png', 'media/topup/why-satang.mp3'] as $file) {
+            $this->assertFileExists(public_path($file));
+        }
+    }
+
+    /** ตัวจับ SMS ปิด = ไม่มีเศษสตางค์ → ห้ามเปิดเสียงอธิบายเรื่องสตางค์ให้ลูกค้างง */
+    public function test_satang_narration_is_hidden_when_sms_matching_is_off(): void
+    {
+        config(['smschecker.enabled' => false]);
+        $user = $this->member();
+
+        $this->actingAs($user)->get('/wallet/topup')
+            ->assertOk()
+            ->assertDontSee('media/topup/why-satang.mp3', false);
     }
 
     /** บัญชีไม่ได้เปิดตัวจับ SMS = Thaiprompt ไม่ส่งเลขบัญชี → ห้ามโชว์ช่องทางกสิกร (เงินเข้าแล้วบิลไม่ตัด) */
