@@ -157,6 +157,7 @@
           @vite('resources/js/oracle-room/room-poses.js')
         @endif
         <div class="or-vignette"></div>
+        <i class="or-safe"></i>
       </div>
 
       {{-- ═══ แถบบนลายทอง: กลับ/เปลี่ยนผู้พยากรณ์ · ชื่อห้อง · เสียง · เครดิต ═══ --}}
@@ -988,9 +989,15 @@
   const bg = shell.querySelector('.or-plate');
   const actor = shell.querySelector('.or-actor');
   const panel = shell.querySelector('.chat-panel');
+  const safe = shell.querySelector('.or-safe');
+  // จอกว้างแนวนอนเท่านั้น — แท็บเล็ตแนวตั้ง (iPad Pro / Safari โหมดเว็บเดสก์ท็อปกว้าง 1024 px) ใช้ฉากแบบมือถือ
+  // ใช้ media query ตัวเดียวกับ resources/css/oracle-room.css ตรง ๆ → CSS กับสคริปต์ไม่มีทางเลือกคนละเลย์เอาต์
+  const WIDE_MQ = '(min-width: 900px) and (orientation: landscape)';
   const place = () => {
     const W = shell.clientWidth; const H = shell.clientHeight;
-    const wide = W >= 900;
+    const wide = window.matchMedia ? window.matchMedia(WIDE_MQ).matches : (W >= 900 && W > H);
+    // แถบสถานะของเครื่อง (แอปในตัว LINE/Facebook, เว็บที่เพิ่มลงหน้าจอโฮม) ดันแถบบนลงมา — ผู้พยากรณ์ต้องเลื่อนลงตาม ไม่งั้นป้ายชื่อห้องทับหัว
+    const safeTop = safe ? parseFloat(getComputedStyle(safe).paddingTop) || 0 : 0;
     // จอกว้าง: แผงแชทชิดขวา → กลางโต๊ะเลื่อนไปกลางพื้นที่ที่เหลือ (ขยายภาพเท่าที่จำเป็นให้ยังเต็มจอ)
     const pw = panel ? panel.getBoundingClientRect().width : 0;   // ยังไม่ล็อกอิน = ไม่มีแผงแชท → ผู้พยากรณ์อยู่กลางจอ
     const side = wide && pw > 0 ? pw + 40 : 0;
@@ -1001,7 +1008,7 @@
     const y = (H - ih) * plate.posY;
     Object.assign(bg.style, { backgroundSize: `${iw}px ${ih}px`, backgroundPosition: `${x}px ${y}px` });
     const ty = y + plate.table * ih;
-    const top = wide ? 96 : 70;
+    const top = (wide ? 96 : 70) + safeTop;
     const hgt = Math.max(90, Math.min(H * (wide ? 0.62 : 0.5), ty - top));
     Object.assign(actor.style, { top: `${ty - hgt}px`, height: `${hgt}px`, width: `${Math.round(Math.min(W, hgt * 0.9))}px`, left: `${x + iw / 2}px` });
     shell.style.setProperty('--or-table', `${ty}px`);
@@ -1011,6 +1018,9 @@
   const img = new Image();
   img.onload = place; img.src = plate.src;
   window.addEventListener('resize', place);
+  // iOS หมุนจอ / แถบ Safari ยืด-หด: ขนาดจอจริงมาหลังอีเวนต์ resize — วัดใหม่เมื่อกล่องฉากเปลี่ยนขนาดจริง
+  if (window.ResizeObserver) new ResizeObserver(place).observe(shell);
+  window.addEventListener('orientationchange', () => setTimeout(place, 350));
   if (window.ResizeObserver && panel) new ResizeObserver(place).observe(panel);
   place();
 })();

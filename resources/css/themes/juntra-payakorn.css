@@ -822,7 +822,9 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
 }
 .hero-slide-image {
   position: absolute; top: 0; right: max(0px, calc((100vw - 1800px) / 2));
-  width: auto; max-width: 60%; height: 100%; aspect-ratio: 4 / 5; object-fit: contain; object-position: center bottom;
+  /* จอเกือบจัตุรัส: max-width ตัดกล่องให้แคบกว่า 4:5 → ภาพย่อลงในกล่อง ชิดบนไว้ให้หน้าผู้พยากรณ์อยู่ใต้เมนูเสมอ
+     (เดิมชิดล่าง → iPad Pro แนวตั้งตัวละครตกไปครึ่งล่างจอแล้วล้นขอบจอ) */
+  width: auto; max-width: 60%; height: 100%; aspect-ratio: 4 / 5; object-fit: contain; object-position: center top;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
 }
@@ -835,7 +837,9 @@ h2.section-title em { font-style: italic; color: var(--gold-2); }
   border-radius: 999px; background: rgba(255,247,224,.45); transition: all .3s;
 }
 .hero-slide-dots button.is-active::before { width: 22px; margin-left: -11px; background: var(--gold-2); }
-@media (max-width: 900px) {
+/* มือถือ + แท็บเล็ตแนวตั้งทุกขนาด (2026-11-10 — iPad Pro แนวตั้ง / iPad ทุกรุ่นใน Safari โหมดเว็บเดสก์ท็อปกว้าง 1024 px
+   เคยได้เลย์เอาต์จอคอม: ภาพแม่หมอเหลือครึ่งล่างจอและโดนขอบจอตัด) → ภาพอยู่บน ข้อความลงล่าง */
+@media (max-width: 900px), (orientation: portrait) {
   .hero.has-slides { align-items: flex-end; text-align: center; }
   /* ครึ่งบนของจอให้หน้าแม่หมอ ข้อความเริ่มกลางจอ (เลื่อนลงอ่านต่อได้) */
   .hero.has-slides { --hero-art-height: min(125vw, clamp(380px, 66vh, 720px)); }
