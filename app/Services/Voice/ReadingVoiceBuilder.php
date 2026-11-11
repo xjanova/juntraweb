@@ -4,6 +4,7 @@ namespace App\Services\Voice;
 
 use App\Models\Reading;
 use App\Services\Thaiprompt\JuntraServerClient;
+use App\Support\ChatRooms;
 use App\Support\Mp3;
 use App\Support\OracleMedia;
 use App\Support\TarotSpreads;
@@ -50,6 +51,9 @@ class ReadingVoiceBuilder
     /** สถานะให้หน้าผล: building (ยังสร้างอยู่) · ready/partial (เสร็จ) · none (ไม่มีเสียง คืนเงินแล้ว) */
     public static function view(Reading $reading): array
     {
+        if (self::stale($reading) && VoicePremium::active($reading)) {
+            return ['status' => 'building', 'done' => 0, 'total' => 0, 'refunded' => false];
+        }
         $voice = data_get($reading->payload, 'voice');
         $build = data_get($reading->payload, 'voice_build.chapters');
         $total = is_array($build) ? count($build) : 0;
@@ -68,6 +72,12 @@ class ReadingVoiceBuilder
     /** ทำงาน 1 ก้าว (ขอบท / สร้างเสียง 1 บท / รวมไฟล์) แล้วคืนสถานะล่าสุด */
     public function step(Reading $reading): array
     {
+        // เสียงเก่าเป็นของผู้พยากรณ์คนอื่น (ก่อน 2026-11-11 ไพ่ชุดของบุษบาบางแบบอัดด้วยเสียงแม่หมอ) → ทิ้งแล้วอัดใหม่ด้วยเสียงเจ้าของไพ่
+        if (self::stale($reading) && VoicePremium::active($reading)) {
+            File::deleteDirectory(self::dir($reading));
+            $this->save($reading, ['voice' => null, 'voice_build' => null, 'voice_build_fails' => null]);
+            $reading->refresh();
+        }
         if (is_array(data_get($reading->payload, 'voice')) || ! VoicePremium::active($reading)) {
             return self::view($reading);
         }
@@ -230,10 +240,35 @@ class ReadingVoiceBuilder
         return self::view($reading);
     }
 
+    /**
+     * ผู้พยากรณ์ที่เล่าคำทำนายนี้ — ยึดเจ้าของไพ่ชุดนั้น (ตรงกับหน้าตาบนโรงละคร ReadingTheater)
+     * ไม่ยึดห้องที่บันทึกไว้ตอนเปิดไพ่ เพราะคำทำนายก่อน 2026-11-11 บันทึกห้องแม่หมอไว้ทั้งที่ไพ่ชุดเป็นของบุษบา
+     * ไพ่ชุดที่ไม่มีห้องไหนเป็นเจ้าของ ค่อยใช้ห้องที่ลูกค้าอยู่ตอนเปิดไพ่
+     */
+    public static function personaOf(Reading $reading): string
+    {
+        $spread = TarotSpreads::keyFromType((string) $reading->type);
+        if (! ChatRooms::hasOwner($spread) && filled(data_get($reading->payload, 'room'))) {
+            return ChatRooms::normalize((string) data_get($reading->payload, 'room'));
+        }
+
+        return OracleMedia::personaFor($spread ?? 'three');
+    }
+
+    /** เสียงเล่าที่อัดเสร็จแล้วเป็นของผู้พยากรณ์คนอื่น — ต้องอัดใหม่ (โรงละครไม่เล่นเสียงนี้) */
+    public static function stale(Reading $reading): bool
+    {
+        $voice = data_get($reading->payload, 'voice');
+        if (! is_array($voice) || ! in_array($voice['status'] ?? null, ['ready', 'partial'], true)) {
+            return false;
+        }
+
+        return filled($voice['persona'] ?? null) && $voice['persona'] !== self::personaOf($reading);
+    }
+
     private function persona(Reading $reading): string
     {
-        return (string) (data_get($reading->payload, 'room')
-            ?: OracleMedia::personaFor(TarotSpreads::keyFromType((string) $reading->type) ?? 'three'));
+        return self::personaOf($reading);
     }
 
     /** เขียนทับเฉพาะคีย์ที่ส่งมาใน payload (null = ลบคีย์) — ล็อกแถว กันชนกับการคืนเงิน/นับตัวอักษร */

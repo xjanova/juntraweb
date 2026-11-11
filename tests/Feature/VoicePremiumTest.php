@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\WalletTransaction;
 use App\Services\FortuneBot\FortuneAiService;
 use App\Services\Tarot\TarotReadingFinisher;
+use App\Services\Voice\ReadingVoiceBuilder;
 use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use App\Support\ReadingQaClock;
@@ -302,6 +303,57 @@ class VoicePremiumTest extends TestCase
         $this->actingAs($this->member())->get(route('tarot.voice.file', $reading))->assertForbidden();
         $this->actingAs($this->member())->postJson(route('tarot.voice.next', $reading))->assertForbidden();
         $this->assertSame(500.0 - 100, $this->balance($u), 'ได้เสียงแล้ว ไม่คืนเงิน');
+    }
+
+    /**
+     * 🎀 (2026-11-11) ไพ่ชุดของบุษบาเล่าด้วยเสียงบุษบาเท่านั้น — เจ้าของ: "ห้องบุษบาต้องใช้เสียงบุษบา ไม่ใช่ใช้เสียงบัวมาพากย์"
+     * คำทำนายก่อนหน้านี้บันทึกห้องแม่หมอไว้ และอัดเสียงด้วยเสียงแม่หมอ → โรงละครต้องไม่เล่นเสียงนั้น และหน้าผลอัดใหม่เป็นเสียงบุษบา
+     */
+    public function test_busaba_spread_narrates_in_her_voice_and_an_old_maemor_take_is_redone(): void
+    {
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Cache::flush();
+        $u = $this->member();
+        $reading = $this->premiumReading($u, 'tarot_three');
+        $reading->update(['payload' => array_merge($reading->payload, [
+            'room'  => 'maemor',
+            'voice' => ['status' => 'ready', 'provider' => 'elevenlabs', 'persona' => 'maemor',
+                'url' => '/tarot/result/' . $reading->id . '/voice.mp3', 'duration' => 3.0,
+                'chapters' => [['anchor' => 'verdict', 'kind' => 'summary', 'tone' => null, 'energy' => null, 'say' => 'สรุป', 'start' => 0, 'end' => 3]]],
+        ])]);
+        $reading = $reading->fresh();
+
+        $this->assertSame('busaba', ReadingVoiceBuilder::personaOf($reading), 'ไพ่ 3 ใบเป็นของบุษบา ไม่ใช่ห้องที่บันทึกไว้');
+        $this->assertTrue(ReadingVoiceBuilder::stale($reading));
+        $this->assertNull(ReadingTheater::build($reading->load('tarotCards.card'))['voice'], 'โรงละครไม่เล่นเสียงแม่หมอในไพ่ของบุษบา');
+        $this->assertSame('building', ReadingVoiceBuilder::view($reading)['status'], 'หน้าผลเริ่มอัดเสียงใหม่เอง');
+
+        $this->assertSame('ready', $this->buildVoice($u, $reading)['status']);
+        $fresh = $reading->fresh();
+        $this->assertSame('busaba', data_get($fresh->payload, 'voice.persona'));
+        $this->assertFalse(ReadingVoiceBuilder::stale($fresh));
+        $this->assertNotNull(ReadingTheater::build($fresh->load('tarotCards.card'))['voice']);
+
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/voice/narration') && $r['persona'] === 'busaba');
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/voice/speak') && $r['persona'] === 'busaba');
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/voice/speak') && $r['persona'] !== 'busaba');
+        $this->assertSame(500.0 - 100, $this->balance($u), 'อัดใหม่ไม่คิดเงินซ้ำ');
+    }
+
+    /** ไพ่ชุดของแม่หมอ (เซลติก) ยังเล่าด้วยเสียงแม่หมอ — เสียงที่อัดไว้ไม่โดนทิ้ง */
+    public function test_a_maemor_spread_keeps_its_maemor_voice(): void
+    {
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Cache::flush();
+        $reading = $this->premiumReading($this->member(), 'tarot_celtic');
+        $reading->update(['payload' => array_merge($reading->payload, [
+            'voice' => ['status' => 'ready', 'persona' => 'maemor', 'url' => '/tarot/result/' . $reading->id . '/voice.mp3', 'chapters' => []],
+        ])]);
+
+        $this->assertSame('maemor', ReadingVoiceBuilder::personaOf($reading->fresh()));
+        $this->assertFalse(ReadingVoiceBuilder::stale($reading->fresh()));
     }
 
     /** สร้างเสียงจนเสร็จ แล้วคืนสถานะล่าสุด */

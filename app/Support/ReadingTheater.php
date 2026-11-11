@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\Reading;
 use App\Services\Thaiprompt\JuntraServerClient;
+use App\Services\Voice\ReadingVoiceBuilder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 
@@ -412,6 +413,10 @@ final class ReadingTheater
     {
         $v = data_get($reading->payload, 'voice');
         if (! is_array($v) || ! in_array($v['status'] ?? null, ['ready', 'partial'], true)) {
+            return null;
+        }
+        // เสียงของผู้พยากรณ์คนอื่น (เช่น ไพ่ชุดบุษบาที่เคยอัดด้วยเสียงแม่หมอ) — ไม่เล่น รอหน้าผลอัดเสียงใหม่
+        if (ReadingVoiceBuilder::stale($reading)) {
             return null;
         }
         $url = $v['url'] ?? null;
