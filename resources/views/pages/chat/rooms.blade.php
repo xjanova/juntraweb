@@ -1,7 +1,7 @@
 @extends('layouts.app')
 @section('page-handles-flash', '1')
 
-{{-- 🔮 (2026-11-03) หน้าเลือกผู้พยากรณ์ — ห้องละ 1 คน 1 แบบทำนาย
+{{-- 🔮 (2026-11-03) หน้าเลือกผู้พยากรณ์ — ห้องละ 1 คน · การ์ดบอกทุกแบบที่ห้องนั้นเปิดไพ่ให้ (2026-11-11)
      ข้อมูลทั้งหมดมาจาก ChatRooms::cards() (config/chat_rooms.php + ราคาสดจาก Pricing)
      ห้องที่ยังไม่เปิด (Thaiprompt ยังไม่รู้จัก persona / แพ็กเกจปิดขาย) โชว์ "เร็ว ๆ นี้" กดไม่ได้ --}}
 
@@ -71,12 +71,37 @@
               </div>
             @endif
 
-            {{-- แพ็กเกจเดียวของห้อง — บอกราคาตรงนี้เลย ลูกค้าไม่ต้องเดาว่าห้องไหนแพง --}}
-            <div class="room-product">
-              <span class="room-product-cards" aria-hidden="true">{{ $r['product']['cards'] ?: '★' }}</span>
-              <span class="room-product-name">{{ $r['product']['name'] }}</span>
-              <span class="room-product-price">{{ $priceLabel }}</span>
-            </div>
+            {{-- 🌸 (2026-11-11) ทุกแบบที่ห้องนี้เปิดไพ่ให้ พร้อมราคา — ชุดเดียวกับโต๊ะในห้อง (ChatOffers::roomMenu)
+                 เจ้าของสั่ง "ทำไมน้องบุษบา ดูได้แค่ไพ่ 3 ใบ เธอต้องดูหมด เลยที่ไพ่ไม่ถึง 10 ใบ"
+                 ห้องยังปิด / ไม่มีแบบไหนขายอยู่ → แพ็กเกจประจำห้องใบเดียวแบบเดิม --}}
+            @php $menu = $r['open'] ? \App\Services\Chat\ChatOffers::roomMenu($r['key'], auth()->user()) : []; @endphp
+            @if ($menu)
+              <ul class="room-menu" aria-label="แบบที่{{ $r['short'] }}เปิดไพ่ให้">
+                @foreach ($menu as $o)
+                  @php
+                    $p = (float) $o['price'];
+                    $href = $o['kind'] === 'tarot' ? route('tarot.index', ['spread' => $o['spread']]) : $o['url'];
+                  @endphp
+                  <li>
+                    <a href="{{ $open ? $href : route('thaiprompt.redirect', ['to' => '/chat?room=' . $r['key']]) }}" class="room-product">
+                      <span class="room-product-cards" aria-hidden="true">{{ $o['cards'] ?: '★' }}</span>
+                      <span class="room-product-name">
+                        {{ $o['label'] }}
+                        @if (! empty($o['locked_until']))<small>เปิดได้อีก {{ $o['locked_until'] }}</small>@endif
+                      </span>
+                      <span class="room-product-price">{{ $p > 0 ? '฿' . number_format($p, $p == intval($p) ? 0 : 2) : 'ฟรี' }}</span>
+                    </a>
+                  </li>
+                @endforeach
+              </ul>
+            @else
+              {{-- แพ็กเกจเดียวของห้อง — บอกราคาตรงนี้เลย ลูกค้าไม่ต้องเดาว่าห้องไหนแพง --}}
+              <div class="room-product">
+                <span class="room-product-cards" aria-hidden="true">{{ $r['product']['cards'] ?: '★' }}</span>
+                <span class="room-product-name">{{ $r['product']['name'] }}</span>
+                <span class="room-product-price">{{ $priceLabel }}</span>
+              </div>
+            @endif
 
             @if ($open)
               <a href="{{ route('chat.index', ['room' => $r['key']]) }}" class="btn btn-primary room-go">
