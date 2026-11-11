@@ -325,7 +325,7 @@
             @endif
           </div>
         </div>
-      @elseif (! empty($pendingBill))
+      @elseif (! empty($pendingBill) && ($billBlocks ?? true))
         <div class="or-table" role="status" aria-live="polite">
           <div class="or-offer is-hold">
             <span class="or-offer-icon" aria-hidden="true">🧾</span>

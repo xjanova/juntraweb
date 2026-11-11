@@ -173,13 +173,19 @@ final class SiteHelp
 
             $bill = ChatTopupController::pendingBill($user);
             $lines[] = $bill
-                ? sprintf(
-                    '- มีบิลเติมเงินรอชำระ: เลขที่ %s ยอด ฿%s (ต้องโอนยอดนี้ให้ตรงเป๊ะ)%s%s',
-                    $bill->reference_code,
-                    number_format((float) $bill->amount, 2),
-                    $bill->expires_at ? ' หมดอายุ ' . self::when($bill->expires_at) : '',
-                    ! empty($bill->slip_path) ? ' · แนบสลิปแล้ว รอตรวจ' : ' · ยังไม่ได้แนบสลิป',
-                )
+                // แนบสลิปแล้ว = ลูกค้าโอนมาแล้ว — ห้ามมีคำว่า "ต้องโอน" ให้ผู้พยากรณ์ทวงซ้ำ (เคสจริง 2026-11-11 ลูกค้าโอนซ้ำ)
+                ? (! empty($bill->slip_path)
+                    ? sprintf(
+                        '- มีบิลเติมเงินเลขที่ %s ยอด ฿%s ที่ลูกค้าแนบสลิปมาแล้ว กำลังรอตรวจ (ลูกค้าโอนแล้ว ห้ามบอกให้โอนซ้ำ)',
+                        $bill->reference_code,
+                        number_format((float) $bill->amount, 2),
+                    )
+                    : sprintf(
+                        '- มีบิลเติมเงินรอชำระ: เลขที่ %s ยอด ฿%s (ต้องโอนยอดนี้ให้ตรงเป๊ะ)%s · ยังไม่ได้แนบสลิป',
+                        $bill->reference_code,
+                        number_format((float) $bill->amount, 2),
+                        $bill->expires_at ? ' หมดอายุ ' . self::when($bill->expires_at) : '',
+                    ))
                 : '- ไม่มีบิลเติมเงินค้าง';
 
             if ($history) {

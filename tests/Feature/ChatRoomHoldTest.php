@@ -6,6 +6,8 @@ use App\Models\ChatConversation;
 use App\Models\Setting;
 use App\Models\User;
 use App\Models\WalletTransaction;
+use App\Services\Chat\ChatOffers;
+use App\Services\Wallet\WalletService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
@@ -169,6 +171,92 @@ class ChatRoomHoldTest extends TestCase
         $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'เปิดไพ่ให้หน่อย', 'room' => 'busaba'])->assertOk();
         $this->assertSame([], $res->json('offers'));
         $this->assertStringContainsString($ref, $res->json('reply'));
+    }
+
+    /**
+     * ราคาถูกสุดที่ต้องมีในวอลเลตทั้งโต๊ะในห้อง และการ์ดที่ผู้พยากรณ์ยื่นให้เมื่อขอเปิดไพ่ (หัวข้อ general)
+     * (ราคาจริงจากระบบ ไม่เดาตัวเลข — ใช้ตัวที่แพงกว่าของสองที่ ให้ผ่านทั้งสองทาง)
+     */
+    private function cheapestOffer(string $room, User $user): float
+    {
+        $cheapest = function (array $offers): float {
+            $prices = array_map(fn ($o) => (float) $o['price'], array_filter($offers, fn ($o) => ($o['locked_until'] ?? null) === null));
+            $this->assertNotEmpty($prices, 'ต้องมีแบบไพ่ให้เปิดอย่างน้อยหนึ่งแบบ ไม่งั้นเทสต์นี้ไม่ได้ทดสอบอะไร');
+
+            return min($prices);
+        };
+        $prices = [$cheapest(ChatOffers::roomMenu($room, $user)), $cheapest(ChatOffers::forRoom($room, 'general', $user))];
+        $this->assertGreaterThan(0, min($prices), 'ต้องเป็นแบบที่ต้องจ่าย เทสต์ถึงจะแยกเงินพอ/ไม่พอได้');
+
+        return max($prices);
+    }
+
+    /** ขาดหนึ่งสตางค์จากแบบที่ถูกสุดของโต๊ะ (การ์ดที่บอทยื่นไม่ถูกกว่าโต๊ะ — assert ไว้ ไม่เดา) */
+    private function tableShortBySatang(string $room, User $user): float
+    {
+        $table = min(array_map(fn ($o) => (float) $o['price'], array_filter(ChatOffers::roomMenu($room, $user), fn ($o) => $o['locked_until'] === null)));
+        $offered = min(array_map(fn ($o) => (float) $o['price'], ChatOffers::forRoom($room, 'general', $user)));
+        $this->assertGreaterThanOrEqual($table, $offered);
+
+        return $table - 0.01;
+    }
+
+    /**
+     * 🧾 เคสจริง 2026-11-11 (ลูกค้า #26): เงินเข้าวอลเลตแล้ว ฿39.92 พอเปิดไพ่ ฿39 แต่มีรายการเติมเงินรอค้าง
+     * → บอทตอบ "ยังมีบิล ... รอชำระ" แทนทุกคำถาม 6 ครั้ง จนลูกค้าโอนซ้ำอีก ฿39.92
+     * เงินพอ = เปิดไพ่ได้เลย (หักวอลเลต ไม่ออกบิลใหม่) — บิลค้างไม่ต้องขวาง
+     */
+    public function test_a_pending_bill_does_not_block_a_reading_the_wallet_already_covers(): void
+    {
+        $user = $this->member();
+        $ref = (string) $this->actingAs($user)->postJson(route('chat.topup.store'), ['amount' => 100])->json('reference_code');
+        // เงินพอดีเป๊ะกับแบบที่ถูกสุด (กิ่งขอบ — เทียบเป็นสตางค์)
+        app(WalletService::class)->credit($user, $this->cheapestOffer('busaba', $user), 'เติมเงินผ่าน SMS');
+
+        $page = $this->actingAs($user)->get('/chat?room=busaba')->assertOk();
+        $page->assertViewHas('tableOffers', fn ($o) => count($o) > 0);
+        $page->assertViewHas('billBlocks', false);
+        // บิลยังอยู่ให้หน้าแชท (กดแบบที่เงินไม่พอ = เปิดบิลเดิม ไม่ซ้อนบิลใหม่) แต่ไม่วางป้ายบิลแทนโต๊ะ
+        $page->assertViewHas('pendingBill', fn ($b) => $b['reference_code'] === $ref);
+        $page->assertDontSee('บิลเลขที่ ' . $ref, false);
+
+        $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'เปิดไพ่ให้หน่อย', 'room' => 'busaba'])->assertOk();
+        $this->assertNotSame([], $res->json('offers'));
+        $this->assertStringNotContainsString($ref, (string) $res->json('reply'));
+        $this->assertStringNotContainsString('รอชำระ', (string) $res->json('reply'));
+    }
+
+    public function test_a_pending_bill_still_blocks_when_the_wallet_is_a_satang_short(): void
+    {
+        $user = $this->member();
+        $ref = (string) $this->actingAs($user)->postJson(route('chat.topup.store'), ['amount' => 100])->json('reference_code');
+        app(WalletService::class)->credit($user, $this->tableShortBySatang('busaba', $user), 'เติมเงิน');
+
+        $page = $this->actingAs($user)->get('/chat?room=busaba')->assertOk();
+        $page->assertViewHas('tableOffers', []);
+        $page->assertViewHas('billBlocks', true);
+        $page->assertSee('บิลเลขที่ ' . $ref, false);
+
+        $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'เปิดไพ่ให้หน่อย', 'room' => 'busaba'])->assertOk();
+        $this->assertSame([], $res->json('offers'));
+        $this->assertStringContainsString($ref, (string) $res->json('reply'));
+    }
+
+    /** แนบสลิปแล้ว = ลูกค้าโอนมาแล้ว รอตรวจ — ห้ามบอกให้โอนอีก (ทวงซ้ำ = ลูกค้าโอนซ้ำจริง) */
+    public function test_a_bill_with_a_slip_awaiting_review_is_not_dunned_again(): void
+    {
+        $user = $this->member();
+        $bill = $this->actingAs($user)->postJson(route('chat.topup.store'), ['amount' => 100])->assertOk();
+        WalletTransaction::findOrFail($bill->json('id'))->update(['slip_path' => 'topup-slips/x.jpg', 'slip_hash' => str_repeat('a', 64)]);
+
+        $res = $this->actingAs($user)->postJson('/chat/send', ['message' => 'เปิดไพ่ให้หน่อย', 'room' => 'busaba'])->assertOk();
+
+        $this->assertSame([], $res->json('offers'));
+        $reply = (string) $res->json('reply');
+        $this->assertStringContainsString($bill->json('reference_code'), $reply);
+        $this->assertStringContainsString('ไม่ต้องโอนซ้ำ', $reply);
+        $this->assertStringNotContainsString('ดู QR จ่ายต่อ', $reply);
+        $this->assertStringNotContainsString('โอนยอดนี้', $reply);
     }
 
     public function test_someone_elses_bill_cannot_be_resumed_and_a_paid_bill_is_gone(): void
