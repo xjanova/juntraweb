@@ -289,7 +289,9 @@ class FreeTarotReadingTest extends TestCase
         $this->assertSame($room->id, $page->viewData('conversation')->id, 'ต้องเปิดห้องที่เพิ่งวางคำทำนาย');
         $this->assertStringContainsString('ไพ่ใบนี้บอกว่าช่วงนี้ของเธอกำลังเปลี่ยนผ่าน', $page->viewData('conversation')->messages->first()->content);
         $this->assertNotEmpty($page->viewData('offerCards')['offers'], 'การ์ดแพ็กเกจต้องขึ้นใต้คำชวน');
-        $this->assertContains('เรื่องงานจะลงตัวเมื่อไร', $page->viewData('aiSuggestions'));
+        // 🎁 (2026-11-11) ปุ่ม "ถามต่อจากเรื่องนี้" ถูกแทนด้วยป้ายไพ่หมวดอื่น (FreeAskClockTest)
+        $this->assertSame([], $page->viewData('aiSuggestions'));
+        $this->assertNotEmpty($page->viewData('freePicks'));
 
         $this->assertDatabaseCount('wallet_transactions', 0);
         Http::assertNotSent(fn ($req) => str_contains($req->url(), '/chat/'));

@@ -68,6 +68,16 @@ Route::get('/download', [DownloadController::class, 'show'])->name('download');
 Route::get('/download/go', [DownloadController::class, 'go'])->middleware('throttle:60,1')->name('download.go');
 Route::redirect('/app', '/download');
 
+// 📱 (2026-11-11) เว็บเป็นแอป (PWA) — manifest สาธารณะ · สมัครรับแจ้งเตือนต้องล็อกอิน
+//    service worker = public/sw.js (ไฟล์นิ่ง ไม่ผ่าน Laravel)
+Route::get('/manifest.webmanifest', [\App\Http\Controllers\PwaController::class, 'manifest'])->name('pwa.manifest');
+Route::middleware('auth')->prefix('push')->name('push.')->controller(\App\Http\Controllers\PwaController::class)->group(function () {
+    Route::post('/subscribe', 'subscribe')->middleware('throttle:20,1')->name('subscribe');
+    Route::post('/unsubscribe', 'unsubscribe')->middleware('throttle:20,1')->name('unsubscribe');
+    Route::post('/test', 'test')->middleware('throttle:3,10')->name('test');
+    Route::post('/preferences', 'preferences')->middleware('throttle:20,1')->name('preferences');
+});
+
 // Static legal pages — theme-agnostic Blade (the ThemeServiceProvider view
 // composer injects $activeTheme/$themeConfig into every view, so Route::view works).
 Route::view('/privacy', 'pages.legal.privacy')->name('legal.privacy');
