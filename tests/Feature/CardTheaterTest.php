@@ -8,6 +8,8 @@ use App\Models\TarotCard;
 use App\Models\User;
 use App\Services\Wallet\WalletService;
 use App\Support\CardTheater;
+use App\Support\ChatRooms;
+use App\Support\TarotSpreads;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -245,5 +247,63 @@ class CardTheaterTest extends TestCase
         $this->assertSame('shrine', CardTheater::layout('kunsai', 10, 'celtic'));
         $this->assertSame('year', CardTheater::layout('year', 12));
         $this->assertSame('rows', CardTheater::layout('x', 7));
+    }
+
+    /**
+     * 🌸 (2026-11-11) โรงละครของทุกแบบไพ่ = ห้องของคนอ่าน
+     *   ไม่ถึง 10 ใบ → บุษบา · เซลติก/12 เดือน → แม่หมอ · คุณไสย → ห้องคุณไสย · จำนวนช่องบนโต๊ะ = จำนวนไพ่จริง
+     */
+    public function test_every_spread_plays_in_its_readers_room_with_the_right_card_count(): void
+    {
+        foreach (TarotSpreads::keys() as $key) {
+            $n = TarotSpreads::cardCount($key);
+            $want = match (true) {
+                $key === 'kunsai' => 'kunsai',
+                $n >= 10          => 'maemor',
+                default           => 'busaba',
+            };
+            $cfg = CardTheater::forPick($key, collect(), ['cost' => 0]);
+            $this->assertSame($want, $cfg['room']['key'], "{$key} ({$n} ใบ) ผิดห้อง");
+            $this->assertCount($n, $cfg['spread']['labels'], "{$key}: จำนวนช่องไม่ตรงจำนวนไพ่");
+            $this->assertSame(ChatRooms::name($want), $cfg['room']['name']);
+        }
+    }
+
+    /** ไพ่ 1 / 3 / 5 ใบของบุษบา: ห้อง ท่าวาง และเสียงตอนตั้งจิต/เลือกครบเป็นของแบบนั้น */
+    public function test_busaba_pick_theater_for_one_three_and_five_cards(): void
+    {
+        $this->deck();
+        $u = $this->member();
+
+        foreach (['single' => [1, 'row'], 'three' => [3, 'row'], 'quick' => [3, 'row'], 'love' => [5, 'arch'], 'career' => [5, 'arch'], 'decision' => [5, 'arch']] as $spread => [$n, $layout]) {
+            $this->actingAs($u)->post('/tarot/begin', ['spread' => $spread]);
+            $res = $this->get('/tarot/pick')->assertOk();
+            $html = $res->getContent();
+            $cfg = $this->configFrom($html);
+
+            $this->assertSame('busaba', $cfg['room']['key'], $spread);
+            $this->assertCount($n, $cfg['spread']['labels'], $spread);
+            $this->assertSame($layout, $cfg['spread']['layout'], $spread);
+            $this->assertStringContainsString("shuffle_focus--{$spread}.mp3", $html, "{$spread}: เสียงตั้งจิตไม่ตรงแบบไพ่");
+            $this->assertStringContainsString("pick_complete--{$spread}.mp3", $html, "{$spread}: เสียงเลือกครบไม่ตรงแบบไพ่");
+            // ปุ่มเสียงเรียกชื่อบุษบา ไม่ใช่แม่หมอ
+            $res->assertSee('aria-label="เปิดเสียงบุษบา"', false)->assertDontSee('เปิดเสียงแม่หมอ', false);
+        }
+    }
+
+    /** หน้าผลไพ่ 5 ใบของบุษบา: ฟันธงใช้เสียงเฉพาะเรื่อง (ความรัก) · ถามต่อพาเข้าห้องบุษบา */
+    public function test_busaba_result_uses_the_spread_verdict_voice_and_hands_off_to_her_room(): void
+    {
+        $u = $this->member();
+        $reading = $this->readingFor($u, null, 'love');
+        $reading->update(['payload' => ['positions' => ['อดีต', 'ปัจจุบัน', 'อนาคต'], 'room' => 'busaba']]);
+
+        $res = $this->actingAs($u)->get(route('tarot.show', $reading))->assertOk();
+        $html = $res->getContent();
+        $this->assertSame('busaba', $this->configFrom($html)['room']['key']);
+        $this->assertStringContainsString('verdict_good--love.mp3', $html);
+        $this->assertStringContainsString('verdict_caution--love.mp3', $html);
+        $this->assertSame('busaba', ChatRooms::roomForSpread('love'));
+        $res->assertSee('ถามบุษบา', false);
     }
 }

@@ -5,7 +5,7 @@
      สับไพ่ → เลือกไพ่ → ยืนยันค่าดูดวง → วางไพ่ → ส่งฟอร์มเดิมไป tarot.cast (ตัดเงิน/สร้างรายการที่เซิร์ฟเวอร์เหมือนเดิม) --}}
 @section('content')
 {{-- 🔊 ผู้พยากรณ์ชวนตั้งจิตตอนเข้าหน้า · เลือกครบ = "ครบแล้ว" (ถ้าลูกค้าเปิดเสียงไว้) --}}
-<x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spread)" :cues="['shuffle_focus']" />
+<x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spread)" :spread="$spread" :cues="['shuffle_focus']" />
 
 <x-card-theater :config="\App\Support\CardTheater::forPick($spread, $cards, [
                     'question' => $question,

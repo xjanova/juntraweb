@@ -103,7 +103,7 @@
 @section('content')
 @if ($isOwner)
   {{-- 🔊 แม่หมอพูดตามสถานะของใบนี้ — ครั้งเดียวต่อสถานะ (รีเฟรช/กลับมาดูซ้ำไม่พูดซ้ำ) --}}
-  <x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spreadKey)"
+  <x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spreadKey)" :spread="$spreadKey"
                   :cues="\App\Support\OracleMedia::readingCues($reading, $sections)"
                   :scope="'reading-' . $reading->id . '-' . $reading->status" />
 @endif
