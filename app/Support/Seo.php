@@ -71,7 +71,15 @@ class Seo
     /** คำอธิบายสำรองของหน้าปัจจุบัน (หน้าที่ไม่ได้ประกาศเอง) */
     public static function description(): string
     {
-        return self::INDEXABLE[Route::currentRouteName()] ?? self::DEFAULT_DESCRIPTION;
+        $name = Route::currentRouteName();
+        $text = self::INDEXABLE[$name] ?? self::DEFAULT_DESCRIPTION;
+
+        // 🌸 (2026-11-11) ไพ่ฟรี 1 ใบเป็นของบุษบาเมื่อห้องเปิด — คำอธิบายต้องไม่บอกว่าแม่หมอเป็นคนเปิด
+        if ($name === 'tarot.free' && ChatRooms::roomForSpread('single') !== ChatRooms::DEFAULT) {
+            $text = str_replace('กับแม่หมอจันทรา', 'กับ' . ChatRooms::readerName('single'), $text);
+        }
+
+        return $text;
     }
 
     /**

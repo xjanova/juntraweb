@@ -6,7 +6,7 @@ namespace App\Support;
  * 🔮 ห้องพยากรณ์ในหน้าแชท (config/chat_rooms.php) — แหล่งความจริงเดียวว่าห้องไหนเป็นของใคร ขายอะไร
  *
  * key ของห้อง = persona ที่ส่งไป Thaiprompt ทั้งแชท คำทำนาย และเสียงพากย์
- * ห้องกับแพ็กเกจเป็นคู่ 1:1 จึงหา persona ของคำทำนายจากแพ็กเกจได้เลย (personaForSpread)
+ * ห้องมีแพ็กเกจประจำ (spread) + แพ็กเกจที่รับอ่านเพิ่ม (also) จึงหา persona ของคำทำนายจากแพ็กเกจได้เลย (personaForSpread)
  * ไม่ต้องลากชื่อห้องผ่านหน้าเลือกไพ่ — ซื้อจากหน้า /tarot ตรง ๆ ก็ได้เสียงผู้พยากรณ์ที่ถูกห้อง
  */
 final class ChatRooms
@@ -74,16 +74,46 @@ final class ChatRooms
         return self::personaUpstream() ? self::normalize($key) : null;
     }
 
-    /** persona ของคำทำนายจากแพ็กเกจ — quick → บุษบา · kunsai → คุณไสย · อื่น ๆ → แม่หมอ */
+    /**
+     * persona ของคำทำนายจากแพ็กเกจ — ผู้พยากรณ์ที่อ่านไพ่ชุดนั้น
+     *
+     * 1. แพ็กเกจประจำห้อง (quick → บุษบา · kunsai → คุณไสย · celtic → แม่หมอ) อ่านโดยห้องนั้นเสมอ
+     * 2. แพ็กเกจใน `also` ของห้อง (ไพ่ไม่ถึง 9 ใบ → บุษบา) — เฉพาะตอนห้องนั้นเปิด
+     *    ห้องปิดอยู่ ไพ่ชุดนั้นขายในห้องแม่หมอ จึงต้องเป็นแม่หมอทั้งหน้าตา เสียง และคำทำนาย
+     * 3. ไม่มีห้องไหนรับ → แม่หมอ
+     */
     public static function personaForSpread(?string $spread): string
     {
+        if ($spread === null) {
+            return self::DEFAULT;
+        }
         foreach (self::all() as $key => $room) {
-            if ($spread !== null && ($room['spread'] ?? null) === $spread) {
+            if (($room['spread'] ?? null) === $spread) {
+                return $key;
+            }
+        }
+        foreach (self::all() as $key => $room) {
+            if (in_array($spread, (array) ($room['also'] ?? []), true) && self::isOpen($key)) {
                 return $key;
             }
         }
 
         return self::DEFAULT;
+    }
+
+    /** มีห้องไหนประกาศว่าเป็นเจ้าของแพ็กเกจนี้ไหม (spread หรือ also) — ไม่มี = ใช้ห้องที่ลูกค้าอยู่ */
+    public static function hasOwner(?string $spread): bool
+    {
+        if ($spread === null) {
+            return false;
+        }
+        foreach (self::all() as $room) {
+            if (($room['spread'] ?? null) === $spread || in_array($spread, (array) ($room['also'] ?? []), true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -97,7 +127,7 @@ final class ChatRooms
         return self::isOpen($key) ? $key : self::DEFAULT;
     }
 
-    /** แพ็กเกจเดียวของห้อง */
+    /** แพ็กเกจประจำห้อง (ขึ้นก่อนในรายการไพ่ของห้อง · การ์ดที่ห้องยื่นในแชท) */
     public static function spread(string $key): string
     {
         return (string) (self::get(self::normalize($key))['spread'] ?? 'celtic');
@@ -106,6 +136,17 @@ final class ChatRooms
     public static function name(string $key): string
     {
         return (string) (self::get(self::normalize($key))['name'] ?? 'แม่หมอจันทรา');
+    }
+
+    /**
+     * 🌸 (2026-11-11) ชื่อผู้อ่านไพ่ชุดนี้ในข้อความบนเว็บ — "น้องบุษบา" / "แม่หมอ" (ตามห้องที่ขายจริงตอนนี้)
+     *   แม่หมอใช้ชื่อสั้นเหมือนข้อความเดิมทั้งเว็บ · ห้องอื่นใช้ชื่อเต็มเพราะ "บุษบา" เฉย ๆ ห้วนเกินในประโยคบรรยาย
+     */
+    public static function readerName(?string $spread): string
+    {
+        $key = self::roomForSpread($spread);
+
+        return $key === self::DEFAULT ? self::short($key) : self::name($key);
     }
 
     public static function short(string $key): string

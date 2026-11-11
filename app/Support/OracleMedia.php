@@ -40,14 +40,40 @@ final class OracleMedia
     /**
      * เสียงประโยคประจำที่มีไฟล์แล้ว — key => url
      *
+     * 🌸 (2026-11-11) ส่งแบบไพ่มาด้วย = ประโยคเฉพาะแบบนั้น (voice_by_spread) แทนประโยคกลางของ key เดียวกัน
+     *    (บุษบาอ่าน 1 · 3 · 5 ใบ — "เลือกไพ่ห้าใบ" ต้องไม่ดังบนโต๊ะที่มีไพ่ใบเดียว) · ไม่มีไฟล์ = ใช้ประโยคกลาง
+     *
      * @return array<string, string>
      */
-    public static function voice(string $persona): array
+    public static function voice(string $persona, ?string $spread = null): array
     {
         $out = [];
         foreach (self::voicePaths($persona) as $key => $path) {
             if (is_file(public_path($path))) {
                 $out[$key] = self::url($path);
+            }
+        }
+        foreach (self::voiceSpreadPaths($persona)[(string) $spread] ?? [] as $key => $path) {
+            if (is_file(public_path($path))) {
+                $out[$key] = self::url($path);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * ประโยคเฉพาะแบบไพ่ตาม manifest (ไม่สนว่ามีไฟล์หรือยัง) — ให้เทสต์ใช้เช็คความครบ
+     *
+     * @return array<string, array<string, string>> spread => key => path ใต้ public/
+     */
+    public static function voiceSpreadPaths(string $persona): array
+    {
+        $dir = self::dir($persona);
+        $out = [];
+        foreach ((array) config('oracle_media.rooms.' . ChatRooms::normalize($persona) . '.voice_by_spread', []) as $spread => $lines) {
+            foreach (array_keys((array) $lines) as $key) {
+                $out[(string) $spread][$key] = "{$dir}/voice/{$key}--{$spread}.mp3";
             }
         }
 
@@ -152,15 +178,17 @@ final class OracleMedia
     }
 
     /**
-     * ห้องที่ "พูด" บนหน้าเลือกไพ่/ผลทำนาย — แพ็กเกจคุณไสยเป็นของห้องคุณไสยเสมอ
-     * นอกนั้นเป็นห้องที่ลูกค้าเพิ่งคุยอยู่ (session chat_room) ไม่มี = แม่หมอจันทรา
+     * ห้องที่ "พูด" บนหน้าเลือกไพ่/ผลทำนาย — ผู้พยากรณ์ที่อ่านไพ่ชุดนั้น (ChatRooms::personaForSpread)
+     * แพ็กเกจที่ไม่มีห้องไหนรับ → ห้องที่ลูกค้าเพิ่งคุยอยู่ (session chat_room) ไม่มี = แม่หมอจันทรา
      */
     public static function personaFor(?string $spreadKey): string
     {
         // แบบทำนายประจำห้อง (quick → บุษบา · kunsai → คุณไสย) พูดด้วยเสียงห้องนั้นเสมอ — ห้องยังปิดก็ยังเป็นเสียงเดิมของแบบนั้น
         //   (ไพ่ quick อ่านโดยบุษบาฝั่ง Thaiprompt — เสียงต้องตรงกับคนเขียนคำทำนาย)
+        // 🌸 (2026-11-11) ไพ่ที่ห้องรับอ่าน (also) ก็เช่นกัน — 1/3/5 ใบเป็นบุษบา · 12 เดือนเป็นแม่หมอ
+        //   เดิมไพ่เหล่านี้ใช้ห้องใน session: ซื้อไพ่ 5 ใบจากห้องบุษบา ได้หน้า/เสียงบุษบา แต่คำทำนายเขียนโดยแม่หมอ
         $owner = ChatRooms::personaForSpread($spreadKey);
-        if ($owner !== ChatRooms::DEFAULT) {
+        if ($owner !== ChatRooms::DEFAULT || ChatRooms::hasOwner($spreadKey)) {
             return $owner;
         }
         $room = session('chat_room');

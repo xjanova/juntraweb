@@ -103,7 +103,7 @@
 @section('content')
 @if ($isOwner)
   {{-- 🔊 แม่หมอพูดตามสถานะของใบนี้ — ครั้งเดียวต่อสถานะ (รีเฟรช/กลับมาดูซ้ำไม่พูดซ้ำ) --}}
-  <x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spreadKey)"
+  <x-oracle-voice :persona="\App\Support\OracleMedia::personaFor($spreadKey)" :spread="$spreadKey"
                   :cues="\App\Support\OracleMedia::readingCues($reading, $sections)"
                   :scope="'reading-' . $reading->id . '-' . $reading->status" />
 @endif
@@ -250,9 +250,9 @@
       <div class="panel reading-wait" style="margin-top:44px;text-align:center" role="status" aria-live="polite"
            data-status-url="{{ route('tarot.status', $reading) }}">
         <div class="reading-wait-moon" aria-hidden="true"></div>
-        <div class="eyebrow" style="display:inline-flex;margin-top:18px">แม่หมอกำลังอ่านไพ่ของคุณ</div>
+        <div class="eyebrow" style="display:inline-flex;margin-top:18px">{{ $oracleShort }}กำลังอ่านไพ่ของคุณ</div>
         <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:46ch;margin:10px auto 0">
-          แม่หมอกำลังเพ่งไพ่ทั้ง {{ $count }} ใบทีละตำแหน่ง ใช้เวลาประมาณ 15 วินาทีถึง 1 นาที
+          {{ $oracleShort }}กำลังเพ่งไพ่ทั้ง {{ $count }} ใบทีละตำแหน่ง ใช้เวลาประมาณ 15 วินาทีถึง 1 นาที
           <span class="reading-wait-elapsed" style="color:var(--gold)"></span><br>
           ปิดหน้านี้ได้ คำทำนายจะรออยู่ในประวัติการดูดวงของคุณ
         </p>
@@ -282,13 +282,13 @@
       <div class="panel" style="margin-top:44px;text-align:center">
         <div class="eyebrow" style="display:inline-flex">อ่านไพ่ไม่สำเร็จ</div>
         <p style="font-family:var(--thai);color:var(--ink-dim);line-height:1.8;max-width:48ch;margin:12px auto 20px">
-          ขออภัยค่ะ แม่หมออ่านไพ่ชุดนี้ไม่สำเร็จ
+          ขออภัยค่ะ {{ $oracleShort }}อ่านไพ่ชุดนี้ไม่สำเร็จ
           @if ((float) data_get($reading->payload, 'cost', 0) > 0)
             — เครดิต ฿{{ number_format((float) data_get($reading->payload, 'cost'), 0) }} คืนเข้ากระเป๋าของคุณเรียบร้อยแล้ว
           @endif
           ลองเปิดไพ่ใหม่อีกครั้งได้เลยนะคะ
         </p>
-        <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ใหม่</a>
+        <a href="{{ route('tarot.index', $spreadKey ? ['spread' => $spreadKey] : []) }}" class="btn btn-primary">เปิดไพ่ใหม่</a>
       </div>
     @elseif ($hasSections)
       <div style="margin-top:40px">
@@ -366,13 +366,13 @@
             <svg x-show="!sending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
           </button>
         </form>
-        <a href="{{ route('tarot.index') }}" class="followup-again">↺ เปิดไพ่ใหม่อีกครั้ง</a>
+        <a href="{{ route('tarot.index', $spreadKey ? ['spread' => $spreadKey] : []) }}" class="followup-again">↺ เปิดไพ่ใหม่อีกครั้ง</a>
       </div>
     @else
       {{-- Non-owner (public share / admin view) → just the basics. --}}
       <div style="text-align:center;margin-top:48px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
         <a href="{{ route('tarot.index') }}" class="btn btn-ghost">เปิดไพ่ของคุณ</a>
-        <a href="{{ route('chat.index') }}" class="btn btn-primary">คุยกับแม่หมอ AI
+        <a href="{{ route('chat.index', ['room' => \App\Support\ChatRooms::DEFAULT]) }}" class="btn btn-primary">คุยกับแม่หมอ AI
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </a>
       </div>

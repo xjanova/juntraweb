@@ -81,7 +81,11 @@ class PickInRoomTest extends TestCase
         $u = $this->member();
 
         $this->assertSame('busaba', ChatOffers::menuRoomOf('quick'));
-        $this->assertSame(['tarot_quick'], array_column(ChatOffers::roomMenu('busaba', $u), 'key'));
+        // 🌸 (2026-11-11) ไพ่ไม่ถึง 9 ใบเป็นของบุษบาทั้งหมด
+        $this->assertSame(
+            ['tarot_quick', 'tarot_single', 'tarot_three', 'tarot_love', 'tarot_career', 'tarot_decision'],
+            array_column(ChatOffers::roomMenu('busaba', $u), 'key'),
+        );
 
         $maemor = array_column(ChatOffers::roomMenu('maemor', $u), 'key');
         $this->assertNotContains('tarot_quick', $maemor);

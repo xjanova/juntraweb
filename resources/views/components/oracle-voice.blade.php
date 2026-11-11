@@ -4,6 +4,8 @@
     'cues'  => [],
     // ขอบเขตของ "พูดครั้งเดียว" — เช่น reading-123 กันรีเฟรชหน้าผลแล้วพูดซ้ำ
     'scope' => null,
+    // 🌸 (2026-11-11) แบบไพ่ของหน้านี้ — ประโยคที่บอกจำนวนใบ/เรื่อง ใช้ของแบบนั้น (OracleMedia::voice)
+    'spread' => null,
 ])
 
 {{-- 🔊 (2026-11-04) เสียงผู้พยากรณ์บนหน้าที่ไม่มีเวที (เลือกไพ่ / ผลทำนาย)
@@ -13,7 +15,9 @@
        และ partials.sound-ask เด้งกลางจอชวนแตะเปิดเสียง
      - หน้าอื่นสั่งพูดได้ด้วย window.dispatchEvent(new CustomEvent('oracle-say', {detail: {key, once}})) --}}
 @php
-    $voice = \App\Support\OracleMedia::voice($persona);
+    $voice = \App\Support\OracleMedia::voice($persona, $spread);
+    // ป้ายปุ่มเรียกชื่อผู้พยากรณ์ของห้องนี้ (บุษบา / แม่หมอ) ไม่ใช่ "แม่หมอ" ตายตัว
+    $who = \App\Support\ChatRooms::short($persona);
 @endphp
 
 @if ($voice)
@@ -24,11 +28,11 @@
           x-data="oracleVoice(@js(['voice' => $voice, 'cues' => array_values($cues), 'scope' => $scope]))"
           @click="toggle()"
           :aria-pressed="sound ? 'true' : 'false'"
-          :aria-label="sound ? 'ปิดเสียงแม่หมอ' : 'เปิดเสียงแม่หมอ'"
-          aria-label="เปิดเสียงแม่หมอ">
+          :aria-label="sound ? @js('ปิดเสียง' . $who) : @js('เปิดเสียง' . $who)"
+          aria-label="เปิดเสียง{{ $who }}">
     <svg x-show="!sound" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6M17 9l6 6"/></svg>
     <svg x-show="sound" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
-    <span class="oracle-voice-label" x-text="sound ? 'เสียงเปิด' : 'ฟังเสียงแม่หมอ'"></span>
+    <span class="oracle-voice-label" x-text="sound ? 'เสียงเปิด' : @js('ฟังเสียง' . $who)"></span>
   </button>
 
   @once

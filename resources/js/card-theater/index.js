@@ -70,7 +70,14 @@ function spreadLayout(layout, n) {
     const gy = CH + 0.32;
     if (layout === 'row') for (let i = 0; i < n; i++) P.push([(i - (n - 1) / 2) * (gx + 0.1), 0, 0]);
     else if (layout === 'arch') for (let i = 0; i < n; i++) { const t = i - (n - 1) / 2; P.push([t * (gx + 0.06), -Math.abs(t) * 0.28 + 0.3, -t * 0.08]); }
-    else if (layout === 'grid') for (let i = 0; i < n; i++) P.push([((i % 3) - 1) * (gx + 0.1), (1 - Math.floor(i / 3)) * gy, 0]);
+    else if (layout === 'grid') {
+        // แถวละ 3 ใบ · 🌸 (2026-11-11) แถวสุดท้ายที่ไม่เต็มวางกึ่งกลางแถว ไม่ชิดซ้าย
+        for (let i = 0; i < n; i++) {
+            const r = Math.floor(i / 3);
+            const inRow = Math.min(3, n - r * 3);
+            P.push([((i % 3) - (inRow - 1) / 2) * (gx + 0.1), (1 - r) * gy, 0]);
+        }
+    }
     else if (layout === 'celtic') {
         const sx = gx + 0.14;
         P.push([0, 0, 0], [0, 0, Math.PI / 2], [0, -gy, 0], [-sx - 0.1, 0, 0], [0, gy, 0], [sx + 0.1, 0, 0]);

@@ -1304,6 +1304,14 @@
 }
 .room-product-name { flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink-dim); }
 .room-product-price { font-family: var(--display); font-size: 22px; color: var(--gold, #f4cf6a); white-space: nowrap; }
+/* 🌸 (2026-11-11) รายการทุกแบบของห้อง (บุษบา 6 แบบ) — แถวเตี้ยลง กดได้ทั้งแถว */
+.room-menu { list-style: none; margin: auto 0 0; padding: 0; display: grid; gap: 6px; }
+.room-menu .room-product { margin-top: 0; padding: 7px 10px; color: inherit; text-decoration: none; transition: border-color .15s, background .15s; }
+.room-menu .room-product:hover, .room-menu .room-product:focus-visible { border-color: var(--gold, #f4cf6a); background: rgba(244, 207, 106, .06); }
+.room-menu .room-product-cards { width: 22px; height: 29px; font-size: 12.5px; }
+.room-menu .room-product-name { color: var(--ink, #f3e9ff); }
+.room-menu .room-product-name small { display: block; font-size: 11px; color: var(--ink-faint, rgba(243, 233, 255, .55)); }
+.room-menu .room-product-price { font-size: 17px; }
 .room-go { width: 100%; justify-content: center; min-height: 48px; }
 .room-go[aria-disabled="true"] { pointer-events: none; opacity: .6; }
 

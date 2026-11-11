@@ -173,7 +173,9 @@ class ChatRoomsTest extends TestCase
 
         $this->assertSame('busaba', \App\Support\OracleMedia::personaFor('quick'));
         $this->assertSame('kunsai', \App\Support\OracleMedia::personaFor('kunsai'));
-        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('three'));
+        // 🌸 (2026-11-11) ไพ่ 3 ใบเป็นของบุษบาแล้ว · 12 เดือนยังเป็นแม่หมอ
+        $this->assertSame('busaba', \App\Support\OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('year'));
     }
 
     public function test_closed_room_notice_shows_once_on_the_picker(): void
@@ -232,7 +234,9 @@ class ChatRoomsTest extends TestCase
         $keys = fn (string $room, string $topic) => array_column(\App\Services\Chat\ChatOffers::forRoom($room, $topic), 'key');
 
         $this->assertSame(['tarot_celtic'], $keys('maemor', 'love'));
-        $this->assertSame(['tarot_quick'], $keys('busaba', 'career'));
+        // 🌸 (2026-11-11) บุษบาอ่านทุกแบบที่ไม่ถึง 10 ใบ → การ์ดประจำห้องก่อน ตามด้วยแบบที่ตรงเรื่อง
+        $this->assertSame(['tarot_quick', 'tarot_career', 'tarot_decision'], $keys('busaba', 'career'));
+        $this->assertSame(['tarot_quick', 'tarot_love', 'tarot_three'], $keys('busaba', 'love'));
         $this->assertSame(['tarot_kunsai'], $keys('kunsai', 'general'));
         // เรื่องของ/คุณไสยในห้องอื่น → การ์ดคุณไสย ตรงกับที่ผู้พยากรณ์บอกว่า "ต้องให้แม่หมอส่องให้โดยเฉพาะ"
         $this->assertSame(['tarot_kunsai'], $keys('busaba', 'kunsai'));
@@ -322,6 +326,54 @@ class ChatRoomsTest extends TestCase
         $this->assertStringNotContainsString('แม่หมอ', $greeting);
     }
 
+    /** 🌸 (2026-11-11, owner) "เธอต้องดูหมด เลยที่ไพ่ไม่ถึง 10 ใบ" — แบบใหม่ที่ไม่ถึง 10 ใบต้องตกเป็นของบุษบาด้วย */
+    public function test_every_spread_under_ten_cards_is_busabas(): void
+    {
+        $this->allRoomsOpen();
+
+        foreach (array_keys(config('tarot_spreads')) as $spread) {
+            if (! is_array(config("tarot_spreads.{$spread}.positions"))) {
+                continue;
+            }
+            $owner = ChatRooms::personaForSpread($spread);
+            if ($spread === 'kunsai') {
+                $this->assertSame('kunsai', $owner);
+            } elseif (\App\Support\TarotSpreads::cardCount($spread) < 10) {
+                $this->assertSame('busaba', $owner, "{$spread} ไม่ถึง 10 ใบ ต้องเป็นของบุษบา");
+            } else {
+                $this->assertSame('maemor', $owner, "{$spread} 10 ใบขึ้นไป ต้องเป็นของแม่หมอ");
+            }
+        }
+    }
+
+    /** การ์ดหน้าเลือกผู้พยากรณ์บอกทุกแบบที่ห้องนั้นเปิดไพ่ให้ พร้อมราคา — ไม่ใช่แค่ "ดูไว 3 ใบ" */
+    public function test_room_picker_lists_every_spread_of_the_room_with_its_price(): void
+    {
+        $this->allRoomsOpen();
+        $user = $this->member();
+
+        $html = $this->actingAs($user)->get('/chat?pick=1')->assertOk()->assertViewIs('pages.chat.rooms')->getContent();
+        $card = function (string $room) use ($html): string {
+            $this->assertSame(1, preg_match('~<article[^>]*data-persona="' . $room . '".*?</article>~s', $html, $m), "ไม่เจอการ์ดห้อง {$room}");
+
+            return $m[0];
+        };
+        $busaba = $card('busaba');
+        $maemor = $card('maemor');
+
+        foreach (['quick', 'single', 'three', 'love', 'career', 'decision'] as $spread) {
+            $name  = e((string) config("tarot_spreads.{$spread}.name_th"));
+            $price = (float) \App\Support\Pricing::for(\App\Support\TarotSpreads::priceKey($spread));
+            $this->assertStringContainsString($name, $busaba, "การ์ดบุษบาต้องมี {$spread}");
+            $this->assertStringContainsString('฿' . number_format($price, $price == intval($price) ? 0 : 2), $busaba);
+            $this->assertStringContainsString(e(route('tarot.index', ['spread' => $spread])), $busaba);
+            $this->assertStringNotContainsString($name, $maemor);
+        }
+        $this->assertStringContainsString(e((string) config('tarot_spreads.celtic.name_th')), $maemor);
+        $this->assertStringNotContainsString(e((string) config('tarot_spreads.celtic.name_th')), $busaba);
+        $this->assertStringContainsString('ไพ่ 1-5 ใบ', $busaba);
+    }
+
     public function test_room_texts_speak_in_the_rooms_voice_and_mae_mor_text_is_unchanged(): void
     {
         Setting::put('chat_daily_limit', '10', 'chat', false);
@@ -344,13 +396,18 @@ class ChatRoomsTest extends TestCase
         $this->assertSame(['tarot_kunsai'], array_column(ChatOffers::forRoom('busaba', 'kunsai', $user), 'key'));
         $this->assertSame(config('chat_rooms.rooms.busaba.handoff'), ChatOffers::invite('kunsai', 'busaba', $user));
 
-        // เพิ่งเปิดไพ่ของห้องไป (ติดข้อห้ามเปิดซ้ำ) → ไม่มีการ์ด → ห้ามพูดว่า "กดการ์ดด้านล่าง"
-        Setting::put('tarot_quick_cooldown_days', '7', 'tarot', false);
+        // ห้องบุษบามีการ์ด → คำชวนไม่ผูกกับ "3 ใบ" (ยื่นได้หลายแบบแล้ว)
+        $this->assertStringNotContainsString('3 ใบ', ChatOffers::invite('career', 'busaba', $user));
+
+        // เพิ่งเปิดไพ่ทุกแบบที่ตรงเรื่องไป (ติดข้อห้ามเปิดซ้ำ) → ไม่มีการ์ด → ห้ามพูดว่า "กดการ์ดด้านล่าง"
+        foreach (['quick', 'career', 'decision'] as $i => $spread) {
+            Setting::put("tarot_{$spread}_cooldown_days", '7', 'tarot', false);
+            Reading::create([
+                'user_id' => $user->id, 'session_token' => "q{$i}", 'type' => "tarot_{$spread}",
+                'question' => 'งานใหม่จะผ่านไหม', 'payload' => ['cost' => 39], 'result' => 'ผ่าน',
+            ]);
+        }
         Cache::flush();
-        Reading::create([
-            'user_id' => $user->id, 'session_token' => 'q1', 'type' => 'tarot_quick',
-            'question' => 'งานใหม่จะผ่านไหม', 'payload' => ['cost' => 39], 'result' => 'ผ่าน',
-        ]);
         $this->assertSame([], ChatOffers::forRoom('busaba', 'career', $user));
         $line = ChatOffers::invite('career', 'busaba', $user);
         $this->assertSame(config('chat_rooms.rooms.busaba.no_offer'), $line);
@@ -406,5 +463,65 @@ class ChatRoomsTest extends TestCase
         Setting::put('pricing_tarot_kunsai', '150', 'pricing', false);
         $migration->up();
         $this->assertSame('150', Setting::where('key', 'pricing_tarot_kunsai')->value('value'));
+    }
+
+    /** 🌸 (2026-11-11, owner) "ไพ่ 1 ใบ ไม่ถึง 9 ใบเป็นของ บุษบาทั้งหมด" — ห้อง หน้าตา เสียง และคำทำนายเป็นบุษบา */
+    public function test_every_spread_under_nine_cards_belongs_to_busaba_once_her_room_is_open(): void
+    {
+        // ห้องบุษบายังปิด → ไพ่ 1/3/5 ใบยังขายและอ่านในห้องแม่หมอ (ไม่มีบุษบาโผล่ในห้องที่เปิดไม่ได้)
+        $this->assertSame('maemor', ChatRooms::personaForSpread('love'));
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('single'));
+
+        $this->allRoomsOpen();
+        session(['chat_room' => 'maemor']);
+        foreach (['single', 'three', 'quick', 'love', 'career', 'decision'] as $spread) {
+            $this->assertLessThan(9, \App\Support\TarotSpreads::cardCount($spread), $spread);
+            $this->assertSame('busaba', ChatRooms::personaForSpread($spread), $spread);
+            $this->assertSame('busaba', ChatOffers::menuRoomOf($spread), $spread);
+            // หน้าเลือกไพ่/ผลทำนายพูดด้วยเสียงบุษบา แม้ลูกค้าจะเพิ่งมาจากห้องแม่หมอ
+            $this->assertSame('busaba', \App\Support\OracleMedia::personaFor($spread), $spread);
+        }
+        foreach (['celtic', 'year'] as $spread) {
+            $this->assertSame('maemor', ChatRooms::personaForSpread($spread), $spread);
+        }
+        $this->assertSame('kunsai', ChatRooms::personaForSpread('kunsai'));
+
+        // เปิดห้องบุษบาจากห้องอื่นแล้ว 12 เดือนยังเป็นแม่หมอ (เดิมใช้ห้องใน session → เสียงบุษบาอ่านไพ่แม่หมอ)
+        session(['chat_room' => 'busaba']);
+        $this->assertSame('maemor', \App\Support\OracleMedia::personaFor('year'));
+
+        // เมนูไพ่ของแต่ละห้อง — แบบประจำห้องขึ้นก่อน
+        $this->assertSame(
+            ['tarot_quick', 'tarot_single', 'tarot_three', 'tarot_love', 'tarot_career', 'tarot_decision'],
+            array_column(ChatOffers::roomMenu('busaba'), 'key'),
+        );
+        $this->assertSame(['tarot_celtic', 'tarot_year', 'deep'], array_column(ChatOffers::roomMenu('maemor'), 'key'));
+
+        // ห้องบุษบาปิดทีละห้อง → ทุกแบบกลับไปห้องแม่หมอ ยกเว้น "ดูไว" ที่บุษบาอ่านเสมอ
+        config(['chat_rooms.closed' => ['busaba']]);
+        $this->assertSame('maemor', ChatRooms::personaForSpread('love'));
+        $this->assertSame('maemor', ChatOffers::menuRoomOf('love'));
+        $this->assertSame('busaba', ChatRooms::personaForSpread('quick'));
+    }
+
+    /** ห้องแม่หมอไม่ยื่นการ์ดไพ่ของห้องบุษบา — กดไปแล้วกลายเป็นคำทำนายของบุษบาในห้องแม่หมอ */
+    public function test_mae_mor_fallback_cards_skip_busabas_spreads(): void
+    {
+        $this->allRoomsOpen();
+        $user = $this->member();
+        // แพ็กเกจประจำห้อง (Celtic) ติดข้อห้ามเปิดซ้ำ → ถอยไปการ์ดตามเรื่อง
+        Setting::put('tarot_celtic_cooldown_days', '7', 'pricing', false);
+        Cache::flush();
+        \App\Models\Reading::create(['user_id' => $user->id, 'session_token' => 's', 'type' => 'tarot_celtic', 'question' => 'q', 'result' => 'r']);
+        $cards = ChatOffers::forRoom('maemor', 'love', $user);
+
+        foreach ($cards as $c) {
+            if ($c['kind'] === 'tarot') {
+                $this->assertSame('maemor', ChatOffers::menuRoomOf((string) $c['spread']), $c['key']);
+            }
+        }
+        $this->assertNotContains('tarot_celtic', array_column($cards, 'key'));
+        $this->assertNotContains('tarot_love', array_column($cards, 'key'));
+        $this->assertNotContains('tarot_three', array_column($cards, 'key'));
     }
 }

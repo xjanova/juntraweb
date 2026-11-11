@@ -2,9 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Models\Setting;
 use App\Support\ChatRooms;
 use App\Support\OracleMedia;
+use App\Support\TarotSpreads;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
@@ -229,12 +232,22 @@ class OracleMediaTest extends TestCase
         $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
         $this->assertSame('maemor', OracleMedia::personaFor('three'));
 
+        // 🌸 (2026-11-11) เสียงตามคนเขียนคำทำนาย ไม่ใช่ห้องใน session
+        //   ห้องบุษบายังปิด → ไพ่ 3 ใบอ่านโดยแม่หมอ แม้ session จะค้างห้องบุษบาไว้
         session(['chat_room' => 'busaba']);
-        $this->assertSame('busaba', OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', OracleMedia::personaFor('three'));
         $this->assertSame('kunsai', OracleMedia::personaFor('kunsai'));
 
+        //   ห้องบุษบาเปิด → ไพ่ 3 ใบเป็นเสียงบุษบา แม้เข้ามาจากห้องแม่หมอ · 12 เดือนยังเป็นแม่หมอ
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Cache::flush();
+        session(['chat_room' => 'maemor']);
+        $this->assertSame('busaba', OracleMedia::personaFor('three'));
+        $this->assertSame('maemor', OracleMedia::personaFor('year'));
+
         session(['chat_room' => 'ไม่มีห้องนี้']);
-        $this->assertSame('maemor', OracleMedia::personaFor('three'));
+        $this->assertSame('busaba', OracleMedia::personaFor('single'));
     }
 
     /** ปุ่มลำโพงลอยบนหน้าเลือกไพ่/ผล: ไม่มีไฟล์ = ไม่มีปุ่ม · ส่งเฉพาะประโยคที่มีไฟล์ · ไม่เล่นเอง */
@@ -359,5 +372,102 @@ class OracleMediaTest extends TestCase
         $dupes = array_keys(array_filter(array_count_values($m[1]), fn ($n) => $n > 1));
         $this->assertSame([], $dupes, 'เมธอดชื่อซ้ำใน oracleStage: ' . implode(', ', $dupes));
         $this->assertContains('playLine', $m[1]);
+    }
+
+    /**
+     * 🌸 (2026-11-11) เสียงพากย์ต้องสอดคล้องกับแบบไพ่ — บุษบาอ่านไพ่ 1 / 3 / 5 ใบ
+     *   ประโยคเฉพาะแบบไพ่ทุกประโยคมีไฟล์จริง · ขึ้นต้นด้วยแท็กน้ำเสียง · ไม่มีราคา · ใช้แบบไพ่ที่มีอยู่จริง
+     */
+    public function test_every_spread_voice_line_has_a_real_mp3_and_a_real_spread(): void
+    {
+        $seen = 0;
+        foreach (ChatRooms::keys() as $persona) {
+            $lines = (array) config("oracle_media.rooms.{$persona}.voice_by_spread", []);
+            foreach (OracleMedia::voiceSpreadPaths($persona) as $spread => $paths) {
+                $this->assertTrue(TarotSpreads::has($spread), "{$persona}: ไม่มีแบบไพ่ {$spread}");
+                foreach ($paths as $key => $path) {
+                    $seen++;
+                    $this->assertArrayHasKey($key, (array) config("oracle_media.rooms.{$persona}.voice"), "{$persona}.{$key}--{$spread} ต้องทับประโยคหลักที่มีอยู่");
+                    $text = (string) $lines[$spread][$key];
+                    $this->assertMatchesRegularExpression('/^\[[a-z]+\] \S/u', $text, "{$persona}.{$key}--{$spread} ต้องขึ้นต้นด้วยแท็กน้ำเสียง");
+                    $this->assertDoesNotMatchRegularExpression('/฿|บาท|\d+\s*เครดิต/u', $text, "{$persona}.{$key}--{$spread} มีราคา");
+                    $full = public_path($path);
+                    $this->assertFileExists($full, "ประโยคเสียง {$path} ยังไม่มีไฟล์");
+                    $this->assertGreaterThan(5000, filesize($full), "{$path} เล็กผิดปกติ");
+                    $head = (string) file_get_contents($full, false, null, 0, 3);
+                    $this->assertTrue(str_starts_with($head, 'ID3') || (ord($head[0] ?? "\0") === 0xFF), "{$path} ไม่ใช่ mp3");
+                }
+            }
+        }
+        $this->assertGreaterThan(0, $seen);
+    }
+
+    /** จำนวนใบที่ประโยคพูดถึง ต้องตรงกับจำนวนไพ่จริงของแบบนั้น · ประโยคกลางของบุษบาห้ามพูดจำนวนใบ */
+    public function test_spoken_card_counts_match_the_spread(): void
+    {
+        $count = function (string $text): ?int {
+            if (preg_match('/(\d+)\s*ใบ/u', $text, $m)) {
+                return (int) $m[1];
+            }
+            foreach (['ใบเดียว' => 1, 'สองใบ' => 2, 'สามใบ' => 3, 'สี่ใบ' => 4, 'ห้าใบ' => 5, 'สิบใบ' => 10, 'สิบสองใบ' => 12] as $word => $n) {
+                if (str_contains($text, $word)) {
+                    return $n;
+                }
+            }
+
+            return null;
+        };
+
+        foreach (ChatRooms::keys() as $persona) {
+            foreach ((array) config("oracle_media.rooms.{$persona}.voice_by_spread", []) as $spread => $lines) {
+                foreach ($lines as $key => $text) {
+                    $n = $count($text);
+                    if ($n !== null) {
+                        $this->assertSame(TarotSpreads::cardCount($spread), $n, "{$persona}.{$key}--{$spread} พูดจำนวนใบผิด: {$text}");
+                    }
+                }
+            }
+        }
+
+        // ประโยคกลางบนเวทีเลือกไพ่/ผล ใช้กับทุกแบบไพ่ → ห้ามผูกจำนวนใบ (free_* อยู่ในไพ่ใบเดียวฟรีเท่านั้น)
+        foreach (config('oracle_media.rooms.busaba.voice') as $key => $text) {
+            if (! str_starts_with($key, 'free_')) {
+                $this->assertNull($count($text), "busaba.{$key} ผูกจำนวนใบไว้: {$text}");
+            }
+        }
+    }
+
+    /** ทุกแบบไพ่ที่บุษบาอ่าน มีประโยคตอนตั้งจิตและตอนเลือกครบเป็นของแบบนั้นเอง · ไฟล์เฉพาะแบบทับไฟล์กลาง */
+    public function test_each_busaba_spread_gets_its_own_pick_lines_and_they_override_the_base(): void
+    {
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Cache::flush();
+        // URL ของไฟล์มี ?v=เวลาแก้ไฟล์ต่อท้าย — เทียบเฉพาะ path
+        $path = fn (string $url) => (string) parse_url($url, PHP_URL_PATH);
+
+        $mine = array_values(array_filter(TarotSpreads::keys(), fn ($k) => ChatRooms::personaForSpread($k) === 'busaba'));
+        $this->assertEqualsCanonicalizing(['single', 'three', 'quick', 'love', 'career', 'decision'], $mine);
+
+        foreach ($mine as $spread) {
+            $v = OracleMedia::voice('busaba', $spread);
+            foreach (['shuffle_focus', 'pick_complete'] as $key) {
+                $this->assertStringEndsWith("/voice/{$key}--{$spread}.mp3", $path($v[$key]), "{$spread}: {$key} ยังเป็นเสียงกลาง");
+            }
+            // ประโยคอื่นยังอยู่ครบ (เปิดไพ่ / ถามต่อ)
+            $this->assertStringEndsWith('/voice/reveal_cards.mp3', $path($v['reveal_cards']));
+            $this->assertStringEndsWith('/voice/followup_ask.mp3', $path($v['followup_ask']));
+        }
+
+        foreach (['love', 'career', 'decision'] as $spread) {
+            $v = OracleMedia::voice('busaba', $spread);
+            $this->assertStringEndsWith("/voice/verdict_good--{$spread}.mp3", $path($v['verdict_good']));
+            $this->assertStringEndsWith("/voice/verdict_caution--{$spread}.mp3", $path($v['verdict_caution']));
+        }
+
+        // ไม่ระบุแบบไพ่ / แบบไพ่ที่ไม่มีประโยคเฉพาะ = เสียงกลาง
+        $this->assertStringEndsWith('/voice/shuffle_focus.mp3', $path(OracleMedia::voice('busaba')['shuffle_focus']));
+        $this->assertStringEndsWith('/voice/shuffle_focus.mp3', $path(OracleMedia::voice('busaba', 'celtic')['shuffle_focus']));
+        $this->assertCount(count(OracleMedia::voicePaths('busaba')), OracleMedia::voice('busaba', 'love'));
     }
 }

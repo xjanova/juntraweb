@@ -42,11 +42,17 @@ class TarotController extends Controller
     {
         $request->session()->reflash();
         $spread = $request->query('spread');
-        $room = is_string($spread) && in_array($spread, TarotSpreads::keys(), true)
-            ? ChatOffers::menuRoomOf($spread)
-            : ChatRooms::DEFAULT;
+        if (is_string($spread) && in_array($spread, TarotSpreads::keys(), true)) {
+            return redirect()->route('chat.index', ['room' => ChatOffers::menuRoomOf($spread), 'menu' => 1]);
+        }
 
-        return redirect()->route('chat.index', ['room' => $room, 'menu' => 1]);
+        // 🌸 (2026-11-11) ไม่ระบุแบบไพ่ + เปิดหลายห้อง → ไม่ยัดเข้าห้องแม่หมอ (ไพ่ไม่ถึง 9 ใบอยู่ห้องบุษบาแล้ว)
+        //   ให้ห้องแชทเลือกเอง: ห้องล่าสุดของลูกค้า → ไม่เคยเลือก = หน้าเลือกผู้พยากรณ์ · เปิดห้องเดียว = แม่หมอเหมือนเดิม
+        $open = array_filter(ChatRooms::keys(), [ChatRooms::class, 'isOpen']);
+
+        return count($open) > 1
+            ? redirect()->route('chat.index', ['menu' => 1])
+            : redirect()->route('chat.index', ['room' => ChatRooms::DEFAULT, 'menu' => 1]);
     }
 
     /**
@@ -264,7 +270,7 @@ class TarotController extends Controller
         //  จากความหมายไพ่ให้แทนคำทำนาย)
         if ($cost > 0 && ! $this->ai->isAvailableFor($user)) {
             return redirect()->route('tarot.index')
-                ->with('status', 'ตอนนี้แม่หมอยังเชื่อมต่อระบบทำนายไม่ได้ชั่วคราว — ยังไม่มีการหักเครดิต ลองใหม่อีกครั้งนะคะ');
+                ->with('status', 'ตอนนี้' . ChatRooms::readerName(TarotSpreads::keyFromType($type)) . 'ยังเชื่อมต่อระบบทำนายไม่ได้ชั่วคราว — ยังไม่มีการหักเครดิต ลองใหม่อีกครั้งนะคะ');
         }
 
         // Reserve credit BEFORE we touch the AI, so a failed reading doesn't
