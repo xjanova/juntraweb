@@ -125,6 +125,11 @@ class ChatSlipIntake
             return $this->report($transRef, self::NO_USER, null, null, 'ไม่พบบัญชีเว็บที่ผูกกับแชทนี้');
         }
 
+        // เงินก้อนนี้ SMS ธนาคารเครดิตบิลเว็บไปแล้ว (ลูกค้าโอนตรงยอด แล้วส่งสลิปในแชทตามมา)
+        if ($paid = $this->registry->smsCreditedTransaction($amount, $slip['trans_timestamp'] ?? null)) {
+            return $this->alreadyPaidBySms($user, $paid, $slip, $owner);
+        }
+
         $tx = $this->pickBill($user, $amount);
 
         // ไม่มีบิลค้างเลย = ลูกค้าโอนมาเอง → เปิดรายการรอแอดมินด้วยยอดในสลิป (ไม่เติมเอง)
@@ -195,6 +200,47 @@ class ChatSlipIntake
             fn ($a, $b) => abs($amount - (float) $a->amount) <=> abs($amount - (float) $b->amount),
             fn ($a, $b) => $b->id <=> $a->id,
         ])->first();
+    }
+
+    /**
+     * สลิปคือเงินก้อนที่ SMS เครดิตบิลไปแล้ว — ไม่เติมซ้ำ ไม่เปิดบิลใหม่
+     *  - บิลของลูกค้าคนนี้ → ผูกสลิปเข้าบิลนั้น แล้วตอบ "เติมแล้ว" (ลูกค้าเห็นยอดที่เข้าจริง)
+     *  - บิลของคนอื่น → สลิปซ้ำ (เงินก้อนนี้ถูกใช้ไปแล้ว)
+     */
+    private function alreadyPaidBySms(User $user, WalletTransaction $paid, array $slip, string $owner): array
+    {
+        $ref = (string) $slip['trans_ref'];
+
+        if ((int) $paid->user_id !== (int) $user->id) {
+            Log::warning('ChatSlipIntake: สลิปจากแชทเป็นเงินที่ SMS เครดิตบิลของลูกค้าคนอื่นไปแล้ว', [
+                'trans_ref' => $ref, 'chat_user' => $user->id, 'paid_tx' => $paid->id,
+            ]);
+
+            return $this->report($ref, self::DUPLICATE, null, null, 'เงินก้อนนี้ SMS ธนาคารยืนยันบิลของบัญชีอื่นไปแล้ว');
+        }
+
+        $claim = $this->registry->claim($paid, $slip, $owner);
+        if ($claim['status'] === SlipRegistry::ALREADY_USED) {
+            return $this->report($ref, self::DUPLICATE, null, null, 'สลิปถูกใช้ไปแล้วที่ ' . SlipRegistry::whereUsed((array) $claim['used_by']));
+        }
+
+        $meta = (array) $paid->meta;
+        $meta['chat_slip'] = array_filter([
+            'trans_ref'  => $ref,
+            'amount'     => (float) $slip['amount'],
+            'sender'     => $slip['sender_name'] ?? null,
+            'note'       => 'สลิปในแชทเพจตรงกับเงินที่ SMS ยืนยันบิลนี้แล้ว — ไม่เติมซ้ำ',
+            'claimed'    => $claim['status'] === SlipRegistry::CLAIMED,
+            'checked_at' => now()->toIso8601String(),
+        ], fn ($v) => $v !== null && $v !== '');
+        $fill = ['meta' => $meta];
+        if (trim((string) $paid->bank_reference) === '') {
+            // รอบหน้า (กริ่งซ้ำ/ตัวกวาด) usedLocally จะเจอเลขนี้ทันที
+            $fill['bank_reference'] = $ref;
+        }
+        $paid->forceFill($fill)->save();
+
+        return $this->report($ref, self::CREDITED, $paid->fresh(), (float) $paid->amount, 'เงินเข้าแล้วทาง SMS ธนาคาร (สลิปในแชทเป็นเงินก้อนเดียวกัน)');
     }
 
     /** ลูกค้าโอนมาโดยไม่มีบิลค้าง — เปิดรายการรอแอดมิน ผูกสลิปไว้กับรายการนี้ (ใช้ที่อื่นไม่ได้) */

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Setting;
+use App\Models\SmsPaymentNotification;
 use App\Models\User;
 use App\Models\WalletTransaction;
 use App\Services\Wallet\ChatSlipIntake;
@@ -241,6 +242,82 @@ class ChatSlipIntakeTest extends TestCase
         $this->assertSame('pending', $tx->fresh()->status);
         $this->assertSame(0.0, $this->balance());
         $this->assertSame('duplicate', $this->tp['resolved']['outcome']);
+    }
+
+    // ─── โอนตรงยอด SMS เติมไปแล้ว แล้วส่งสลิปในแชทตามมา (เคสจริง 2026-11-11) ──────
+
+    /** บิลที่ SMS ธนาคารยืนยันแล้ว (ยอดตรงถึงสตางค์) */
+    private function smsPaidBill(float $payable, ?User $owner = null, int $minutesFromSlip = 0): WalletTransaction
+    {
+        $owner ??= $this->user;
+        $tx = app(WalletService::class)->recordPendingTopup($owner, $payable, null, 'promptpay');
+        $tx = app(WalletService::class)->confirmTopupAuto($tx, ['confirmed_via' => 'sms']);
+        SmsPaymentNotification::create([
+            'device_id' => 'D1', 'bank' => 'KBANK', 'type' => 'credit', 'amount' => number_format($payable, 2, '.', ''),
+            'status' => 'confirmed', 'matched_transaction_id' => $tx->id,
+            'sms_timestamp' => now()->addMinutes($minutesFromSlip),
+        ]);
+
+        return $tx->fresh();
+    }
+
+    public function test_a_chat_slip_for_money_sms_already_credited_reports_that_bill_and_opens_nothing(): void
+    {
+        $this->parkSlip(39.92);
+        $paid = $this->smsPaidBill(39.92);
+
+        $this->ring()->assertOk()
+            ->assertJsonPath('outcome', 'credited')
+            ->assertJsonPath('topup_ref', $paid->reference_code)
+            ->assertJsonPath('credited', 39.92);
+
+        $this->assertSame(1, WalletTransaction::where('type', 'topup')->count(), 'ไม่เปิดบิลรอแอดมินซ้ำ');
+        $this->assertSame(39.92, $this->balance(), 'ไม่เติมซ้ำ');
+        $this->assertSame(self::REF, $paid->fresh()->bank_reference);
+        $this->assertSame(self::REF, data_get($paid->fresh()->meta, 'chat_slip.trans_ref'));
+        $this->assertSame($paid->reference_code, $this->tp['claimed_by'], 'สลิปผูกกับบิลนี้ ใช้ที่อื่นไม่ได้');
+        $this->assertSame('credited', $this->tp['resolved']['outcome']);
+
+        // กริ่งซ้ำ + ตัวกวาด ก็ไม่เปลี่ยนอะไร
+        $this->ring()->assertJsonPath('outcome', 'credited');
+        $this->artisan('wallet:sweep-chat-slips')->assertSuccessful();
+        $this->assertSame(1, WalletTransaction::where('type', 'topup')->count());
+        $this->assertSame(39.92, $this->balance());
+    }
+
+    public function test_an_sms_paid_bill_wins_over_another_pending_bill_of_the_same_customer(): void
+    {
+        $this->parkSlip(39.92);
+        $paid    = $this->smsPaidBill(39.92);
+        $pending = $this->bill(39.47, 39);
+
+        $this->ring()->assertOk()->assertJsonPath('outcome', 'credited')->assertJsonPath('topup_ref', $paid->reference_code);
+
+        $this->assertSame('pending', $pending->fresh()->status, 'เงินก้อนเดียวจ่ายบิลที่สองไม่ได้');
+        $this->assertSame(39.92, $this->balance());
+    }
+
+    public function test_money_sms_credited_to_someone_else_is_a_duplicate(): void
+    {
+        $this->parkSlip(39.92);
+        $this->smsPaidBill(39.92, User::factory()->create());
+
+        $this->ring()->assertOk()->assertJsonPath('outcome', 'duplicate');
+
+        $this->assertSame(0, WalletTransaction::where('user_id', $this->user->id)->count());
+        $this->assertSame(0.0, $this->balance());
+        $this->assertSame('duplicate', $this->tp['resolved']['outcome']);
+    }
+
+    public function test_an_sms_of_the_same_amount_at_another_time_is_not_this_slip(): void
+    {
+        $this->parkSlip(39.92);
+        $this->smsPaidBill(39.92, null, 30);
+
+        $this->ring()->assertOk()->assertJsonPath('outcome', 'review');
+
+        $this->assertSame(2, WalletTransaction::where('user_id', $this->user->id)->count(), 'โอนคนละครั้ง = รายการใหม่ให้แอดมินดู');
+        $this->assertSame(39.92, $this->balance());
     }
 
     // ─── ไม่มีบิล / ไม่เจอลูกค้า / สวิตช์ ───────────────────────────────

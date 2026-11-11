@@ -65,8 +65,32 @@ class SlipRegistry
      */
     public function usedBySms(?float $amount, ?string $transTimestamp, ?int $exceptTxId = null): bool
     {
+        return $this->smsMatchesFor($amount, $transTimestamp, $exceptTxId) !== [];
+    }
+
+    /**
+     * รายการของเว็บที่ SMS ธนาคารเครดิตด้วยเงินก้อนเดียวกับสลิปนี้ (ยอดตรงถึงสตางค์ · เวลาห่าง ≤ 2 นาที)
+     *
+     * 🧾 (2026-11-11) เคสจริง: ลูกค้าโอน 39.92 ตรงยอด → SMS อนุมัติบิลทันที แล้วลูกค้าส่งสลิปใบเดียวกันในแชทเพจ
+     * → ไม่มีบิลค้าง → เดิมเปิดบิลใหม่ "รอแอดมิน" (กดอนุมัติ = เงินเข้าซ้ำ) และบอกลูกค้าว่ายังรอทีมงาน
+     *
+     * คืนรายการเฉพาะเมื่อชี้ได้รายการเดียว — SMS ยอดเดียวกันหลายใบในช่วงเดียวกัน = ไม่เดา (null)
+     */
+    public function smsCreditedTransaction(?float $amount, ?string $transTimestamp): ?WalletTransaction
+    {
+        $ids = array_values(array_unique($this->smsMatchesFor($amount, $transTimestamp)));
+        if (count($ids) !== 1) {
+            return null;
+        }
+
+        return WalletTransaction::where('id', $ids[0])->where('type', 'topup')->where('status', 'success')->first();
+    }
+
+    /** @return list<int> matched_transaction_id ของ SMS ที่ตรงกับสลิป */
+    private function smsMatchesFor(?float $amount, ?string $transTimestamp, ?int $exceptTxId = null): array
+    {
         if ($amount === null || $amount <= 0 || empty($transTimestamp)) {
-            return false;
+            return [];
         }
         try {
             // สลิปเป็น UTC (Z) — แปลงเป็นโซนเดียวกับ sms_timestamp ที่เก็บในโซนของแอพ
@@ -80,11 +104,13 @@ class SlipRegistry
                     $at->copy()->subMinutes(2)->toDateTimeString(),
                     $at->copy()->addMinutes(2)->toDateTimeString(),
                 ])
-                ->exists();
+                ->pluck('matched_transaction_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
         } catch (Throwable $e) {
             Log::warning('SlipRegistry::usedBySms failed (non-blocking)', ['err' => $e->getMessage()]);
 
-            return false;
+            return [];
         }
     }
 
