@@ -29,10 +29,11 @@
   }
 
   .pwa-chip {
-    position: fixed; z-index: 70; left: 50%; transform: translateX(-50%);
+    /* left+right+margin auto (ไม่ใช่ left:50%) — ไม่งั้นชิปกว้างได้แค่ครึ่งจอ ข้อความตัด 4 บรรทัดบนมือถือ */
+    position: fixed; z-index: 70; left: 16px; right: 16px; margin: 0 auto; width: max-content;
     bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     display: flex; align-items: center; gap: 4px;
-    max-width: calc(100% - 32px); padding: 6px 6px 6px 8px; border-radius: 999px;
+    max-width: calc(100% - 32px); box-sizing: border-box; padding: 6px 6px 6px 8px; border-radius: 999px;
     background: rgba(13, 8, 38, .92); border: 1px solid rgba(244, 207, 106, .45);
     box-shadow: 0 14px 40px -12px rgba(0, 0, 0, .7), 0 0 24px rgba(176, 124, 255, .18);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
