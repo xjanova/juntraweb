@@ -307,7 +307,11 @@ class OracleMediaTest extends TestCase
                 $this->assertContains($mood, $covered, "{$persona}: ไม่มีท่าสำหรับสถานะ {$mood}");
             }
         }
-        $this->assertGreaterThanOrEqual(1, $rooms, 'อย่างน้อยห้องแม่หมอต้องมีอิริยาบถ');
+        $this->assertGreaterThanOrEqual(2, $rooms, 'อย่างน้อยห้องแม่หมอและบุษบาต้องมีอิริยาบถ');
+        // 🌸 บุษบาต้องมีท่าเล่า (talk) และท่ายิ้ม (smile) — เป็นหมอดูสาวสดใส ไม่ใช่นั่งนิ่งตลอด
+        $busaba = array_unique(array_merge(...array_column(OracleMedia::poses('busaba')['clips'], 'moods')));
+        $this->assertContains('talk', $busaba);
+        $this->assertContains('smile', $busaba);
     }
 
     public function test_poses_only_ship_files_that_exist(): void
