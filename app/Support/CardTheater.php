@@ -143,7 +143,7 @@ final class CardTheater
                 'posY'  => (float) $r['plate']['pos_y'],
             ],
             // มีภาพนิ่งของชุดอิริยาบถ = ใช้ภาพนั้น (ท่าเดียวกับเฟรมแรกของคลิป ไม่กระตุกตอนสลับ)
-            'sprite'  => $poses['still'] ?? asset($r['sprite']),
+            'sprite'  => $poses['still'] ?? OracleMedia::asset($r['sprite']),
             'accent'  => $r['accent'],
             'accent2' => $r['accent_2'],
             'glow'    => $r['glow'],

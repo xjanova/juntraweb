@@ -215,4 +215,18 @@ final class OracleMedia
     {
         return asset($path) . '?v=' . filemtime(public_path($path));
     }
+
+    /**
+     * URL ของรูปผู้พยากรณ์ (ภาพห้อง / สไปรต์โรงละครไพ่) ต่อท้าย ?v=<mtime>
+     *
+     * 🕯️ (2026-11-11) Cloudflare เก็บรูปชื่อเดิมไว้ 4 ชั่วโมง (max-age=14400) — วาดรูปใหม่ทับไฟล์เดิม
+     *   ลูกค้ายังเห็นรูปเก่าต่ออีกครึ่งวัน ⇒ ใส่ mtime ให้ได้ URL ใหม่ทุกครั้งที่ไฟล์เปลี่ยน
+     *   ไฟล์ยังไม่ขึ้นเซิร์ฟเวอร์ = คืน URL เปล่า (ไม่มี ?v) เหมือน asset() เดิม
+     */
+    public static function asset(string $path): string
+    {
+        $full = public_path($path);
+
+        return is_file($full) ? asset($path) . '?v=' . filemtime($full) : asset($path);
+    }
 }
