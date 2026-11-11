@@ -277,9 +277,11 @@ class WalletController extends Controller
         // exact amount so the user can scan-to-pay without re-typing it.
         $payout      = PayoutAccount::resolve($request->user());
         $promptpayId = $payout['promptpay_id'] ?? '';
-        $qr = ($tx->status === 'pending' && $promptpayId)
+        // 🧾 รายการจากหลักฐานในแชทเพจ = ลูกค้าจ่ายมาแล้ว → ไม่มี QR (เคสจริง 2026-11-11: เห็น QR แล้วจ่ายซ้ำ)
+        $qr = ($tx->awaitsCustomerPayment() && $promptpayId)
             ? PromptPayQr::svgDataUri($promptpayId, (float) $tx->amount)
             : null;
+        $fromChat = $tx->method === WalletTransaction::METHOD_CHAT_SLIP;
 
         // 🏦 เลขบัญชีกสิกรสำหรับโอนยอดนี้ — ใช้ใบที่จดไว้กับรายการก่อน (ตอนสร้างรายการ)
         // รายการเก่าก่อน 2026-11-11 ไม่ได้จด = ใช้บัญชีปัจจุบัน เหมือนที่ QR ข้างบนทำอยู่แล้ว
@@ -296,6 +298,7 @@ class WalletController extends Controller
             'transfer'      => $transfer,
             'channel'       => ($meta['channel'] ?? null) === 'kbank' && $transfer ? 'kbank' : 'promptpay',
             'methodLabel'   => match (true) {
+                $fromChat                              => 'ส่งหลักฐานในแชทเพจ',
                 ($meta['channel'] ?? null) === 'kbank' => 'โอนเข้าบัญชีกสิกรไทย',
                 $tx->method === 'promptpay'            => 'พร้อมเพย์ (สแกน QR)',
                 $tx->method === 'promptpay_slip'       => 'พร้อมเพย์ + แนบสลิป',
@@ -307,7 +310,9 @@ class WalletController extends Controller
             'slipUrl'       => $tx->slip_path ? route('wallet.topup.slip', $tx) : null,
             'promptpayQr'   => $qr,
             'promptpayName' => $payout['name'] ?? '',
-            'canCancel'     => $tx->status === 'pending' && $tx->user_id === $request->user()->id,
+            // ยกเลิก/แนบใหม่ได้เฉพาะบิลที่ยังรอจ่าย — รายการจากแชทเงินเข้าแล้ว ให้แอดมินตัดสินเท่านั้น
+            'canCancel'     => $tx->awaitsCustomerPayment() && $tx->user_id === $request->user()->id,
+            'fromChat'      => $fromChat,
         ]);
     }
 

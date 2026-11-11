@@ -128,7 +128,8 @@ class SmsCheckerService
             $matchedTxId = null;
 
             if ($type === 'credit' && $amount > 0 && config('smschecker.enabled')) {
-                $topup = $this->findMatchingTopup($amount, $smsTs);
+                // บิลปกติ (ยอดสตางค์เฉพาะ) ก่อน → ไม่เจอ ค่อยดูหลักฐานจากแชทเพจที่เป็นเงินก้อนนี้ (ผูกด้วยเวลาในสลิป)
+                $topup = $this->findMatchingTopup($amount, $smsTs) ?? $this->findChatSlipTopup($amount, $smsTs);
                 if ($topup) {
                     $matchedTxId = $topup->id;
                     if ($device->autoConfirms() && TopupAutoApprove::sms()) {
@@ -160,7 +161,10 @@ class SmsCheckerService
                         // Manual mode: stamp the match on the top-up for the admin.
                         $topup->update([
                             'slip_amount'    => number_format($amount, 2, '.', ''),
-                            'bank_reference' => $payload['reference_number'] ?? null,
+                            // รายการจากแชทเพจถือเลขอ้างอิงสลิปไว้ (กันใช้สลิปซ้ำ) — ห้ามเขียนทับด้วยเลข SMS
+                            'bank_reference' => $topup->method === WalletTransaction::METHOD_CHAT_SLIP
+                                ? $topup->bank_reference
+                                : ($payload['reference_number'] ?? null),
                             'meta'           => array_merge((array) $topup->meta, [
                                 'sms_matched'         => true,
                                 'sms_notification_id' => $notification->id,
@@ -206,6 +210,104 @@ class SmsCheckerService
         }
 
         return $q->first();
+    }
+
+    /**
+     * 🧾 (2026-11-11) รายการ "หลักฐานจากแชทเพจ" (method chat_slip) ที่ SMS ใบนี้คือเงินก้อนเดียวกัน
+     *
+     * รายการพวกนี้ใช้ยอดดิบจากสลิป (ไม่ได้จองยอดสตางค์เฉพาะ) จึงห้ามจับคู่ด้วยยอดอย่างเดียว —
+     * SMS ยอดเท่ากันของคนอื่นจะมาตัดได้ ต้องตรงยอดถึงสตางค์ และเวลา SMS ห่างจากเวลาโอนในสลิป
+     * อยู่ในหน้าต่าง CHAT_SLIP_SMS_WINDOW และชี้ได้รายการเดียว ไม่งั้นให้แอดมินตัดสิน
+     */
+    public function findChatSlipTopup(float $amount, ?Carbon $smsTimestamp): ?WalletTransaction
+    {
+        if ($smsTimestamp === null) {
+            return null;
+        }
+
+        $hits = WalletTransaction::where('type', 'topup')
+            ->where('status', 'pending')
+            ->where('method', WalletTransaction::METHOD_CHAT_SLIP)
+            ->where('amount', number_format($amount, 2, '.', ''))
+            ->where('created_at', '>=', now()->subDays(3))
+            ->get()
+            ->filter(fn (WalletTransaction $tx) => self::smsMatchesSlipTime($smsTimestamp, data_get($tx->meta, 'slip_check.trans_at')));
+
+        return $hits->count() === 1 ? $hits->first() : null;
+    }
+
+    /**
+     * SMS ที่ยังไม่ผูกกับรายการไหน ที่เป็นเงินก้อนเดียวกับสลิป (ยอดตรง · เวลาในหน้าต่าง · มีใบเดียว)
+     * ใช้ตอนสลิปจากแชทมาถึงทีหลัง SMS และลูกค้าไม่มีบิลค้าง
+     */
+    public function unclaimedSmsForSlip(float $amount, ?string $transAt): ?SmsPaymentNotification
+    {
+        $at = self::parseSlipTime($transAt);
+        if ($at === null || $amount <= 0) {
+            return null;
+        }
+        [$from, $to] = self::CHAT_SLIP_SMS_WINDOW;
+
+        $hits = SmsPaymentNotification::whereNull('matched_transaction_id')
+            ->where('type', 'credit')
+            ->where('status', 'pending')
+            ->where('amount', number_format($amount, 2, '.', ''))
+            ->whereBetween('sms_timestamp', [
+                $at->copy()->addMinutes($from)->toDateTimeString(),
+                $at->copy()->addMinutes($to)->toDateTimeString(),
+            ])
+            ->limit(2)
+            ->get();
+
+        return $hits->count() === 1 ? $hits->first() : null;
+    }
+
+    /**
+     * เครดิตรายการหลักฐานจากแชทด้วย SMS ที่ยืนยันเงินก้อนเดียวกัน (ล็อก SMS + รายการ — ทำซ้ำไม่เติมซ้ำ)
+     * คืน null = ไม่เติม (ปิดสวิตช์ / เครื่องไม่ได้ตั้งอนุมัติเอง / SMS ถูกใบอื่นเอาไปแล้ว)
+     *
+     * @throws \RuntimeException เมื่อรายการไม่ pending แล้ว
+     */
+    public function confirmChatSlipWithSms(WalletTransaction $tx, SmsPaymentNotification $sms): ?WalletTransaction
+    {
+        $device = SmsCheckerDevice::where('device_id', $sms->device_id)->first();
+        if (! config('smschecker.enabled') || ! TopupAutoApprove::sms() || ! $device?->autoConfirms()) {
+            return null;
+        }
+
+        return $this->confirmWithEvidence($tx, $sms, [
+            'confirmed_via'    => 'sms',
+            'auto_approved_by' => TopupAutoApprove::SMS,
+            'via'              => 'chat_slip',
+            'bank'             => $sms->bank,
+        ]);
+    }
+
+    /** หน้าต่างเวลา SMS เทียบเวลาโอนในสลิป (นาที): ก่อน 2 · หลัง 15 (SMS ธนาคารมาช้าได้) */
+    public const CHAT_SLIP_SMS_WINDOW = [-2, 15];
+
+    public static function smsMatchesSlipTime(Carbon $smsAt, ?string $transAt): bool
+    {
+        $at = self::parseSlipTime($transAt);
+        if ($at === null) {
+            return false;
+        }
+        [$from, $to] = self::CHAT_SLIP_SMS_WINDOW;
+
+        return $smsAt->betweenIncluded($at->copy()->addMinutes($from), $at->copy()->addMinutes($to));
+    }
+
+    /** เวลาในสลิปเป็น UTC (Z) — แปลงเป็นโซนของแอพ ให้เทียบกับ sms_timestamp ได้ */
+    private static function parseSlipTime(?string $transAt): ?Carbon
+    {
+        if (empty($transAt)) {
+            return null;
+        }
+        try {
+            return Carbon::parse($transAt)->setTimezone((string) config('app.timezone', 'UTC'));
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /* ===================== APP-DRIVEN ACTIONS (orders) ===================== */

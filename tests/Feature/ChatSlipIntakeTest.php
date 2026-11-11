@@ -232,6 +232,23 @@ class ChatSlipIntakeTest extends TestCase
         $this->assertSame($tx->reference_code, $this->tp['resolved']['topup_ref']);
     }
 
+    public function test_a_slip_attached_on_the_web_then_sent_in_the_chat_is_never_credited_twice(): void
+    {
+        // ลูกค้าแนบสลิปบนเว็บ → บิลเติมแล้ว (ผูกเลขอ้างอิงสลิปไว้กับบิล)
+        $tx = $this->bill(100.00, 100);
+        app(WalletService::class)->confirmTopupAuto($tx, ['confirmed_via' => 'slip']);
+        $tx->forceFill(['bank_reference' => self::REF])->save();
+        $this->assertSame(100.0, $this->balance());
+
+        // แล้วส่งสลิปใบเดิมในแชทเพจ (ทั้งกริ่งและตัวกวาด)
+        $this->ring()->assertOk()->assertJsonPath('outcome', 'credited')->assertJsonPath('topup_ref', $tx->reference_code);
+        $this->artisan('wallet:sweep-chat-slips')->assertSuccessful();
+
+        $this->assertSame(100.0, $this->balance(), 'ยอดไม่เพิ่ม');
+        $this->assertSame(1, WalletTransaction::where('type', 'topup')->count(), 'ไม่เปิดรายการใหม่');
+        $this->assertNull($this->tp['claimed_by'], 'ไม่จองสลิปซ้ำ');
+    }
+
     public function test_a_slip_already_used_elsewhere_is_refused(): void
     {
         $tx = $this->bill(60.59, 60);
@@ -245,6 +262,14 @@ class ChatSlipIntakeTest extends TestCase
     }
 
     // ─── โอนตรงยอด SMS เติมไปแล้ว แล้วส่งสลิปในแชทตามมา (เคสจริง 2026-11-11) ──────
+
+    private function smsDevice(string $mode = 'auto'): \App\Models\SmsCheckerDevice
+    {
+        return \App\Models\SmsCheckerDevice::firstOrCreate(['device_id' => 'SMSCHK-CHATSLIP'], [
+            'device_name' => 'Test', 'api_key' => 'k-' . bin2hex(random_bytes(6)), 'secret_key' => str_repeat('a', 64),
+            'platform' => 'android', 'status' => 'active', 'approval_mode' => $mode,
+        ]);
+    }
 
     /** บิลที่ SMS ธนาคารยืนยันแล้ว (ยอดตรงถึงสตางค์) */
     private function smsPaidBill(float $payable, ?User $owner = null, int $minutesFromSlip = 0): WalletTransaction
@@ -333,6 +358,101 @@ class ChatSlipIntakeTest extends TestCase
         $this->assertSame('review', data_get($tx->meta, 'slip_check.decision'));
         $this->assertSame(0.0, $this->balance());
         $this->assertSame($tx->reference_code, $this->tp['claimed_by'], 'สลิปถูกผูกกับรายการนี้ ใช้ที่อื่นไม่ได้');
+    }
+
+    public function test_a_chat_slip_item_is_paid_money_so_it_never_expires_or_asks_for_payment(): void
+    {
+        $this->ring()->assertJsonPath('outcome', 'review');
+        $tx = WalletTransaction::where('user_id', $this->user->id)->sole();
+
+        $this->assertSame(WalletTransaction::METHOD_CHAT_SLIP, $tx->method);
+        $this->assertNull($tx->expires_at, 'เงินเข้าแล้ว รอแค่ยืนยัน — ห้ามหมดอายุเงียบ ๆ');
+        $this->assertFalse($tx->awaitsCustomerPayment());
+        $this->assertNull(\App\Http\Controllers\ChatTopupController::pendingBill($this->user), 'ป้ายบิลค้างในห้องไม่ทวงรายการนี้');
+
+        // หน้ารายการ: ไม่มี QR ให้จ่ายซ้ำ บอกชัดว่าไม่ต้องโอนซ้ำ
+        $this->actingAs($this->user)->get(route('wallet.topup.show', $tx))
+            ->assertOk()
+            ->assertSee('ได้รับหลักฐานจากแชทเพจแล้ว')
+            ->assertSee('ไม่ต้องโอนซ้ำ')
+            ->assertDontSee('ยอดที่ต้องโอน')
+            ->assertDontSee('tp-qr-code', false)
+            ->assertDontSee('แนบสลิปให้ระบบตรวจทันที');
+    }
+
+    public function test_a_second_chat_slip_never_lands_on_the_first_chat_slip_item(): void
+    {
+        $this->ring()->assertJsonPath('outcome', 'review');
+        $first = WalletTransaction::where('user_id', $this->user->id)->sole();
+
+        // สลิปใบใหม่ยอดเท่ากัน — รายการแรกคือเงินอีกก้อนที่จ่ายมาแล้ว ไม่ใช่บิลให้สลิปใบใหม่มาตัด
+        $pick = (new \ReflectionMethod(ChatSlipIntake::class, 'pickBill'))->invoke(app(ChatSlipIntake::class), $this->user, 100.00);
+
+        $this->assertNull($pick);
+        $this->assertSame('pending', $first->fresh()->status);
+    }
+
+    public function test_no_bill_but_the_bank_sms_already_came_credits_at_once(): void
+    {
+        $device = $this->smsDevice();
+        $sms = SmsPaymentNotification::create([
+            'device_id' => $device->device_id, 'bank' => 'KBANK', 'type' => 'credit', 'amount' => '100.00',
+            'status' => 'pending', 'sms_timestamp' => now()->addSeconds(20),
+        ]);
+
+        $this->ring()->assertOk()->assertJsonPath('outcome', 'credited')->assertJsonPath('credited', 100);
+
+        $tx = WalletTransaction::where('user_id', $this->user->id)->sole();
+        $this->assertSame('success', $tx->status);
+        $this->assertSame(100.0, $this->balance());
+        $this->assertSame('sms', data_get($tx->meta, 'auto_approved.by'));
+        $this->assertSame('confirmed', $sms->fresh()->status);
+        $this->assertSame($tx->id, (int) $sms->fresh()->matched_transaction_id);
+        $this->assertSame('credited', $this->tp['resolved']['outcome']);
+    }
+
+    public function test_no_bill_and_sms_auto_approve_off_waits_for_the_admin(): void
+    {
+        TopupAutoApprove::set(TopupAutoApprove::SMS, false);
+        $device = $this->smsDevice();
+        SmsPaymentNotification::create([
+            'device_id' => $device->device_id, 'type' => 'credit', 'amount' => '100.00',
+            'status' => 'pending', 'sms_timestamp' => now(),
+        ]);
+
+        $this->ring()->assertOk()->assertJsonPath('outcome', 'review');
+        $this->assertSame(0.0, $this->balance());
+    }
+
+    public function test_the_bank_sms_arriving_after_the_chat_slip_credits_that_item(): void
+    {
+        $this->ring()->assertJsonPath('outcome', 'review');
+        $tx = WalletTransaction::where('user_id', $this->user->id)->sole();
+
+        $res = app(\App\Services\SmsPayment\SmsCheckerService::class)->processNotification(
+            ['bank' => 'KBANK', 'type' => 'credit', 'amount' => '100.00', 'sms_timestamp' => (int) (now()->addMinutes(3)->getTimestampMs())],
+            $this->smsDevice(), '127.0.0.1',
+        );
+
+        $this->assertTrue($res['matched']);
+        $this->assertSame('success', $tx->fresh()->status);
+        $this->assertSame(100.0, $this->balance());
+        $this->assertSame(self::REF, $tx->fresh()->bank_reference, 'เลขอ้างอิงสลิปไม่ถูกเขียนทับ');
+    }
+
+    public function test_someone_elses_sms_of_the_same_amount_at_another_time_never_pays_a_chat_slip_item(): void
+    {
+        $this->ring()->assertJsonPath('outcome', 'review');
+        $tx = WalletTransaction::where('user_id', $this->user->id)->sole();
+
+        $res = app(\App\Services\SmsPayment\SmsCheckerService::class)->processNotification(
+            ['bank' => 'KBANK', 'type' => 'credit', 'amount' => '100.00', 'sms_timestamp' => (int) (now()->addMinutes(40)->getTimestampMs())],
+            $this->smsDevice(), '127.0.0.1',
+        );
+
+        $this->assertFalse($res['matched']);
+        $this->assertSame('pending', $tx->fresh()->status);
+        $this->assertSame(0.0, $this->balance());
     }
 
     public function test_no_linked_web_account_is_reported_for_the_admin(): void
