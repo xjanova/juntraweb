@@ -22,7 +22,7 @@
 @php
     $theater = \App\Support\ReadingTheater::build($reading, $parsed);
     $room = \App\Support\ChatRooms::get($theater['persona']) ?? [];
-    $poster = asset($room['image'] ?? 'images/juntra/rooms/maemor.webp');
+    $poster = \App\Support\OracleMedia::asset($room['image'] ?? 'images/juntra/rooms/maemor.webp');
     $hasVoice = $theater['voice'] !== null;
 @endphp
 

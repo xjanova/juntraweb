@@ -77,6 +77,25 @@ class OracleMediaTest extends TestCase
         }
     }
 
+    /**
+     * 🕯️ (2026-11-11) วาดรูปห้อง/สไปรต์ใหม่ทับไฟล์ชื่อเดิม — Cloudflare เก็บรูปไว้ 4 ชม.
+     * ต้องได้ URL ใหม่ (?v=<mtime>) ไม่งั้นลูกค้าเห็นรูปเก่าต่อหลัง deploy
+     */
+    public function test_room_image_and_sprite_urls_change_when_the_file_changes(): void
+    {
+        foreach (array_keys(ChatRooms::all()) as $key) {
+            $card = collect(ChatRooms::cards())->firstWhere('key', $key);
+            $this->assertNotNull($card, "ไม่มีการ์ดห้อง {$key}");
+            $this->assertMatchesRegularExpression('/\.webp\?v=\d+$/', $card['image'], "รูปห้อง {$key} ต้องมี ?v=");
+
+            $sprite = \App\Support\CardTheater::room($key)['sprite'];
+            $this->assertMatchesRegularExpression('/\.webp\?v=\d+$/', $sprite, "สไปรต์ห้อง {$key} ต้องมี ?v=");
+        }
+
+        // ไฟล์ยังไม่ขึ้นเซิร์ฟเวอร์ = URL เปล่าเหมือน asset() เดิม (ไม่ error)
+        $this->assertSame(asset('images/none-' . 'x.webp'), OracleMedia::asset('images/none-x.webp'));
+    }
+
     public function test_voice_lines_carry_no_price_and_no_voice_id(): void
     {
         foreach (config('oracle_media.rooms') as $persona => $room) {

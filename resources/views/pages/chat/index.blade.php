@@ -18,7 +18,7 @@
   //    (เดิมเขียน "แม่หมอจันทรา" ตายตัวทั้งหน้า → ห้องบุษบาจะขึ้นชื่อแม่หมอ)
   $room       = \App\Support\ChatRooms::normalize($room ?? null);
   $roomCfg    = \App\Support\ChatRooms::get($room) ?? [];
-  $roomImage  = is_file(public_path($roomCfg['image'] ?? '')) ? asset($roomCfg['image']) : asset('images/hero-chantra.webp');
+  $roomImage  = is_file(public_path($roomCfg['image'] ?? '')) ? \App\Support\OracleMedia::asset($roomCfg['image']) : asset('images/hero-chantra.webp');
   $P = [
       'key'     => $room,
       'name'    => \App\Support\ChatRooms::name($room),

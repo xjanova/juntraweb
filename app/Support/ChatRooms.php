@@ -183,7 +183,7 @@ final class ChatRooms
                 'tags'    => $room['tags'] ?? [],
                 'busy'    => $room['busy'] ?? '',
                 // รูปห้องยังไม่ได้ขึ้นเซิร์ฟเวอร์ (deploy ไม่ครบ) → ใช้รูปแม่หมอเดิม ดีกว่าการ์ดรูปแตก
-                'image'   => asset(is_file(public_path($room['image'])) ? $room['image'] : 'images/hero-chantra.webp'),
+                'image'   => OracleMedia::asset(is_file(public_path($room['image'])) ? $room['image'] : 'images/hero-chantra.webp'),
                 'accent'  => $room['accent'] ?? 'violet',
                 'open'    => self::isOpen($key),
                 'product' => [
