@@ -1,3 +1,10 @@
+# 📱 (2026-11-11) PWA — เบราว์เซอร์ต้องเห็น sw.js ตัวใหม่ทันทีหลัง deploy (ไม่ใช้ของในแคช HTTP)
+<IfModule mod_headers.c>
+    <FilesMatch "^(sw\.js|offline\.html)$">
+        Header set Cache-Control "no-cache"
+    </FilesMatch>
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes

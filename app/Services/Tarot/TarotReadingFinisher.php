@@ -94,6 +94,9 @@ class TarotReadingFinisher
         if ($tx = $this->debitOf($reading)) {
             $tx->update(['reference_id' => $reading->id]);
         }
+
+        // 🔔 แจ้งเครื่องที่เปิดรับไว้ เผื่อลูกค้าปิดหน้าไปก่อนไพ่อ่านเสร็จ (ไม่โยน exception)
+        app(\App\Services\Push\PushNotifier::class)->readingReady($reading->id);
     }
 
     /**

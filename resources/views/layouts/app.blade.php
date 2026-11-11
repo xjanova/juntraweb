@@ -48,6 +48,20 @@
      คง .png ไว้ทั้งคู่เพราะ Safari/หน้าจอโฮมของ iOS ยังไม่รับ .webp ทุกเวอร์ชัน --}}
 <link rel="icon" href="{{ asset('images/favicon.png') }}" sizes="64x64" type="image/png">
 <link rel="apple-touch-icon" href="{{ asset('images/apple-touch-icon.png') }}">
+{{-- 📱 (2026-11-11) ติดตั้งเป็นแอปได้ (PWA) — manifest + service worker (public/sw.js, ลงทะเบียนใน resources/js/pwa.js)
+     iOS อ่าน manifest ไม่ครบ ต้องมี meta ของ Apple ด้วย · แถบสถานะ black-translucent = เนื้อหาเต็มจอ
+     ส่วนที่ต้องหลบแถบสถานะดันลงด้วย env(safe-area-inset-top) แล้ว (<x-pwa-install>, oracle-room.css) --}}
+<link rel="manifest" href="{{ route('pwa.manifest') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="จันทรา">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="application-name" content="จันทรา">
+@auth
+@if (\App\Services\Push\PushNotifier::ready())
+<meta name="jw-push-key" content="{{ config('webpush.public_key') }}" data-user="{{ auth()->id() }}">
+@endif
+@endauth
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family={{ str_replace('|', '&family=', $themeConfig['fonts']) }}&display=swap" rel="stylesheet">
@@ -82,6 +96,9 @@
 
 {{-- ✨ (2026-11-07) แนะนำฟีเจอร์ใหม่ ครั้งเดียวต่อเครื่อง --}}
 <x-whats-new />
+
+{{-- 📱 (2026-11-11) ชิปติดตั้งแอป + แผ่นสอนเพิ่มลงหน้าจอโฮมบน iPhone/iPad --}}
+<x-pwa-install />
 
 @stack('scripts')
 </body>

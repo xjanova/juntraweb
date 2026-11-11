@@ -32,6 +32,12 @@ Schedule::command('alerts:watchdog')->everyFiveMinutes()->withoutOverlapping()->
 Schedule::command('alerts:digest')->hourly()->withoutOverlapping()->runInBackground();
 Schedule::command('alerts:daily-report')->dailyAt('09:00')->timezone('Asia/Bangkok')->withoutOverlapping()->runInBackground();
 
+// 🔔 Web push (แอปบนหน้าจอโฮม) — ไม่มีกุญแจ VAPID ใน .env = ทั้งสองตัวไม่ทำอะไร
+//  - ยอดค้าง: บิลเติมเงินที่ยังไม่โอนเกิน 30 นาที เตือนครั้งเดียวต่อบิล (นอกเวลาเงียบ)
+//  - ดวงประจำวัน: ช่วงเช้าหลังเวลาเงียบ วันละครั้ง เฉพาะคนที่ยังไม่เช็กอิน
+Schedule::command('push:remind-bills')->everyTenMinutes()->withoutOverlapping(10)->runInBackground();
+Schedule::command('push:daily-nudge')->everyThirtyMinutes()->withoutOverlapping(30)->runInBackground();
+
 // 🛒 Google Play Billing (แอพช่อง Play) — ไม่ได้ตั้ง service account = ทั้งสองตัวไม่ทำอะไร
 //  - consume ที่พลาดไป (ต้องทันภายใน 3 วัน ไม่งั้น Google คืนเงินลูกค้าอัตโนมัติ)
 //  - ลูกค้าขอคืนเงิน/chargeback กับ Google → ดึงเครดิตคืน
