@@ -4,6 +4,7 @@ namespace App\Services\Wallet;
 
 use App\Models\User;
 use App\Models\WalletTransaction;
+use App\Services\SmsPayment\SmsCheckerService;
 use App\Services\Thaiprompt\JuntraServerClient;
 use App\Support\Alerts\WalletAlerts;
 use App\Support\Pricing;
@@ -48,6 +49,7 @@ class ChatSlipIntake
         private SlipAutoVerifier $verifier,
         private SlipRegistry $registry,
         private WalletService $wallet,
+        private SmsCheckerService $sms,
     ) {}
 
     /**
@@ -125,6 +127,11 @@ class ChatSlipIntake
             return $this->report($transRef, self::NO_USER, null, null, 'ไม่พบบัญชีเว็บที่ผูกกับแชทนี้');
         }
 
+        // เงินก้อนนี้ SMS ธนาคารเครดิตบิลเว็บไปแล้ว (ลูกค้าโอนตรงยอด แล้วส่งสลิปในแชทตามมา)
+        if ($paid = $this->registry->smsCreditedTransaction($amount, $slip['trans_timestamp'] ?? null)) {
+            return $this->alreadyPaidBySms($user, $paid, $slip, $owner);
+        }
+
         $tx = $this->pickBill($user, $amount);
 
         // ไม่มีบิลค้างเลย = ลูกค้าโอนมาเอง → เปิดรายการรอแอดมินด้วยยอดในสลิป (ไม่เติมเอง)
@@ -178,6 +185,8 @@ class ChatSlipIntake
         $pending = WalletTransaction::where('user_id', $user->id)
             ->where('type', 'topup')
             ->where('status', 'pending')
+            // รายการหลักฐานจากแชทใบก่อน = เงินก้อนอื่นที่จ่ายมาแล้ว ไม่ใช่บิลที่รอจ่าย
+            ->where('method', '!=', WalletTransaction::METHOD_CHAT_SLIP)
             ->where('created_at', '>=', now()->subDays(self::CANDIDATE_DAYS))
             ->orderByDesc('id')
             ->get();
@@ -197,6 +206,47 @@ class ChatSlipIntake
         ])->first();
     }
 
+    /**
+     * สลิปคือเงินก้อนที่ SMS เครดิตบิลไปแล้ว — ไม่เติมซ้ำ ไม่เปิดบิลใหม่
+     *  - บิลของลูกค้าคนนี้ → ผูกสลิปเข้าบิลนั้น แล้วตอบ "เติมแล้ว" (ลูกค้าเห็นยอดที่เข้าจริง)
+     *  - บิลของคนอื่น → สลิปซ้ำ (เงินก้อนนี้ถูกใช้ไปแล้ว)
+     */
+    private function alreadyPaidBySms(User $user, WalletTransaction $paid, array $slip, string $owner): array
+    {
+        $ref = (string) $slip['trans_ref'];
+
+        if ((int) $paid->user_id !== (int) $user->id) {
+            Log::warning('ChatSlipIntake: สลิปจากแชทเป็นเงินที่ SMS เครดิตบิลของลูกค้าคนอื่นไปแล้ว', [
+                'trans_ref' => $ref, 'chat_user' => $user->id, 'paid_tx' => $paid->id,
+            ]);
+
+            return $this->report($ref, self::DUPLICATE, null, null, 'เงินก้อนนี้ SMS ธนาคารยืนยันบิลของบัญชีอื่นไปแล้ว');
+        }
+
+        $claim = $this->registry->claim($paid, $slip, $owner);
+        if ($claim['status'] === SlipRegistry::ALREADY_USED) {
+            return $this->report($ref, self::DUPLICATE, null, null, 'สลิปถูกใช้ไปแล้วที่ ' . SlipRegistry::whereUsed((array) $claim['used_by']));
+        }
+
+        $meta = (array) $paid->meta;
+        $meta['chat_slip'] = array_filter([
+            'trans_ref'  => $ref,
+            'amount'     => (float) $slip['amount'],
+            'sender'     => $slip['sender_name'] ?? null,
+            'note'       => 'สลิปในแชทเพจตรงกับเงินที่ SMS ยืนยันบิลนี้แล้ว — ไม่เติมซ้ำ',
+            'claimed'    => $claim['status'] === SlipRegistry::CLAIMED,
+            'checked_at' => now()->toIso8601String(),
+        ], fn ($v) => $v !== null && $v !== '');
+        $fill = ['meta' => $meta];
+        if (trim((string) $paid->bank_reference) === '') {
+            // รอบหน้า (กริ่งซ้ำ/ตัวกวาด) usedLocally จะเจอเลขนี้ทันที
+            $fill['bank_reference'] = $ref;
+        }
+        $paid->forceFill($fill)->save();
+
+        return $this->report($ref, self::CREDITED, $paid->fresh(), (float) $paid->amount, 'เงินเข้าแล้วทาง SMS ธนาคาร (สลิปในแชทเป็นเงินก้อนเดียวกัน)');
+    }
+
     /** ลูกค้าโอนมาโดยไม่มีบิลค้าง — เปิดรายการรอแอดมิน ผูกสลิปไว้กับรายการนี้ (ใช้ที่อื่นไม่ได้) */
     private function queueWithoutBill(User $user, array $slip, string $owner): array
     {
@@ -204,7 +254,8 @@ class ChatSlipIntake
         $amount = (float) $slip['amount'];
 
         try {
-            $tx = $this->wallet->recordPendingTopup($user, $amount, null, 'promptpay');
+            // method chat_slip: ลูกค้าจ่ายมาแล้ว — ไม่โชว์ QR ไม่ทวงจ่าย ไม่ให้ SMS ยอดเท่ากันของคนอื่นมาตัด
+            $tx = $this->wallet->recordPendingTopup($user, $amount, null, WalletTransaction::METHOD_CHAT_SLIP);
         } catch (\Throwable $e) {
             // ติดเพดานรายการค้าง ฯลฯ — ไม่ผูกบิล ให้แอดมินดูจากฝั่งแชท
             Log::warning('ChatSlipIntake: เปิดรายการรอแอดมินไม่ได้', ['trans_ref' => $ref, 'err' => $e->getMessage()]);
@@ -235,18 +286,50 @@ class ChatSlipIntake
             'sender'     => $slip['sender_name'] ?? null,
             'mode'       => 'chat',
             'claimed'    => $claim['status'] === SlipRegistry::CLAIMED,
+            // เวลาโอนในสลิป — ให้ SMS ที่มาทีหลังผูกกับรายการนี้ได้เฉพาะเงินก้อนเดียวกัน
+            'trans_at'   => $slip['trans_timestamp'] ?? null,
             'checked_at' => now()->toIso8601String(),
         ], fn ($v) => $v !== null && $v !== '');
         $tx->forceFill([
             'meta'           => $meta,
             'bank_reference' => $ref,
             'slip_amount'    => $amount,
-            'description'    => 'เติมเงินจากสลิปในแชทเพจ (รอแอดมินยืนยัน)',
+            // เงินเข้าแล้ว รอแค่ยืนยัน — ห้ามหมดอายุเองแล้วเงียบหาย (แอดมินอนุมัติ/ปฏิเสธเท่านั้น)
+            'expires_at'     => null,
+            'description'    => 'เติมเงินจากสลิปในแชทเพจ',
         ])->save();
+
+        // SMS ธนาคารยืนยันเงินก้อนนี้มาก่อนแล้ว (ยอดตรง · เวลาตรงกับสลิป) = หลักฐานสองชั้น → เติมทันที
+        if ($credited = $this->creditWithSms($tx->fresh(), $slip)) {
+            return $this->report($ref, self::CREDITED, $credited, (float) $credited->amount, 'เติมอัตโนมัติ: สลิปในแชท + SMS ธนาคารยืนยันเงินก้อนเดียวกัน');
+        }
 
         WalletAlerts::needsReview($tx->fresh(), $reason, ['amount' => $amount, 'sender_name' => $slip['sender_name'] ?? null]);
 
         return $this->report($ref, self::REVIEW, $tx->fresh(), null, $reason);
+    }
+
+    /** null = ยังไม่มี SMS ที่ชี้ได้ว่าเป็นเงินก้อนนี้ (SMS ที่มาทีหลังจะผูกเองใน SmsCheckerService) */
+    private function creditWithSms(WalletTransaction $tx, array $slip): ?WalletTransaction
+    {
+        // สลิปต้องผ่านครบ: เข้าบัญชีเรา + ไม่เก่าเกิน
+        if (empty($slip['receiver_matches']) || ($slip['slip_age_ok'] ?? true) === false) {
+            return null;
+        }
+
+        $sms = $this->sms->unclaimedSmsForSlip((float) $slip['amount'], $slip['trans_timestamp'] ?? null);
+        if ($sms === null) {
+            return null;
+        }
+
+        try {
+            return $this->sms->confirmChatSlipWithSms($tx, $sms);
+        } catch (\RuntimeException $e) {
+            // แพ้ race กับแอดมิน/SMS — รายงานตามสถานะจริง
+            $fresh = $tx->fresh();
+
+            return $fresh?->status === 'success' ? $fresh : null;
+        }
     }
 
     /** รายงานผลกลับ Thaiprompt — ไม่สำเร็จ = สลิปยังพักอยู่ ตัวกวาดมาทำซ้ำได้ (ทุกขั้นข้างบน idempotent) */

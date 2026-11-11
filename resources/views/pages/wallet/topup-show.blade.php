@@ -59,6 +59,21 @@
         @endif
       </dl>
 
+      @if (!empty($fromChat) && $tx->status === 'pending')
+        {{-- 🧾 (2026-11-11) ลูกค้าส่งหลักฐานในแชทเพจแล้ว — ไม่มี QR ให้จ่ายซ้ำ บอกให้ชัดว่ารออะไร --}}
+        <div class="tp-chat-received" role="status"
+             style="margin-top:20px;padding:16px 18px;border-radius:14px;border:1px solid var(--line);background:rgba(212,160,23,.08)">
+          <div style="font-weight:700;margin-bottom:6px">ได้รับหลักฐานจากแชทเพจแล้ว ✓</div>
+          <div style="font-size:14px;line-height:1.7">
+            ยอด <b>฿{{ number_format($tx->amount, 2) }}</b> · ทีมงานกำลังยืนยันและเติมเข้าวอลเลตให้
+            — <b>ไม่ต้องโอนซ้ำ</b> และไม่ต้องแนบสลิปอีกนะคะ
+          </div>
+          <div style="font-size:12px;color:var(--ink-dim);margin-top:8px">
+            ครั้งหน้า: กดเติมเงินบนเว็บ แล้วโอนยอดตามที่หน้าเว็บบอก (รวมสตางค์) ระบบเติมให้อัตโนมัติภายในไม่กี่นาที
+          </div>
+        </div>
+      @endif
+
       @if (!empty($promptpayQr))
         @php($payable = number_format($tx->amount, 2, '.', ''))
         {{-- 🏦 (2026-11-11) โอนได้สองทาง: สแกน QR ที่ใส่ยอดแล้ว หรือโอนเข้าเลขบัญชีกสิกรไทย (บัญชีเดียวกัน)

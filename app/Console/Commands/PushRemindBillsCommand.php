@@ -39,6 +39,8 @@ class PushRemindBillsCommand extends Command
             ->where('type', 'topup')
             ->where('status', 'pending')
             ->whereNull('slip_path')
+            // ลูกค้าส่งหลักฐานในแชทเพจมาแล้ว = ห้ามทวง (ทวงแล้วจ่ายซ้ำ)
+            ->where('method', '!=', WalletTransaction::METHOD_CHAT_SLIP)
             ->whereBetween('created_at', [now()->subDay(), now()->subMinutes(self::WAIT_MINUTES)])
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()->addMinutes(10)))
             ->whereIn('user_id', PushSubscription::select('user_id'))

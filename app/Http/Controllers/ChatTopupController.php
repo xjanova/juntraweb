@@ -127,6 +127,8 @@ class ChatTopupController extends Controller
         return WalletTransaction::where('user_id', $user->id)
             ->where('type', 'topup')
             ->where('status', 'pending')
+            // รายการจากหลักฐานในแชทเพจ = จ่ายมาแล้ว ไม่ใช่บิลค้างที่ต้องจ่าย
+            ->where('method', '!=', WalletTransaction::METHOD_CHAT_SLIP)
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->latest('id')
             ->first();

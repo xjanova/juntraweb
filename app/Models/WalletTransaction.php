@@ -107,6 +107,21 @@ class WalletTransaction extends Model
                 || ($this->approved_at === null && ! data_get($this->meta, 'reject_reason')));
     }
 
+    /**
+     * 🧾 (2026-11-11) รายการที่เปิดจากหลักฐานที่ลูกค้าส่งในแชทเพจโดยไม่มีบิลค้าง
+     * ลูกค้า "จ่ายมาแล้ว" — ห้ามโชว์ QR/ทวงให้จ่าย (เคสจริง: ลูกค้าเห็น QR แล้วจ่ายซ้ำ)
+     * ยอดเป็นยอดดิบจากสลิป ไม่ได้จองสตางค์เฉพาะ → SMS จับคู่ได้เฉพาะแบบผูกเวลา (findChatSlipTopup)
+     */
+    public const METHOD_CHAT_SLIP = 'chat_slip';
+
+    /** บิลที่ลูกค้ายังต้องจ่าย (ใช้กับป้าย/แจ้งเตือน/QR) — ไม่รวมรายการที่ลูกค้าส่งหลักฐานมาแล้ว */
+    public function awaitsCustomerPayment(): bool
+    {
+        return $this->type === 'topup'
+            && $this->status === 'pending'
+            && $this->method !== self::METHOD_CHAT_SLIP;
+    }
+
     /** A pending top-up whose expiry has passed and admin never acted on it. */
     public function isExpired(): bool
     {
