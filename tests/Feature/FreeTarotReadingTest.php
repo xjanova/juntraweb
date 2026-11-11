@@ -332,4 +332,36 @@ class FreeTarotReadingTest extends TestCase
             ->assertRedirect(route('tarot.show', $reading));
         $this->assertSame(0, \App\Models\ChatConversation::count());
     }
+
+    /**
+     * 🌸 (2026-11-11) เจ้าของ: "ไพ่ 1 ใบ … เป็นของบุษบาทั้งหมด" — ไพ่ฟรี 1 ใบด้วย
+     *   ห้องบุษบาเปิด → หน้าเรียกบุษบา · Thaiprompt ได้ persona=busaba · จบแล้วเข้าห้องบุษบา
+     *   ห้องปิด → แม่หมอเหมือนเดิม และคำขอไม่มีฟิลด์ persona เลย
+     */
+    public function test_the_free_card_is_busabas_once_her_room_is_open(): void
+    {
+        $this->actingAs($this->member())->get(route('tarot.free'))
+            ->assertSee('แม่หมอกำลัง', false)->assertDontSee('น้องบุษบากำลัง', false);
+        $this->actingAs($u = $this->member())->post(route('tarot.free.cast'));
+        Http::assertSent(fn ($req) => str_contains($req->url(), '/fortune/tarot/free') && ! array_key_exists('persona', $req->data()));
+        $this->actingAs($u)->get(route('chat.from-free', Reading::where('user_id', $u->id)->sole()))
+            ->assertRedirect(route('chat.index', ['room' => 'maemor']));
+
+        config(['chat_rooms.persona_upstream' => true]);
+        Setting::put('tarot_quick_visible', '1', 'tarot', false);
+        Cache::flush();
+
+        $this->assertSame('น้องบุษบา', FreeReadingPolicy::reader());
+        $this->actingAs($this->member())->get(route('tarot.free'))
+            ->assertSee('น้องบุษบากำลัง', false)->assertSee('ของขวัญจากน้องบุษบา', false)->assertDontSee('แม่หมอกำลัง', false);
+
+        $this->actingAs($b = $this->member())->post(route('tarot.free.cast'));
+        Http::assertSent(fn ($req) => str_contains($req->url(), '/fortune/tarot/free') && ($req->data()['persona'] ?? null) === 'busaba');
+        $this->actingAs($b)->get(route('chat.from-free', Reading::where('user_id', $b->id)->sole()))
+            ->assertRedirect(route('chat.index', ['room' => 'busaba']));
+
+        // ลิงก์ "เปิดไพ่" ที่ไม่ระบุแบบไพ่ไม่ยัดเข้าห้องแม่หมอแล้ว — ให้ห้องแชทเลือก (ห้องล่าสุด / หน้าเลือกผู้พยากรณ์)
+        $this->get(route('tarot.index'))->assertRedirect(route('chat.index', ['menu' => 1]));
+        $this->get(route('tarot.index', ['spread' => 'single']))->assertRedirect(route('chat.index', ['room' => 'busaba', 'menu' => 1]));
+    }
 }

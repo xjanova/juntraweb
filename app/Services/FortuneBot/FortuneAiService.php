@@ -132,7 +132,12 @@ class FortuneAiService
             return null;
         }
 
-        $remote = $this->bot->freeTarot($user, [
+        // 🌸 (2026-11-11) ไพ่ 1 ใบเป็นของบุษบาเมื่อห้องเปิด — ส่ง persona ไปให้ Thaiprompt เขียนเป็นเสียงบุษบา
+        //   ห้องปิด / แม่หมอ = ไม่ส่งฟิลด์เลย (คำขอหน้าตาเดิมทุกไบต์)
+        $persona = ChatRooms::personaForSpread(TarotSpreads::keyFromType((string) $reading->type));
+        $personaField = $persona !== ChatRooms::DEFAULT ? ChatRooms::upstreamPersona($persona) : null;
+
+        $remote = $this->bot->freeTarot($user, ($personaField !== null ? ['persona' => $personaField] : []) + [
             'card' => [
                 'name_en' => (string) ($card->card->name_en ?? ''),
                 'name_th' => (string) ($card->card->name_th ?? ''),

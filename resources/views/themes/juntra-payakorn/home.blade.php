@@ -157,7 +157,7 @@
       @endif
       <h3>ดูดวงฟรี 1 ใบ</h3>
       <div class="duration">Free Card · สมาชิกใหม่</div>
-      <p>ลองให้แม่หมอเปิดไพ่ 1 ใบ ทำนายสั้น ๆ ฟรี ก่อนตัดสินใจเปิดไพ่ชุดเต็ม</p>
+      <p>ลองให้{{ \App\Support\FreeReadingPolicy::reader() }}เปิดไพ่ 1 ใบ ทำนายสั้น ๆ ฟรี ก่อนตัดสินใจเปิดไพ่ชุดเต็ม</p>
       <a href="{{ route('tarot.free') }}" class="arrow">รับคำทำนายฟรี →</a>
     </div>
     <div class="service reveal {{ $cardArt('chat') ? 'has-art' : '' }}">
@@ -170,7 +170,7 @@
       <h3>คุยกับแม่หมอ</h3>
       <div class="duration">Chat · ระบบเดียวกับบอทแม่หมอ</div>
       <p>เล่าเรื่องที่ค้างใจได้ฟรีเหมือนแชทกับแม่หมอในเฟซบุ๊ก/ไลน์ อยากให้ทำนายเมื่อไหร่ แม่หมอแนะนำแพ็กเกจให้</p>
-      <a href="{{ route('chat.index') }}" class="arrow">เริ่มคุย →</a>
+      <a href="{{ route('chat.index', ['room' => \App\Support\ChatRooms::DEFAULT]) }}" class="arrow">เริ่มคุย →</a>
     </div>
 
     {{-- บริการอื่น — แสดงเฉพาะที่เปิดอยู่ --}}

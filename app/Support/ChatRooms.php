@@ -138,6 +138,17 @@ final class ChatRooms
         return (string) (self::get(self::normalize($key))['name'] ?? 'แม่หมอจันทรา');
     }
 
+    /**
+     * 🌸 (2026-11-11) ชื่อผู้อ่านไพ่ชุดนี้ในข้อความบนเว็บ — "น้องบุษบา" / "แม่หมอ" (ตามห้องที่ขายจริงตอนนี้)
+     *   แม่หมอใช้ชื่อสั้นเหมือนข้อความเดิมทั้งเว็บ · ห้องอื่นใช้ชื่อเต็มเพราะ "บุษบา" เฉย ๆ ห้วนเกินในประโยคบรรยาย
+     */
+    public static function readerName(?string $spread): string
+    {
+        $key = self::roomForSpread($spread);
+
+        return $key === self::DEFAULT ? self::short($key) : self::name($key);
+    }
+
     public static function short(string $key): string
     {
         return (string) (self::get(self::normalize($key))['short'] ?? 'แม่หมอ');

@@ -17,7 +17,7 @@
     @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
     @serviceopen('palmistry')<a href="{{ route('palmistry.index') }}">ลายมือ</a>@endserviceopen
     @serviceopen('auspicious')<a href="{{ route('auspicious.index') }}">ฤกษ์ยาม</a>@endserviceopen
-    <a href="{{ route('chat.index') }}">คุยกับแม่หมอ</a>
+    <a href="{{ route('chat.index', ['room' => \App\Support\ChatRooms::DEFAULT]) }}">คุยกับแม่หมอ</a>
     <a href="{{ route('download') }}">แอพมือถือ</a>
     @auth
       <a href="{{ route('wallet.index') }}">วอลเลต</a>

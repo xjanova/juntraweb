@@ -58,10 +58,10 @@
           <a href="{{ route('tarot.free') }}" class="service" style="text-decoration:none">
             <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 2.7l1.85 5.45L19.3 10l-5.45 1.85L12 17.3l-1.85-5.45L4.7 10l5.45-1.85z"/></svg></div>
             <h3>ดูดวงฟรี 1 ใบ</h3>
-            <p>ให้แม่หมอเปิดไพ่ 1 ใบ ทำนายสั้น ๆ ฟรี</p>
+            <p>ให้{{ \App\Support\FreeReadingPolicy::reader() }}เปิดไพ่ 1 ใบ ทำนายสั้น ๆ ฟรี</p>
           </a>
         @endserviceopen
-        <a href="{{ route('chat.index') }}" class="service" style="text-decoration:none">
+        <a href="{{ route('chat.index', ['room' => \App\Support\ChatRooms::DEFAULT]) }}" class="service" style="text-decoration:none">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M21 12c0 4.97-4.03 9-9 9-1.5 0-2.91-.37-4.15-1.02L3 21l1.02-4.85A8.96 8.96 0 0 1 3 12a9 9 0 1 1 18 0z"/></svg></div>
           <h3>คุยกับแม่หมอ</h3>
           <p>เล่าเรื่องที่ค้างใจได้ฟรี ตอบทันทีตลอด 24 ชม.</p>
@@ -114,7 +114,7 @@
           @else
             <div class="panel" style="text-align:center;padding:32px 24px;margin-top:16px">
               <p style="color:var(--ink-dim);margin:0;margin-bottom:14px">ยังไม่มีบทสนทนา</p>
-              <a href="{{ route('chat.index') }}" class="btn btn-ghost">ทักแม่หมอ →</a>
+              <a href="{{ route('chat.index', ['room' => \App\Support\ChatRooms::DEFAULT]) }}" class="btn btn-ghost">ทักแม่หมอ →</a>
             </div>
           @endif
         </div>

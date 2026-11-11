@@ -12,9 +12,9 @@
         {{ $message }}
       </p>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-        <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่กับแม่หมอ</a>
+        <a href="{{ route('tarot.index') }}" class="btn btn-primary">เปิดไพ่ยิปซี</a>
         <a href="{{ route('tarot.free') }}" class="btn btn-ghost">ดูดวงฟรี 1 ใบ</a>
-        <a href="{{ route('chat.index') }}" class="btn btn-ghost">คุยกับแม่หมอฟรี</a>
+        <a href="{{ route('chat.index', ['room' => \App\Support\ChatRooms::DEFAULT]) }}" class="btn btn-ghost">คุยกับแม่หมอฟรี</a>
       </div>
     </div>
   </div>

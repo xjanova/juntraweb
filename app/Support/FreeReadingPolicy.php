@@ -133,6 +133,14 @@ class FreeReadingPolicy
         return self::claimInFlight($claim);
     }
 
+    /**
+     * 🌸 (2026-11-11) คนที่เปิดไพ่ฟรี 1 ใบให้ — บุษบาเมื่อห้องเปิด (ไพ่ 1 ใบเป็นของบุษบา) ไม่งั้นแม่หมอ
+     */
+    public static function reader(): string
+    {
+        return ChatRooms::readerName('single');
+    }
+
     /** ผู้ใช้คนนี้เคยใช้สิทธิ์ฟรีของรอบนี้ไปแล้วหรือยัง */
     public static function alreadyUsed($user): bool
     {
@@ -148,7 +156,7 @@ class FreeReadingPolicy
     {
         if (! self::enabled()) {
             return ['allowed' => false, 'code' => 'disabled', 'reading_id' => null,
-                'reason' => 'ตอนนี้แม่หมอปิดรอบดูดวงฟรีชั่วคราวค่ะ'];
+                'reason' => 'ตอนนี้'.self::reader().'ปิดรอบดูดวงฟรีชั่วคราวค่ะ'];
         }
 
         if (! $user) {
@@ -168,7 +176,7 @@ class FreeReadingPolicy
 
         if (self::claimInFlight($claim)) {
             return ['allowed' => false, 'code' => 'in_flight', 'reading_id' => null,
-                'reason' => 'แม่หมอกำลังเปิดไพ่ให้อยู่ค่ะ รอสักครู่นะคะ'];
+                'reason' => self::reader().'กำลังเปิดไพ่ให้อยู่ค่ะ รอสักครู่นะคะ'];
         }
 
         if (self::claimBlocks($claim)) {
@@ -178,7 +186,7 @@ class FreeReadingPolicy
 
         if (self::capReached()) {
             return ['allowed' => false, 'code' => 'daily_cap', 'reading_id' => null,
-                'reason' => 'วันนี้แม่หมอเปิดไพ่ฟรีครบจำนวนแล้วค่ะ พรุ่งนี้มาใหม่นะคะ'];
+                'reason' => 'วันนี้'.self::reader().'เปิดไพ่ฟรีครบจำนวนแล้วค่ะ พรุ่งนี้มาใหม่นะคะ'];
         }
 
         return ['allowed' => true, 'code' => null, 'reason' => null, 'reading_id' => null];
