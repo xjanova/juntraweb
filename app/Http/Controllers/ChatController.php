@@ -146,9 +146,9 @@ class ChatController extends Controller
 
         $this->loadRecentMessages($conversation);
 
-        // 🔒 กำลังทำนาย / บิลค้าง → ซ่อนทุกปุ่มที่พาไปเปิดไพ่ใบใหม่
+        // 🔒 กำลังทำนาย → ซ่อนทุกปุ่มที่พาไปเปิดไพ่ใบใหม่ (บิลค้างตัดสินด้านล่าง หลังรู้ว่ามีแบบไพ่อะไรให้เปิด)
         $bill       = $user ? ChatTopupController::pendingBill($user) : null;
-        $hideOffers = $lock !== null || $bill !== null;
+        $hideOffers = $lock !== null;
 
         // เข้าแชทต่อจากการเปิดไพ่หรือเปล่า — ใช้เลือกชุดปุ่มคำถามลัด
         // 💬 (2026-09-21) อ่านจากห้อง (chat_conversations.reading_id) ไม่ใช่ session เบราว์เซอร์อีกต่อไป
@@ -160,6 +160,14 @@ class ChatController extends Controller
         // 🔮 (2026-11-06) ทุกแบบการเปิดไพ่ของห้อง — หน้ารวมแพ็กเกจ /tarot ปิดแล้ว ลูกค้าเลือกบนโต๊ะในห้องแทน
         //    โต๊ะวางไม่เกิน 3 แบบที่เปิดได้ตอนนี้ (ผู้สูงอายุ ตัวเลือกมากไปคือไม่เลือก) ที่เหลืออยู่ใน "ไพ่แบบอื่น"
         $menu  = $gate['allowed'] && ! $hideOffers ? ChatOffers::roomMenu((string) $conversation->persona, $user) : [];
+        // 🧾 บิลค้างขวางโต๊ะเฉพาะเมื่อเงินในวอลเลตยังไม่พอเปิดไพ่สักแบบ — พอแล้วเปิดได้เลย ไม่ออกบิลใหม่
+        //    (เคสจริง 2026-11-11 ลูกค้า #26: เงินเข้าแล้ว ฿39.92 แต่มีรายการรอค้าง บอทตอบทวงบิล 6 ครั้ง จนลูกค้าโอนซ้ำ)
+        //    บิลยังส่งให้หน้าแชท (pendingBill) — กดแบบที่เงินไม่พอ = เปิดบิลเดิม ไม่ซ้อนบิลใหม่
+        $billBlocks = $bill !== null && ! $this->walletCovers($user, $menu);
+        if ($billBlocks) {
+            $hideOffers = true;
+            $menu = [];
+        }
         $table = array_slice(array_values(array_filter($menu, fn ($o) => $o['locked_until'] === null)), 0, 3);
 
         // ห้องของไพ่ (มีนาฬิกาถามต่อ/การ์ดปิดท้ายนับถอยหลัง) — ป๊อปอัป "มีอะไรใหม่" ห้ามบัง
@@ -191,6 +199,8 @@ class ChatController extends Controller
             'menuOpen'     => $request->boolean('menu') && count($menu) > count($table),
             'roomLock'     => $lock !== null ? ReadingRoomLock::view($lock) : null,
             'pendingBill'  => $bill !== null ? ChatTopupController::billView($bill) : null,
+            // ป้ายบิลบนโต๊ะ (แทนแพ็กเกจ) เฉพาะเมื่อบิลขวางการเปิดไพ่จริง
+            'billBlocks'   => $billBlocks,
             // 🎁 ห้องของไพ่ฟรีไม่มีปุ่ม "ถามต่อจากเรื่องนี้" — ป้ายไพ่หมวดอื่นแทน (เจ้าของสั่ง 2026-11-11)
             'aiSuggestions' => $freeAsk !== null ? []
                 : ($hideOffers ? ChatSuggestions::withoutReadingStarters((array) Cache::get(self::askKey($conversation->id), []))
@@ -534,7 +544,7 @@ class ChatController extends Controller
     /**
      * ลูกค้าขอดูดวงระหว่างที่ยังเปิดการ์ดใหม่ไม่ได้ — คืนคำตอบนุ่ม ๆ แทนการ์ด หรือ null ถ้าเปิดได้ตามปกติ
      */
-    private function offerHold(Request $request, $user, ?string $persona, ?array $qa = null): ?string
+    private function offerHold(Request $request, $user, ?string $persona, ?array $qa = null, array $offers = []): ?string
     {
         $self = ChatRooms::selfName($persona);
         if ($qa !== null && ! $qa['over']) {
@@ -551,7 +561,17 @@ class ChatController extends Controller
                 default => "ตอนนี้เรากำลังอยู่ในพิธีเปิดไพ่กันอยู่นะคะ กลับไปเลือกไพ่ให้ครบก่อน แล้วค่อยถามต่อจากไพ่ได้เลยค่ะ 🌙",
             };
         }
-        if ($user && ($bill = ChatTopupController::pendingBill($user)) !== null) {
+        // 🧾 (2026-11-11) บิลค้างขวางเฉพาะเมื่อเงินในวอลเลตยังไม่พอเปิดแบบที่ยื่นให้สักแบบ
+        //    เคสจริง: ลูกค้า #26 มีเงิน ฿39.92 พอเปิดไพ่ ฿39 แต่มีรายการรอค้าง → ได้ข้อความทวงบิลแทนทุกคำถาม
+        //    (กดแบบที่เงินไม่พอ หน้าแชทเปิดบิลเดิมให้จ่ายเอง ไม่ออกบิลใหม่ซ้อน)
+        if ($user && ($bill = ChatTopupController::pendingBill($user)) !== null && ! $this->walletCovers($user, $offers)) {
+            $amount = '฿' . number_format((float) $bill->amount, 2);
+            // แนบสลิปแล้ว = ลูกค้าโอนมาแล้ว รอตรวจ — ห้ามบอกให้โอนอีก (ทวงซ้ำ = ลูกค้าโอนซ้ำจริง)
+            if (! empty($bill->slip_path)) {
+                return "ได้รับสลิปของบิลเลขที่ {$bill->reference_code} ยอด {$amount} แล้วนะคะ กำลังตรวจอยู่ ไม่ต้องโอนซ้ำค่ะ "
+                    . "พอเงินเข้าระบบแล้ว{$self}เปิดไพ่ให้ต่อได้เลยค่ะ 🌙";
+            }
+
             // 🧭 (2026-11-10) แชทจริง: ลูกค้าถาม "ชำระตรงไหนค่ะ" แล้วได้ประโยคนี้ซ้ำ 8 ครั้งโดยไม่รู้ว่าต้องกดอะไร
             //    → บอกทางจ่ายต่อ และทางยกเลิกถ้าไม่ใช้บิลนี้แล้ว (ชื่อปุ่มตรงกับหน้าเว็บ)
             return "ยังมีบิลเติมเงินเลขที่ {$bill->reference_code} ยอด ฿" . number_format((float) $bill->amount, 2) . ' รอชำระอยู่นะคะ '
@@ -561,6 +581,28 @@ class ChatController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * เงินในวอลเลตพอเปิดแบบไพ่ที่ยื่นอยู่ได้อย่างน้อยหนึ่งแบบไหม (แบบที่ยังล็อกอยู่ไม่นับ)
+     * เทียบเป็นสตางค์ เหมือน canAfford() ของหน้าแชท — float ตรง ๆ ทำให้คนที่เงินพอดีโดนบล็อก
+     */
+    private function walletCovers($user, array $offers): bool
+    {
+        if (! $user || $offers === []) {
+            return false;
+        }
+        $cents = (int) round($this->wallet->balance($user) * 100);
+        foreach ($offers as $o) {
+            if (($o['locked_until'] ?? null) !== null) {
+                continue;
+            }
+            if ((int) round(((float) ($o['price'] ?? 0)) * 100) <= $cents) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** ชุดปุ่มคำถามลัดที่เหมาะกับสถานะของบทสนทนาตอนนี้ */
@@ -752,7 +794,7 @@ class ChatController extends Controller
                 : ChatOffers::forRoom($conversation->persona, (string) ($dispatch['offer_topic'] ?? 'general'), $user));
         // 🔒 (2026-11-05) กำลังทำนายอยู่ (สับไพ่/อ่านไพ่) หรือมีบิลเติมเงินค้าง — ไม่ยื่นการ์ดเปิดไพ่ใบใหม่ซ้อน
         //    เจ้าของสั่ง "ถ้าทำนายอยู่ปุ่มดูดวงไม่ควรโผล่มา" + "ป้ายเปิดไพ่ต้องไม่ขึ้นถ้ายังค้างบิลอยู่"
-        if ($offers !== [] && ($hold = $this->offerHold($request, $user, $conversation->persona, $qa)) !== null) {
+        if ($offers !== [] && ($hold = $this->offerHold($request, $user, $conversation->persona, $qa, $offers)) !== null) {
             $offers = [];
             $reply  = $hold;
         }
@@ -887,7 +929,7 @@ class ChatController extends Controller
         $room = (string) $conversation->persona;
         $topic = FreeAskClock::topicOf($message);
         $offers = FreeAskClock::offersFor($room, $user, $topic);
-        $hold = $this->offerHold($request, $user, $room);
+        $hold = $this->offerHold($request, $user, $room, null, $offers);
         if ($offers === [] && $hold === null) {
             return null;
         }

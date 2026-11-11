@@ -25,9 +25,17 @@
   $chatGate    = \App\Support\ChatPolicy::gate($viewer);
   $canConsult  = $isOwner && $chatGate['allowed'];
 
+  // 💬 (2026-11-11) ปุ่มลอย "กลับไปถามต่อในห้องแชท" — เคสจริงลูกค้า #26: เปิดไพ่เสร็จ เข้าห้องแล้วไม่ได้ถามอะไรเลย
+  //    เจ้าของ: "ควรทำปุ่มลอยให้ลูกค้ารู้ว่า เปิดไพ่แล้วกลับไปห้องแชทถามต่อได้ด้วย"
+  //    ห้องของไพ่ชุดนี้หมดเวลาถามต่อ/กด "พอแล้ว" ไปแล้ว = ไม่ชวน (กดไปก็ถามไม่ได้)
+  $qaRoom   = $canConsult ? \App\Models\ChatConversation::where('user_id', $viewer->id)->where('reading_id', $reading->id)->latest('id')->first() : null;
+  $qaOver   = $qaRoom !== null && (\App\Support\ReadingQaClock::state($qaRoom, $reading)['over'] ?? false);
+
   // 🎁 ไพ่ฟรี 1 ใบ — ตัวแยกคือธงใน payload (ห้ามใช้ราคาเป็นตัวแยก แอดมินปรับได้ตลอด)
   $isFreeReading = (bool) data_get($reading->payload, 'free', false);
   $nextQuestions = array_filter((array) data_get($reading->payload, 'next_questions', []));
+  // ไพ่ฟรีมีชิปคำถามถามต่อ + ชวนเปิดชุดเต็มของมันเองอยู่แล้ว — ปุ่มลอยเฉพาะไพ่ที่จ่ายแล้ว
+  $showAskFab = $canConsult && ! $qaOver && ! $isFreeReading;
 
   // 🔮 (2026-09-15) คำทำนายแบบการ์ด/ตาราง — แยกได้เมื่อแม่หมอตอบตามหัวข้อของแพ็กเกจ
   //    (คำทำนายเก่า/ตอบผิดรูปแบบ → แสดงเป็นข้อความสวยแบบเดิม)
@@ -97,6 +105,26 @@
     .followup-form { flex-direction: column; }
     .followup-form .btn { justify-content: center; }
   }
+
+  /* 💬 ปุ่มลอยกลับไปถามต่อ — ซ้ายล่าง (ขวาล่างเป็นปุ่มลำโพง .oracle-voice-fab) · ใหญ่พอให้ผู้สูงอายุกดง่าย */
+  .ask-fab {
+    position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 61;
+    max-width: calc(100vw - 96px);
+    transition: opacity .25s, transform .25s;
+  }
+  .ask-fab.is-away { opacity: 0; transform: translateY(12px); pointer-events: none; }
+  .ask-fab button {
+    display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+    min-height: 52px; padding: 0 20px 0 16px; border-radius: 999px; border: 0; cursor: pointer;
+    background: linear-gradient(135deg, var(--gold-2, #f8dc8a), var(--gold, #f4cf6a));
+    color: #1a0f2e; font: inherit; font-size: 15px; font-weight: 600;
+    box-shadow: 0 12px 30px -10px rgba(0, 0, 0, .7), 0 0 0 4px rgba(244, 207, 106, .18);
+  }
+  .ask-fab button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ask-fab button:disabled { opacity: .7; cursor: wait; }
+  .ask-fab button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .ask-fab svg { width: 20px; height: 20px; flex: none; }
+  @media (prefers-reduced-motion: reduce) { .ask-fab { transition: none; } }
 </style>
 @endpush
 
@@ -345,6 +373,19 @@
          cards drawn, so answers read those cards — not a blank-slate chat.
          (ต้องรอคำทำนายเสร็จก่อน — primer ใช้เนื้อคำทำนาย) --}}
     @if ($canConsult && ! $reading->isInProgress() && ! $reading->isFailed())
+      @if ($showAskFab)
+        {{-- ซ่อนเองเมื่อกล่องถามต่อด้านล่างอยู่ในจอแล้ว (ไม่ให้มีปุ่มเดียวกันสองที่) --}}
+        <form action="{{ route('chat.from-reading', $reading) }}" method="POST" class="ask-fab" data-ask-fab
+              x-data="{ away: false, sending: false }" :class="{ 'is-away': away }" @submit="sending = true"
+              x-init="const box = document.querySelector('.followup-box');
+                      if (box && 'IntersectionObserver' in window) new IntersectionObserver((e) => { away = e[0].isIntersecting }).observe(box)">
+          @csrf
+          <button type="submit" :disabled="sending" aria-label="กลับไปถาม{{ $oracleShort }}ต่อในห้องแชท">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+            <span x-text="sending ? 'กำลังพาไปห้อง ⋯' : 'ถาม{{ $oracleShort }}ต่อในห้องแชท'">ถาม{{ $oracleShort }}ต่อในห้องแชท</span>
+          </button>
+        </form>
+      @endif
       <div class="followup-box">
         <div class="eyebrow" style="display:inline-flex">ถาม{{ $oracleShort }}ต่อจากไพ่ชุดนี้</div>
         <p class="followup-hint">

@@ -303,4 +303,31 @@ class ReadingQaClockTest extends TestCase
         \Illuminate\Support\Facades\Auth::logout();
         $this->post(route('chat.qa.end'))->assertRedirect();   // ยังไม่ล็อกอิน
     }
+
+    /**
+     * 💬 (2026-11-11) เคสจริงลูกค้า #26: เปิดไพ่เสร็จ เข้าห้องแล้วไม่ได้ถามอะไร — เจ้าของสั่งปุ่มลอยบอกว่ากลับไปถามต่อได้
+     * ปุ่มลอยพาไปห้องของไพ่ชุดนี้ · ยังไม่เข้าห้อง/เข้าแล้วยังไม่ถาม = มี · หมดเวลาถามต่อแล้ว = ไม่ชวน · คนอื่นดู = ไม่มี
+     */
+    public function test_the_result_page_floats_a_button_back_to_the_room_until_the_follow_up_time_is_over(): void
+    {
+        $user = $this->member();
+        $reading = $this->reading($user, 'tarot_three');
+        $fab = 'data-ask-fab';
+
+        $this->actingAs($user)->get(route('tarot.show', $reading))->assertOk()
+            ->assertSee($fab, false)
+            ->assertSee('action="' . route('chat.from-reading', $reading) . '" method="POST" class="ask-fab"', false);
+
+        // เข้าห้องแล้วแต่ยังไม่ถาม (นาฬิกายังไม่เริ่ม) — ยังชวนกลับไปถาม
+        $room = $this->enter($user, $reading);
+        $this->actingAs($user)->get(route('tarot.show', $reading))->assertOk()->assertSee($fab, false);
+
+        // ถามแล้วหมดเวลา — ไม่ชวนแล้ว (กดไปก็ถามไม่ได้)
+        $this->actingAs($user)->postJson('/chat/send', ['message' => 'ข้อแรกค่ะ', 'room' => $room->persona])->assertOk();
+        $this->travel(8)->minutes();
+        $this->actingAs($user)->get(route('tarot.show', $reading))->assertOk()->assertDontSee($fab, false);
+
+        // คนอื่นเปิดดูลิงก์แชร์ — ไม่มีปุ่มนี้
+        $this->actingAs($this->member())->get(route('tarot.show', $reading))->assertDontSee($fab, false);
+    }
 }
