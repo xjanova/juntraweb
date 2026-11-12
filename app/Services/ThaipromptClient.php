@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Setting;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -57,18 +58,65 @@ class ThaipromptClient
         return $this->baseUrl() . '/oauth/authorize?' . $q;
     }
 
-    public function exchangeCode(string $code): ?array
+    public function socialProviders(): array
+    {
+        if (! $this->isEnabled() || parse_url($this->baseUrl(), PHP_URL_SCHEME) !== 'https') {
+            return [];
+        }
+        return Cache::remember('social-providers:'.hash('sha256', $this->baseUrl()), 30, function () {
+            try {
+                $response = Http::acceptJson()->withoutRedirecting()->timeout(5)
+                    ->get($this->baseUrl().'/api/oauth/social/providers');
+                if (! $response->successful() || $response->json('data.flow') !== 'juntra-social-v1') {
+                    return [];
+                }
+                $enabled = $response->json('data.providers');
+                if (! is_array($enabled)) {
+                    return [];
+                }
+                $providers = [];
+                foreach (['facebook' => 'Facebook', 'google' => 'Google'] as $id => $name) {
+                    if (in_array($id, array_column($enabled, 'id'), true)) {
+                        $providers[] = compact('id', 'name');
+                    }
+                }
+                return $providers;
+            } catch (\Throwable) {
+                return [];
+            }
+        });
+    }
+
+    public function socialAuthorizeUrl(string $state, string $provider, string $nonce): string
+    {
+        $query = parse_url($this->authorizeUrl($state), PHP_URL_QUERY);
+        return $this->baseUrl().'/oauth/social/authorize?'.$query.'&'.http_build_query([
+            'provider' => $provider, 'social_nonce' => $nonce,
+        ]);
+    }
+
+    public function exchangeCode(string $code, ?array $social = null): ?array
     {
         try {
-            $resp = Http::asForm()->timeout(15)->post($this->baseUrl() . '/oauth/token', [
+            $body = [
                 'grant_type'    => 'authorization_code',
                 'client_id'     => $this->clientId(),
                 'client_secret' => $this->clientSecret(),
                 'redirect_uri'  => $this->redirectUri(),
                 'code'          => $code,
-            ]);
+            ];
+            if ($social) {
+                $body['social_provider'] = $social['provider'];
+                $body['social_nonce'] = $social['nonce'];
+            }
+            $resp = Http::asForm()->withoutRedirecting()->timeout(15)->post($this->baseUrl() . '/oauth/token', $body);
             if (!$resp->successful()) {
-                Log::warning('Thaiprompt token exchange failed', ['status' => $resp->status(), 'body' => $resp->body()]);
+                Log::warning('Thaiprompt token exchange failed', ['status' => $resp->status()]);
+                return null;
+            }
+            if ($social && (! is_string($resp->json('social_provider')) || ! is_string($resp->json('social_nonce'))
+                || ! hash_equals($social['provider'], $resp->json('social_provider'))
+                || ! hash_equals($social['nonce'], $resp->json('social_nonce')))) {
                 return null;
             }
             return $resp->json();

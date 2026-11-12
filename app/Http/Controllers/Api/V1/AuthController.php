@@ -286,7 +286,7 @@ class AuthController extends Controller
      * Compact user payload — same shape as /api/v1/auth/me so the Flutter
      * client can cache it from the login response without a second call.
      */
-    private function profile(User $user): array
+    public function profile(User $user): array
     {
         // อีเมลที่ระบบสร้างให้คนที่สมัครด้วยเบอร์ ห้ามโชว์เป็น "อีเมลของคุณ"
         // — มันไม่ใช่อีเมลจริง ส่งเมลไปก็ไม่ถึง และทำให้ผู้ใช้สับสน

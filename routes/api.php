@@ -44,6 +44,13 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     Route::post('auth/register', [AuthController::class, 'register'])
         ->middleware('throttle:auth-register')->name('auth.register');
 
+    Route::get('auth/social/providers', [\App\Http\Controllers\Api\V1\SocialAuthController::class, 'providers'])
+        ->middleware('throttle:60,1,social-providers')->name('auth.social.providers');
+    Route::post('auth/social/start', [\App\Http\Controllers\Api\V1\SocialAuthController::class, 'start'])
+        ->middleware('throttle:6,1,social-start')->name('auth.social.start');
+    Route::post('auth/social/poll', [\App\Http\Controllers\Api\V1\SocialAuthController::class, 'poll'])
+        ->middleware('throttle:social-poll')->name('auth.social.poll');
+
     Route::get('app/health', fn () => response()->json([
         'status'  => 'ok',
         'app'     => config('app.name'),

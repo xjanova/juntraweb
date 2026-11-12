@@ -85,6 +85,13 @@ class AppServiceProvider extends ServiceProvider
 
         // สมัครสมาชิก: แอพไม่มี Turnstile (ทำไม่ได้บนมือถือ) เพดานต่อ IP
         // จึงเป็นด่านเดียวที่กันฟาร์มบัญชี — 3/นาที และ 20/วัน ต่อ IP
+        RateLimiter::for('social-poll', function (Request $request) {
+            return [
+                Limit::perMinute(40)->by('social-ticket:'.hash('sha256', (string) $request->input('id'))),
+                Limit::perMinute(120)->by('social-ip:'.$request->ip()),
+            ];
+        });
+
         RateLimiter::for('auth-register', function (Request $request) {
             return [
                 Limit::perMinute(3)->by('reg:' . $request->ip()),
