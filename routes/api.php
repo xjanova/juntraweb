@@ -78,6 +78,13 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     // แพ็กเกจไพ่ที่เปิดขาย (ราคา/ภาพประกอบ/ตำแหน่งไพ่/ข้อห้ามเปิดซ้ำ) — ชุดเดียวกับหน้า /tarot
     Route::get('tarot/packages', [TarotController::class, 'packages'])->name('tarot.packages');
 
+    // 🔮 (2026-11-12) ห้องผู้พยากรณ์ (หน้าเลือกห้องของเว็บ) + ตัวเลขสดหน้าห้อง — ไม่ต้องล็อกอิน
+    //    rooms อ่าน bearer ถ้ามี (meta.lock = กำลังทำนายอยู่ห้องไหน)
+    Route::get('chat/rooms', [ChatController::class, 'rooms'])
+        ->middleware('throttle:60,1,chat-rooms')->name('chat.rooms');
+    Route::get('chat/live', [ChatController::class, 'live'])
+        ->middleware('throttle:60,1,chat-live')->name('chat.live');
+
     // ─── Authenticated (Sanctum bearer) ───────────────────────
     Route::middleware('auth:sanctum')->group(function () {
 
@@ -135,6 +142,15 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('conversations/{conversation}',    [ChatController::class, 'show'])->name('conversations.show');
             Route::post('conversations/{conversation}/send', [ChatController::class, 'send'])
                 ->middleware('throttle:chat-send')->name('conversations.send');
+            // ⏳ "พอแล้ว" — จบเวลาถามต่อของไพ่ก่อนกำหนด (ตัวนับเดียวกับการส่งข้อความ เหมือนเว็บ)
+            Route::post('conversations/{conversation}/qa/end', [ChatController::class, 'endQa'])
+                ->middleware('throttle:chat-send')->whereNumber('conversation')->name('conversations.qa.end');
+            // 🧑‍💼 ข้อความใหม่จากทีมงาน (แอพ poll ระหว่าง held) — ตัวนับของเส้นนี้เอง
+            Route::get('conversations/{conversation}/feed', [ChatController::class, 'feed'])
+                ->middleware('throttle:40,1,chat-feed')->whereNumber('conversation')->name('conversations.feed');
+            // 🎙️ ปุ่มไมค์ — เพดานเดียวกับเว็บ (12 ครั้ง/นาที)
+            Route::post('transcribe', [ChatController::class, 'transcribe'])
+                ->middleware('throttle:12,1,chat-mic')->name('transcribe');
             // หมวดคำถามแบบเต็ม (5 หมวด 24 คำถาม) — ชุดเดียวกับที่เว็บกางในแชท
             Route::get('topics', [ChatController::class, 'topics'])->name('topics');
         });

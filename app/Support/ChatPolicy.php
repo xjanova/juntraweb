@@ -38,6 +38,25 @@ class ChatPolicy
         return $kind === 'offer' || $kind === 'guard' || $kind === 'help';
     }
 
+    /**
+     * คำว่า "ฟรี" บนหน้าเลือกห้อง (เว็บ /chat?pick=1 + แอพ GET /v1/chat/rooms) ต้องจริงตามที่แอดมินตั้ง
+     * — ราคาต่อข้อความ 0 หรือมีโควตาฟรีรายวัน
+     */
+    public static function advertisedFree(): bool
+    {
+        return self::isFree() || self::dailyLimit() > 0;
+    }
+
+    /** ประโยคบอกราคาแชทบนหน้าเลือกห้อง — ชุดเดียวทั้งเว็บและแอพ */
+    public static function lede(): string
+    {
+        return match (true) {
+            self::isFree() && self::dailyLimit() <= 0 => 'คุยฟรีทุกวัน',
+            self::dailyLimit() > 0 => 'คุยฟรีวันละ ' . self::dailyLimit() . ' ข้อความ',
+            default => 'คุยข้อความละ ' . Pricing::format(self::cost()),
+        };
+    }
+
     /** ราคาต่อข้อความ (0 = ฟรี) */
     public static function cost(): float
     {

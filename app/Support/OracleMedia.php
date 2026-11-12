@@ -63,6 +63,26 @@ final class OracleMedia
     }
 
     /**
+     * ประโยคเฉพาะแบบไพ่ที่มีไฟล์แล้ว — spread => key => url (แอพเลือกเองตามโต๊ะที่เปิด แทนการถามทีละแบบ)
+     * ไม่มีไฟล์ของแบบไหน = แบบนั้นไม่อยู่ในรายการ (แอพใช้ประโยคกลางจาก voice())
+     *
+     * @return array<string, array<string, string>>
+     */
+    public static function voiceBySpread(string $persona): array
+    {
+        $out = [];
+        foreach (self::voiceSpreadPaths($persona) as $spread => $lines) {
+            foreach ($lines as $key => $path) {
+                if (is_file(public_path($path))) {
+                    $out[$spread][$key] = self::url($path);
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * ประโยคเฉพาะแบบไพ่ตาม manifest (ไม่สนว่ามีไฟล์หรือยัง) — ให้เทสต์ใช้เช็คความครบ
      *
      * @return array<string, array<string, string>> spread => key => path ใต้ public/
