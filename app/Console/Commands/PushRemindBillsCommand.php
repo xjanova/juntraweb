@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Models\PushDelivery;
-use App\Models\PushSubscription;
 use App\Models\WalletTransaction;
 use App\Services\Push\PushNotifier;
 use Illuminate\Console\Command;
@@ -43,7 +42,8 @@ class PushRemindBillsCommand extends Command
             ->where('method', '!=', WalletTransaction::METHOD_CHAT_SLIP)
             ->whereBetween('created_at', [now()->subDay(), now()->subMinutes(self::WAIT_MINUTES)])
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()->addMinutes(10)))
-            ->whereIn('user_id', PushSubscription::select('user_id'))
+            // มีเครื่องรับได้: เบราว์เซอร์ (Web Push) หรือแอป Android ช่อง direct (แอปจาก Play ไม่ได้รับยอดค้าง)
+            ->tap(fn ($q) => PushNotifier::whereReachable($q, 'user_id', 'bill'))
             ->orderBy('id')
             ->chunkById(200, function ($rows) use ($notifier, &$sent) {
                 $done = PushDelivery::where('type', 'bill')

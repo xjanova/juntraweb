@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\PushDelivery;
 use App\Models\Setting;
+use App\Services\Push\FcmSender;
 use App\Services\Push\PushNotifier;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Section;
@@ -113,7 +114,12 @@ class PushNotifications extends Page implements HasForms
 
     public function getStatusProperty(): array
     {
-        return ['ready' => PushNotifier::ready(), 'quiet' => PushNotifier::isQuiet()] + PushNotifier::stats();
+        return [
+            'ready' => PushNotifier::ready(),
+            'web' => PushNotifier::webReady(),
+            'fcm' => FcmSender::configured(),
+            'quiet' => PushNotifier::isQuiet(),
+        ] + PushNotifier::stats();
     }
 
     public function getRecentProperty()

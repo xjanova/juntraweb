@@ -58,7 +58,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="application-name" content="จันทรา">
 @auth
-@if (\App\Services\Push\PushNotifier::ready())
+@if (\App\Services\Push\PushNotifier::webReady())
 <meta name="jw-push-key" content="{{ config('webpush.public_key') }}" data-user="{{ auth()->id() }}">
 @endif
 @endauth

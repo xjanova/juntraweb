@@ -1,17 +1,23 @@
 <x-filament-panels::page>
     @php($s = $this->status)
     <div class="flex flex-wrap gap-2 text-sm">
-        <x-filament::badge :color="$s['ready'] ? 'success' : 'warning'">
-            {{ $s['ready'] ? 'กุญแจ VAPID พร้อม' : 'ยังไม่มีกุญแจ VAPID ใน .env — ระบบแจ้งเตือนปิดอยู่' }}
+        <x-filament::badge :color="$s['web'] ? 'success' : 'warning'">
+            {{ $s['web'] ? 'กุญแจ VAPID พร้อม' : 'ยังไม่มีกุญแจ VAPID ใน .env — แจ้งเตือนบนเว็บปิดอยู่' }}
+        </x-filament::badge>
+        <x-filament::badge :color="$s['fcm'] ? 'success' : 'gray'">
+            {{ $s['fcm'] ? 'FCM (แอป Android) พร้อม' : 'ยังไม่ได้ตั้ง FCM_* ใน .env — แอป Android ยังไม่ได้รับแจ้งเตือน' }}
         </x-filament::badge>
         <x-filament::badge color="info">สมาชิกเปิดแจ้งเตือน {{ number_format($s['users']) }} คน · {{ number_format($s['devices']) }} เครื่อง</x-filament::badge>
+        @if ($s['app_devices'] > 0)
+            <x-filament::badge color="info">แอป Android {{ number_format($s['app_users']) }} คน · {{ number_format($s['app_devices']) }} เครื่อง</x-filament::badge>
+        @endif
         <x-filament::badge color="gray">ส่งถึงเครื่อง 24 ชม. ล่าสุด {{ number_format((int) $s['sent_24h']) }} ครั้ง</x-filament::badge>
         @if ($s['quiet'])
             <x-filament::badge color="gray">ตอนนี้อยู่ในเวลาเงียบ</x-filament::badge>
         @endif
     </div>
 
-    @unless ($s['ready'])
+    @unless ($s['web'])
         <x-filament::section>
             <x-slot name="heading">ตั้งกุญแจ VAPID (ทำครั้งเดียวบนเซิร์ฟเวอร์)</x-slot>
             <p class="text-sm text-gray-600 dark:text-gray-300">

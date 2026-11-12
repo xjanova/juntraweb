@@ -3,6 +3,7 @@
 namespace App\Services\Push;
 
 use App\Models\PushDelivery;
+use App\Models\PushDevice;
 use App\Models\PushSubscription;
 use App\Models\Reading;
 use App\Models\Setting;
@@ -10,6 +11,7 @@ use App\Models\User;
 use App\Models\WalletTransaction;
 use App\Support\DailyLuck;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -25,6 +27,11 @@ use Illuminate\Support\Facades\Log;
  *     - คำทำนายพร้อม (transactional) ผู้ใช้เพิ่งสั่งเอง ส่งทันทีครั้งเดียวต่อรายการ ไม่ติดเวลาเงียบ
  *   แอดมินเปิด/ปิดแต่ละหมวดได้ที่ /admin → แจ้งเตือนแอป · ผู้ใช้ปิดรายหมวดได้ในหน้าบัญชี
  *
+ * 📲 (2026-11-12) ส่งได้สองช่องทาง กติกาข้างบนชุดเดียวกัน:
+ *   - Web Push (เบราว์เซอร์/เว็บที่ติดตั้งเป็นแอป) — เมื่อมีกุญแจ VAPID
+ *   - FCM (แอป Android, ตาราง push_devices) — เมื่อตั้ง FCM_* ใน .env · ไม่ตั้ง = ปิดเงียบ ๆ
+ *   แอปที่ติดตั้งจาก Google Play ไม่ได้รับ "ยอดค้าง" (ข้อความชวนโอน/แนบสลิป = ชี้ไปจ่ายนอก Play ผิดนโยบาย Payments)
+ *
  * ทุกเมธอดสาธารณะไม่โยน exception — แจ้งเตือนพังห้ามทำให้งานหลัก (อ่านไพ่/เติมเงิน) พัง
  */
 final class PushNotifier
@@ -38,6 +45,16 @@ final class PushNotifier
         'daily' => ['ดวงประจำวัน', 'ชวนกลับมารับดวงวันนี้ (สีเสริมดวง/เลขนำโชค) ช่วงเช้า เฉพาะคนที่ยังไม่เช็กอิน — วันละครั้ง', 'nudge'],
     ];
 
+    /** คำอธิบายหมวดที่สมาชิกเห็น (การ์ดในหน้าบัญชี + หน้าตั้งค่าในแอป) — คำอธิบายใน TYPES เป็นของแอดมิน */
+    public const MEMBER_LABELS = [
+        'bill' => 'บิลเติมเงินที่ยังไม่ได้โอน',
+        'reading_ready' => 'คำทำนายอ่านเสร็จแล้ว',
+        'daily' => 'ดวงประจำวันช่วงเช้า (วันละครั้ง)',
+    ];
+
+    /** หมวดที่ส่งถึงแอป Android ช่อง direct เท่านั้น — แอปจาก Play (หรือไม่รู้ช่อง) ห้ามชวนไปจ่ายนอก Google Play */
+    public const APP_DIRECT_ONLY = ['bill'];
+
     public const DEFAULT_QUIET_START = '21:00';
 
     public const DEFAULT_QUIET_END = '08:00';
@@ -45,11 +62,65 @@ final class PushNotifier
     /** หน้าต่างส่งดวงประจำวัน: ตั้งแต่หมดเวลาเงียบ ถึงเที่ยง (คนเปิดมือถือช่วงเช้า) */
     public const DAILY_UNTIL_HOUR = 12;
 
-    public function __construct(private WebPushSender $sender) {}
+    public function __construct(private WebPushSender $sender, private FcmSender $fcm) {}
 
+    /** มีช่องทางส่งอย่างน้อยหนึ่งช่อง (Web Push หรือ FCM) */
     public static function ready(): bool
     {
+        return self::webReady() || FcmSender::configured();
+    }
+
+    /** ช่อง Web Push พร้อม (มีกุญแจ VAPID) — การ์ด/ปุ่มบนหน้าเว็บดูค่านี้ ไม่ใช่ ready() */
+    public static function webReady(): bool
+    {
         return Vapid::configured();
+    }
+
+    /** แอปช่องนี้ (play | direct | null = ไม่รู้ ถือเป็น play) รับหมวดนี้ได้ไหม */
+    public static function appMayReceive(string $type, ?string $channel): bool
+    {
+        return ! in_array($type, self::APP_DIRECT_ONLY, true) || $channel === 'direct';
+    }
+
+    /**
+     * จำกัดคิวรีให้เหลือผู้ใช้ที่มีเครื่องรับหมวดนี้ได้ ตามช่องทางที่เปิดอยู่ — คำสั่งตามเวลาใช้คัดคนก่อนวนส่ง
+     *
+     * @template T of \Illuminate\Contracts\Database\Query\Builder
+     *
+     * @param  T  $query
+     * @return T
+     */
+    public static function whereReachable($query, string $column = 'user_id', ?string $type = null)
+    {
+        $web = self::webReady();
+        $app = FcmSender::configured();
+
+        return $query->where(function ($q) use ($column, $type, $web, $app) {
+            if ($web) {
+                $q->whereIn($column, PushSubscription::select('user_id'));
+            }
+            if ($app) {
+                $q->orWhereIn($column, self::appDevices($type)->select('user_id'));
+            }
+            if (! $web && ! $app) {
+                $q->whereRaw('1 = 0');
+            }
+        });
+    }
+
+    /** @return Builder<PushDevice> */
+    private static function appDevices(?string $type): Builder
+    {
+        return PushDevice::query()->when(
+            $type !== null && ! self::appMayReceive($type, null),
+            fn ($q) => $q->where('channel', 'direct'),
+        );
+    }
+
+    private static function hasDevice(int $userId, ?string $type): bool
+    {
+        return (self::webReady() && PushSubscription::where('user_id', $userId)->exists())
+            || (FcmSender::configured() && self::appDevices($type)->where('user_id', $userId)->exists());
     }
 
     public static function typeEnabled(string $type): bool
@@ -201,7 +272,7 @@ final class PushNotifier
         if ($this->throttled($userId, $type)) {
             return 'throttled';
         }
-        if (! PushSubscription::where('user_id', $userId)->exists()) {
+        if (! self::hasDevice($userId, $type)) {
             return 'no_device';
         }
 
@@ -221,7 +292,7 @@ final class PushNotifier
         return $result['delivered'] > 0 ? 'sent' : 'undelivered';
     }
 
-    /** @return array{devices:int, delivered:int} */
+    /** @return array{devices:int, delivered:int} นับรวมทุกช่องทาง */
     private function deliver(int $userId, array $message, string $urgency, ?string $topic): array
     {
         $message += [
@@ -229,15 +300,39 @@ final class PushNotifier
             'badge' => asset('images/pwa/badge-96.png'),
             'ts' => now()->getTimestampMs(),
         ];
-        $subs = PushSubscription::where('user_id', $userId)->orderByDesc('id')->limit((int) config('webpush.max_per_user', 10))->get();
+        $devices = 0;
         $delivered = 0;
-        foreach ($subs as $sub) {
-            if ($this->sender->send($sub, $message, $urgency, $topic) === 'ok') {
-                $delivered++;
+
+        if (self::webReady()) {
+            $subs = PushSubscription::where('user_id', $userId)->orderByDesc('id')->limit((int) config('webpush.max_per_user', 10))->get();
+            foreach ($subs as $sub) {
+                if ($this->sender->send($sub, $message, $urgency, $topic) === 'ok') {
+                    $delivered++;
+                }
             }
+            $devices += $subs->count();
         }
 
-        return ['devices' => min(255, $subs->count()), 'delivered' => min(255, $delivered)];
+        if (FcmSender::configured()) {
+            $type = isset($message['type']) ? (string) $message['type'] : null;
+            $apps = self::appDevices($type)->where('user_id', $userId)
+                ->orderByDesc('updated_at')->orderByDesc('id')->limit((int) config('fcm.max_per_user', 10))->get();
+            // แอปเปิดลิงก์จากแจ้งเตือนเอง — ต้องเป็น URL เต็ม (Web Push ยังได้ path ของเว็บตามเดิม)
+            $appMessage = ['url' => self::absoluteUrl((string) ($message['url'] ?? '/'))] + $message;
+            foreach ($apps as $device) {
+                if ($this->fcm->send($device, $appMessage, $urgency, $topic) === 'ok') {
+                    $delivered++;
+                }
+            }
+            $devices += $apps->count();
+        }
+
+        return ['devices' => min(255, $devices), 'delivered' => min(255, $delivered)];
+    }
+
+    private static function absoluteUrl(string $url): string
+    {
+        return preg_match('#^https?://#i', $url) ? $url : url($url);
     }
 
     private function throttled(int $userId, string $type): bool
@@ -264,6 +359,8 @@ final class PushNotifier
         return [
             'devices' => PushSubscription::count(),
             'users' => (int) PushSubscription::query()->distinct()->count('user_id'),
+            'app_devices' => PushDevice::count(),
+            'app_users' => (int) PushDevice::query()->distinct()->count('user_id'),
             'sent_24h' => PushDelivery::where('created_at', '>=', now()->subDay())->sum('delivered'),
             'by_type_24h' => PushDelivery::where('created_at', '>=', now()->subDay())
                 ->select('type', DB::raw('SUM(delivered) as n'))->groupBy('type')->pluck('n', 'type')->all(),
