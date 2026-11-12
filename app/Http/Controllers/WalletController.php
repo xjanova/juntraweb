@@ -10,6 +10,7 @@ use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use App\Support\PayoutAccount;
 use App\Support\PromptPayQr;
+use App\Support\TopupChannel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -84,10 +85,12 @@ class WalletController extends Controller
         $payout      = PayoutAccount::resolve($request->user());
         $promptpayId = $payout['promptpay_id'] ?? '';
 
+        $limits = TopupChannel::limits();
+
         return view('pages.wallet.topup', [
-            'bundles'        => config('pricing.topup_bundles', [50, 100, 200, 500]),
-            'min'            => (int) config('pricing.min_topup', 20),
-            'max'            => (int) config('pricing.max_topup', 50000),
+            'bundles'        => $limits['bundles'],
+            'min'            => $limits['min'],
+            'max'            => $limits['max'],
             'promptpayId'    => $promptpayId,
             'promptpayName'  => $payout['name'] ?? '',
             // Static QR (no amount) — user scans then types the amount in their
@@ -105,8 +108,7 @@ class WalletController extends Controller
 
     public function topupSubmit(Request $request, AmountReservation $amounts)
     {
-        $min = (int) config('pricing.min_topup', 20);
-        $max = (int) config('pricing.max_topup', 50000);
+        ['min' => $min, 'max' => $max] = TopupChannel::limits();
 
         $data = $request->validate([
             'amount' => "required|numeric|min:$min|max:$max",
@@ -115,15 +117,13 @@ class WalletController extends Controller
             'note'   => 'nullable|string|max:255',
         ]);
 
-        // 🏦 'kbank' = โอนเข้าเลขบัญชีกสิกรไทย ซึ่งเป็น "บัญชีเดียวกับ QR พร้อมเพย์"
-        // ตัวจับ SMS เห็นเงินเข้าเหมือนกันทุกประการ → ภายในต้องเป็น method 'promptpay'
-        // (SmsCheckerService จับคู่เฉพาะ method='promptpay') ช่องทางที่ลูกค้าเลือกจดไว้ใน meta.channel
-        $channel  = $data['method'];
-        $transfer = null;
+        // 🏦 'kbank' = บัญชีเดียวกับ QR พร้อมเพย์ → ภายในเป็น method 'promptpay' (กติกาใน TopupChannel ใช้ร่วมกับแอพ)
+        $channel = $data['method'];
+        $picked  = null;
         if ($channel !== 'manual') {
-            $transfer = PayoutAccount::resolve($request->user())['transfer'] ?? null;
-            if ($channel === 'kbank' && ! $transfer) {
-                return back()->withInput()->withErrors(['method' => 'ช่องทางโอนเข้าบัญชีกสิกรไทยยังไม่พร้อมชั่วคราว — สแกน QR พร้อมเพย์แทนได้เลยค่ะ']);
+            $picked = TopupChannel::pick($request->user(), $channel);
+            if (! $picked) {
+                return back()->withInput()->withErrors(['method' => TopupChannel::KBANK_UNAVAILABLE]);
             }
             $data['method'] = 'promptpay';
         }
@@ -183,11 +183,10 @@ class WalletController extends Controller
         if (!empty($data['note'])) {
             $meta['note'] = $data['note'];
         }
-        if ($channel !== 'manual') {
+        if ($picked) {
             // จดบัญชีที่โชว์ให้ลูกค้าโอนไว้กับรายการ (เหมือนบิลในห้องแชท) — หน้าสถานะจะโชว์
             // บัญชีของรายการนี้ ไม่ใช่บัญชีใหม่ที่แอดมินอาจสลับไปทีหลัง
-            $meta['channel']  = $channel;
-            $meta['transfer'] = $transfer;
+            $meta += TopupChannel::meta($picked);
         }
         if ($meta) {
             $tx->update(['meta' => array_merge((array) $tx->meta, $meta)]);
@@ -283,20 +282,14 @@ class WalletController extends Controller
             : null;
         $fromChat = $tx->method === WalletTransaction::METHOD_CHAT_SLIP;
 
-        // 🏦 เลขบัญชีกสิกรสำหรับโอนยอดนี้ — ใช้ใบที่จดไว้กับรายการก่อน (ตอนสร้างรายการ)
-        // รายการเก่าก่อน 2026-11-11 ไม่ได้จด = ใช้บัญชีปัจจุบัน เหมือนที่ QR ข้างบนทำอยู่แล้ว
-        $meta     = (array) $tx->meta;
-        $transfer = null;
-        if ($qr && in_array($tx->method, ['promptpay', 'promptpay_slip'], true)) {
-            $transfer = array_key_exists('transfer', $meta)
-                ? (is_array($meta['transfer']) ? $meta['transfer'] : null)
-                : ($payout['transfer'] ?? null);
-        }
+        // 🏦 เลขบัญชีกสิกรสำหรับโอนยอดนี้ — ใช้ใบที่จดไว้กับรายการก่อน (TopupChannel ใช้ร่วมกับแอพ)
+        $meta  = (array) $tx->meta;
+        $wired = TopupChannel::ofTransaction($tx, $payout);
 
         return view('pages.wallet.topup-show', [
             'tx'      => $tx,
-            'transfer'      => $transfer,
-            'channel'       => ($meta['channel'] ?? null) === 'kbank' && $transfer ? 'kbank' : 'promptpay',
+            'transfer'      => $wired['transfer'],
+            'channel'       => $wired['channel'],
             'methodLabel'   => match (true) {
                 $fromChat                              => 'ส่งหลักฐานในแชทเพจ',
                 ($meta['channel'] ?? null) === 'kbank' => 'โอนเข้าบัญชีกสิกรไทย',
