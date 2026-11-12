@@ -110,6 +110,10 @@ Route::prefix('tarot')->name('tarot.')->middleware(['auth', 'throttle:20,1'])->c
     Route::post('/result/{reading}/share', 'share')->name('share');
 });
 
+// 🌸 (2026-11-12) หน้าเลือกครั้งแรก + ทัวร์บุษบา — จำว่าเลือกแล้ว (ไม่ต้องล็อกอิน)
+Route::post('/tour/seen', [\App\Http\Controllers\BusabaTourController::class, 'seen'])
+    ->middleware('throttle:30,1')->name('tour.seen');
+
 // 🎁 ดูดวงฟรี 1 ใบ — ปลายทางของปุ่ม "ดูดวงฟรี" จากบอท FB/LINE (magic link ?to=/tarot/free)
 // GET เรนเดอร์หน้ารอเท่านั้น (ห้ามให้ GET ยิง AI — รีเฟรช/prefetch จะยิงซ้ำ)
 // POST เป็นตัวเปิดไพ่จริง + throttle เดียวกับรายการที่ตัดเงิน

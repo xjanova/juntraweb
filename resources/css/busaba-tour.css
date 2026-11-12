@@ -1,0 +1,222 @@
+/* 🌸 (2026-11-12) หน้าเลือกครั้งแรก + ทัวร์บุษบา — resources/js/busaba-tour.js
+ *
+ * ใช้คลาสของตัวเองทั้งหมด (bt-*) ไม่ใช้ .btn ของธีม: .btn ของธีมเป็น Cinzel + letter-spacing .22em
+ * ภาษาไทยที่ถ่างตัวอักษรจะแตกเป็นตัว ๆ · ปุ่มใช้ .x.x (0,2,0+) ชนะ body.theme-… button:not(.btn)
+ * ชั้น: หน้าเว็บ < เมนูธีม (z 50) < ม่าน 9400 < กรอบชี้ 9401 < การ์ดบุษบา 9402 · whats-new 9000 ไม่เด้งตอนทัวร์อยู่
+ */
+
+.bt-welcome, .bt-tour {
+  --bt-gold: var(--gold, #f4cf6a);
+  --bt-ink: var(--ink, #f6efe0);
+  --bt-dim: var(--ink-dim, rgba(246, 239, 224, .66));
+  --bt-sky: #8fd3ff;
+  --bt-card: linear-gradient(165deg, #1d1240 0%, #0c0724 100%);
+  font-family: var(--thai, 'Prompt', sans-serif);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.bt-welcome *, .bt-tour * { box-sizing: border-box; letter-spacing: normal; text-transform: none; }
+
+/* ── หน้าเลือกสองปุ่ม ─────────────────────────────────────────────────────── */
+.bt-welcome {
+  position: fixed; inset: 0; z-index: 9400;
+  display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  background: rgba(4, 2, 16, .78);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  opacity: 0; transition: opacity .25s ease;
+}
+.bt-welcome.is-open { opacity: 1; }
+.bt-welcome[hidden] { display: none; }
+
+.bt-welcome-card {
+  position: relative; width: min(760px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto;
+  display: grid; grid-template-columns: 300px 1fr; align-items: stretch;
+  border: 1px solid rgba(244, 207, 106, .42); border-radius: 26px;
+  background: radial-gradient(120% 80% at 20% 0%, rgba(143, 211, 255, .14), transparent 60%), var(--bt-card);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .03) inset;
+  transform: translateY(14px) scale(.98); transition: transform .3s cubic-bezier(.2, .9, .3, 1.2);
+}
+.bt-welcome.is-open .bt-welcome-card { transform: none; }
+
+.bt-welcome-busaba {
+  position: relative; overflow: hidden; border-radius: 26px 0 0 26px;
+  background: radial-gradient(90% 70% at 50% 35%, rgba(143, 211, 255, .28), transparent 70%), linear-gradient(180deg, #24185a, #120a32);
+  min-height: 360px;
+}
+.bt-welcome-busaba .bt-still, .bt-welcome-busaba .bt-pose {
+  position: absolute; left: 50%; bottom: 0; height: 104%; width: auto; max-width: none;
+  transform: translateX(-50%); object-fit: contain; object-position: bottom center;
+  filter: drop-shadow(0 12px 30px rgba(0, 0, 0, .45));
+}
+/* 🪞 กรอบคลิปท่าทางสูงกว่าภาพนิ่ง --bt-ps เท่า (OracleMedia::poses()['scale'] มีที่ว่างเหนือหัว) ชิดล่าง กึ่งกลางเดียวกัน
+   → ขนาดคลิปต้องคูณ --bt-ps ไม่งั้นตัวในคลิปเล็ก/ใหญ่กว่าภาพนิ่ง สลับกันแล้วเห็นภาพซ้อน */
+.bt-welcome-busaba .bt-pose { height: calc(104% * var(--bt-ps, 1)); opacity: 0; transition: opacity .35s; }
+.bt-welcome-busaba.is-moving .bt-pose { opacity: 1; }
+.bt-welcome-busaba.is-moving .bt-still { opacity: 0; transition: opacity .35s .1s; }
+
+.bt-welcome-body { padding: 30px 28px 24px; display: flex; flex-direction: column; gap: 6px; }
+.bt-eyebrow { color: var(--bt-sky); font-size: 13px; font-weight: 500; }
+.bt-welcome-title { margin: 2px 0 0; font-family: var(--thai, 'Prompt', sans-serif); font-weight: 500; font-size: clamp(24px, 4.6vw, 30px); line-height: 1.3; color: var(--bt-ink); }
+.bt-welcome-lede { margin: 0 0 14px; color: var(--bt-dim); font-size: 16px; }
+
+.bt-choices { display: grid; gap: 12px; }
+.bt-welcome .bt-choice.bt-choice {
+  display: flex; align-items: center; gap: 14px; width: 100%; min-height: 78px; padding: 14px 18px;
+  border-radius: 18px; cursor: pointer; text-align: left; color: var(--bt-ink);
+  font: inherit; transition: transform .15s, box-shadow .2s, border-color .2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.bt-welcome .bt-choice.bt-choice:active { transform: scale(.98); }
+.bt-welcome .bt-choice-free.bt-choice-free {
+  border: 0; color: #1d1236;
+  background: linear-gradient(135deg, #ffe7a3 0%, var(--bt-gold) 45%, #e7a940 100%);
+  box-shadow: 0 10px 30px rgba(244, 207, 106, .35);
+}
+.bt-welcome .bt-choice-tour.bt-choice-tour {
+  border: 1.5px solid rgba(143, 211, 255, .55);
+  background: linear-gradient(135deg, rgba(143, 211, 255, .14), rgba(176, 124, 255, .10));
+}
+.bt-welcome .bt-choice-tour.bt-choice-tour:hover { border-color: var(--bt-sky); box-shadow: 0 0 0 4px rgba(143, 211, 255, .12); }
+.bt-choice-ico { font-size: 30px; line-height: 1; flex: none; }
+.bt-choice-txt { display: flex; flex-direction: column; gap: 2px; }
+.bt-choice-txt b { font-size: 19px; font-weight: 600; }
+.bt-choice-txt small { font-size: 13.5px; opacity: .78; }
+.bt-choice.is-busy { opacity: .7; pointer-events: none; }
+
+.bt-welcome .bt-later.bt-later {
+  margin: 10px auto 0; padding: 8px 14px; border: 0; background: none; cursor: pointer;
+  color: var(--bt-dim); font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px;
+}
+.bt-welcome .bt-x.bt-x {
+  position: absolute; top: 10px; right: 12px; z-index: 2; width: 38px; height: 38px; border-radius: 50%;
+  border: 0; background: rgba(255, 255, 255, .08); color: var(--bt-ink); font-size: 22px; line-height: 1; cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .bt-welcome { align-items: end; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .bt-welcome-card { grid-template-columns: 1fr; border-radius: 24px; }
+  .bt-welcome-busaba { min-height: 0; height: 210px; border-radius: 24px 24px 0 0; }
+  .bt-welcome-busaba .bt-still, .bt-welcome-busaba .bt-pose { height: 150%; bottom: auto; top: 6px; object-position: top center; }
+  .bt-welcome-busaba .bt-pose { height: calc(150% * var(--bt-ps, 1)); top: calc(6px + 150% - 150% * var(--bt-ps, 1)); }
+  .bt-welcome-body { padding: 18px 16px 14px; }
+  .bt-welcome-lede { margin-bottom: 10px; }
+}
+
+/* ── ทัวร์ ──────────────────────────────────────────────────────────────── */
+.bt-tour { position: fixed; inset: 0; z-index: 9400; pointer-events: none; opacity: 0; transition: opacity .25s; }
+.bt-tour.is-open { opacity: 1; }
+.bt-tour.is-leaving { opacity: .4; }
+
+/* ม่านกันกดหน้าเว็บระหว่างทัวร์ — โปร่งใสเมื่อมีกรอบชี้ (เงาของกรอบเป็นตัวมืด) */
+.bt-veil { position: absolute; inset: 0; pointer-events: auto; background: transparent; transition: background .3s; }
+.bt-tour.is-centered .bt-veil { background: rgba(4, 2, 16, .66); }
+
+.bt-spot {
+  position: absolute; left: 0; top: 0; z-index: 1; width: 40px; height: 40px; border-radius: 16px;
+  box-shadow: 0 0 0 2px var(--bt-gold), 0 0 22px 4px rgba(244, 207, 106, .55), 0 0 0 200vmax rgba(4, 2, 16, .66);
+  transition: transform .32s cubic-bezier(.2, .8, .2, 1), width .32s, height .32s, opacity .25s;
+  opacity: 0; pointer-events: none;
+}
+.bt-spot::after {
+  content: ''; position: absolute; inset: -6px; border-radius: 20px; border: 2px solid rgba(244, 207, 106, .6);
+  animation: bt-ring 1.6s ease-out infinite;
+}
+@keyframes bt-ring { from { transform: scale(.96); opacity: .9; } to { transform: scale(1.08); opacity: 0; } }
+
+.bt-dock {
+  position: absolute; z-index: 2; pointer-events: auto;
+  right: 24px; bottom: 24px; width: min(420px, calc(100vw - 32px));
+  display: grid; grid-template-columns: 76px 1fr; gap: 14px; padding: 16px 16px 14px;
+  border: 1px solid rgba(244, 207, 106, .45); border-radius: 22px; color: var(--bt-ink);
+  background: radial-gradient(120% 90% at 0% 0%, rgba(143, 211, 255, .16), transparent 55%), var(--bt-card);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
+  transition: top .3s, bottom .3s, transform .3s;
+}
+.bt-tour.is-centered .bt-dock { right: 50%; bottom: 50%; transform: translate(50%, 50%); }
+.bt-dock.is-nudge { animation: bt-nudge .4s; }
+@keyframes bt-nudge { 30% { translate: -6px 0; } 60% { translate: 6px 0; } }
+
+.bt-avatar {
+  position: relative; width: 76px; height: 76px; border-radius: 50%; align-self: start;
+  background: radial-gradient(80% 80% at 50% 30%, rgba(143, 211, 255, .35), #1b1150);
+  box-shadow: 0 0 0 2px var(--bt-gold), 0 6px 18px rgba(0, 0, 0, .4);
+}
+/* 🪞 (2026-11-12) เจ้าของ: "แก้ภาพซ้อน · หน้าไม่ตรงกลางวงกลม"
+   หน้าบุษบาใน sprite-busaba.webp (767×1200) อยู่ที่ x 52% · y 31.7% ของภาพ
+   ภาพสูง 300% ของวง → หน้าที่ y 31.7% × 300% − 45% = 50% · กึ่งกลางภาพที่ 46.2% → หน้าที่ x 50%
+   คลิปท่าทาง: สูงกว่าภาพ --bt-ps เท่า ชิดล่างเดียวกัน (ล่างภาพ = 255%) กึ่งกลางเดียวกัน → ตัวในคลิปทับภาพนิ่งพอดี
+   คลิปเล่นอยู่ (.is-moving) = ซ่อนภาพนิ่ง ไม่ให้โผล่ตรงส่วนที่คลิปใสตอนขยับหัว/ผม */
+/* วงรูปตัดกลมอยู่ชั้นใน — แถบคลื่นเสียงจึงห้อยใต้วงได้ ไม่ทับคาง */
+.bt-av-face { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; }
+.bt-av-still, .bt-av-pose {
+  position: absolute; left: 46.2%; top: -45%; height: 300%; width: auto; max-width: none;
+  transform: translateX(-50%); object-fit: contain;
+}
+.bt-av-pose { height: calc(300% * var(--bt-ps, 1)); top: calc(255% - 300% * var(--bt-ps, 1)); opacity: 0; transition: opacity .3s; }
+.bt-av-face.is-moving .bt-av-pose { opacity: 1; }
+.bt-av-face.is-moving .bt-av-still { opacity: 0; transition: opacity .15s .3s; }
+.bt-av-pose[hidden] { display: none; }
+/* แถบคลื่น "กำลังพูด" — ป้ายพื้นเข้มห้อยใต้วง ไม่ทับคางจนดูเหมือนภาพซ้อน */
+.bt-wave { position: absolute; left: 50%; bottom: -9px; z-index: 1; transform: translateX(-50%); display: flex; align-items: center; gap: 2px;
+  padding: 2px 6px; height: 14px; border-radius: 7px; background: rgba(8, 4, 24, .78); opacity: 0; transition: opacity .2s; }
+.bt-wave i { width: 3px; height: 6px; border-radius: 2px; background: var(--bt-gold); animation: bt-wave .8s ease-in-out infinite; }
+.bt-wave i:nth-child(2) { animation-delay: .15s; } .bt-wave i:nth-child(3) { animation-delay: .3s; }
+@keyframes bt-wave { 50% { transform: scaleY(1.9); } }
+.bt-tour.is-talking .bt-wave { opacity: 1; }
+.bt-tour.is-talking .bt-avatar { box-shadow: 0 0 0 2px var(--bt-gold), 0 0 0 7px rgba(244, 207, 106, .18), 0 6px 18px rgba(0, 0, 0, .4); }
+
+.bt-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.bt-meta { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--bt-dim); }
+.bt-who { color: var(--bt-sky); font-weight: 500; }
+.bt-count { margin-right: auto; font-variant-numeric: tabular-nums; }
+.bt-tour .bt-icon.bt-icon {
+  border: 1px solid rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .06); color: var(--bt-ink);
+  border-radius: 999px; min-width: 36px; height: 32px; padding: 0 10px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.bt-title { margin: 0; font-family: var(--thai, 'Prompt', sans-serif); font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--bt-gold); }
+.bt-text { margin: 0; font-size: 15.5px; line-height: 1.6; color: var(--bt-ink); }
+.bt-lock { margin: 2px 0 0; padding: 7px 10px; border-radius: 10px; font-size: 13px; color: var(--bt-sky); background: rgba(143, 211, 255, .08); border: 1px dashed rgba(143, 211, 255, .35); }
+.bt-lock[hidden] { display: none; }
+.bt-steps { height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden; margin-top: 4px; }
+.bt-steps i { display: block; height: 100%; background: linear-gradient(90deg, var(--bt-sky), var(--bt-gold)); transition: width .4s; }
+
+.bt-nav, .bt-end { display: flex; gap: 8px; margin-top: 6px; }
+.bt-nav[hidden], .bt-end[hidden] { display: none; }
+.bt-end { flex-direction: column; }
+.bt-tour .bt-btn.bt-btn {
+  flex: 1 1 auto; min-height: 44px; padding: 10px 12px; border-radius: 14px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font: inherit; font-size: 15px; font-weight: 500; text-decoration: none; white-space: nowrap;
+  color: var(--bt-ink); background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .14);
+  -webkit-tap-highlight-color: transparent;
+}
+.bt-tour .bt-btn.bt-btn:disabled { opacity: .35; cursor: default; }
+.bt-tour .bt-btn.bt-btn[hidden] { display: none; }
+.bt-tour .bt-back.bt-back { flex: 0 0 auto; }
+.bt-tour .bt-next.bt-next { color: #1d1236; border: 0; font-weight: 600; background: linear-gradient(135deg, #ffe7a3, var(--bt-gold) 55%, #e7a940); }
+.bt-tour .bt-next.is-pulse { animation: bt-pulse 1.4s ease-in-out infinite; }
+@keyframes bt-pulse { 50% { box-shadow: 0 0 0 6px rgba(244, 207, 106, .25); } }
+.bt-tour.needs-tap .bt-play.bt-play { color: #0d1a2a; border: 0; background: var(--bt-sky); animation: bt-pulse 1.2s ease-in-out infinite; }
+
+/* มือถือ / iPad แนวตั้ง: การ์ดเต็มความกว้าง ชิดล่าง (ย้ายขึ้นบนเมื่อของที่ชี้อยู่ครึ่งล่าง) */
+@media (max-width: 767px) {
+  .bt-dock {
+    left: 12px; right: 12px; width: auto; bottom: max(12px, env(safe-area-inset-bottom));
+    grid-template-columns: 58px 1fr; gap: 10px; padding: 12px 12px 10px; border-radius: 20px;
+  }
+  .bt-dock.is-top { bottom: auto; top: max(12px, env(safe-area-inset-top)); }
+  .bt-tour.is-centered .bt-dock { right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); transform: none; top: auto; }
+  .bt-avatar { width: 58px; height: 58px; }
+  .bt-title { font-size: 16.5px; }
+  .bt-text { font-size: 15px; line-height: 1.55; }
+  /* จอแคบ 320–375px: สามปุ่มต้องอยู่ในแถวเดียวไม่ล้นขอบ (เดิม "ถัดไป" ตกขอบขวาตอนปุ่มแตะฟังเสียงขึ้น) */
+  .bt-nav { gap: 6px; }
+  .bt-tour .bt-btn.bt-btn { font-size: 14.5px; padding: 9px 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .bt-tour .bt-next.bt-next { flex: 0 0 auto; }
+  .bt-who { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bt-spot::after, .bt-wave i, .bt-tour .bt-next.is-pulse, .bt-tour.needs-tap .bt-play { animation: none; }
+}

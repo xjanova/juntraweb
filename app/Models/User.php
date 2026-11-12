@@ -57,6 +57,7 @@ class User extends Authenticatable implements FilamentUser
             'thaiprompt_token' => EncryptedString::class,
             'thaiprompt_refresh_token' => EncryptedString::class,
             'thaiprompt_token_expires_at' => 'datetime',
+            'tour_seen_at' => 'datetime',
         ];
     }
 

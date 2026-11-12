@@ -15,6 +15,15 @@
     line-height: 1.55;
   }
   body { overflow-x: hidden; }
+  /* 📱 (2026-11-12) เจ้าของ: "หน้าจอเกินมือถือ แก้ได้เลย"
+     body overflow-x:hidden ส่งต่อไปที่ viewport แต่ Chrome/WebView บนมือถือ (รวมแอป FB) ยังขยาย layout viewport
+     ตามของที่ล้นออกไปอยู่ดี (วงแหวน .ring / การ์ดลอย / marquee บนหน้าแรก, แถบปัดห้องใน /chat?pick=1)
+     → หน้ากว้าง 448–486px บนจอ 375px ทั้งหน้าถูกย่อเล็กลง และสปอตไลต์ทัวร์คลาดตำแหน่ง
+     ตัดที่ขอบ main/footer ด้วย clip (ไม่ใช่ hidden: clip ไม่สร้างกล่องเลื่อน → position:sticky ข้างในยังทำงาน
+     และไม่ตัดแนวตั้ง) — แถบที่ตั้งใจเลื่อนแนวนอนได้ (overflow-x:auto ของมันเอง) ยังเลื่อนได้ตามเดิม */
+  @supports (overflow: clip) {
+    main, footer { overflow-x: clip; }
+  }
   img { max-width: 100%; display: block; }
   a { color: inherit; text-decoration: none; }
 }

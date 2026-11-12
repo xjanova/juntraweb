@@ -15,6 +15,9 @@ export default defineConfig({
                 'resources/js/oracle-room/music.js',
                 // 🎭 อิริยาบถของผู้พยากรณ์ในห้องแชท (คลิปพื้นใส คิด/ฟัง/พูด/ยิ้ม)
                 'resources/js/oracle-room/room-poses.js',
+                // 🌸 หน้าเลือกครั้งแรก + ทัวร์เสียงบุษบา (โหลดเฉพาะตอนขึ้นหน้าเลือก/ทัวร์เดินอยู่)
+                'resources/js/busaba-tour.js',
+                'resources/css/busaba-tour.css',
                 // 🏛️ ห้องพยากรณ์เต็มจอ (หน้าแชทสด)
                 'resources/css/oracle-room.css',
                 'resources/css/themes/mae-mor-chantra.css',

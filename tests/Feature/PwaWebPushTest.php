@@ -134,7 +134,9 @@ class PwaWebPushTest extends TestCase
 
     public function test_every_page_links_the_manifest_and_the_ios_home_screen_tags(): void
     {
-        $html = $this->get('/')->assertOk()->getContent();
+        // 🌸 (2026-11-12) คนที่มาครั้งแรกเห็นหน้าเลือก "ดูดวงฟรีเลย / ให้บุษบาพาทัวร์" ก่อน — ชิปติดตั้งแอปรอไว้
+        //    ไม่ซ้อนกัน (hide_whats_new) · เครื่องที่เลือกแล้ว (cookie jw_tour_v1) = หน้าทั่วไปตามปกติ
+        $html = $this->withUnencryptedCookie(\App\Support\BusabaTour::cookie(), 'done')->get('/')->assertOk()->getContent();
 
         $this->assertStringContainsString('rel="manifest" href="'.route('pwa.manifest').'"', $html);
         $this->assertStringContainsString('name="apple-mobile-web-app-capable" content="yes"', $html);

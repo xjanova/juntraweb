@@ -199,7 +199,7 @@
                    value="{{ old('amount', '100') }}">
           </div>
           {{-- ใช้ :class ไม่ใช่ :style — Alpine ผูก :style แบบสตริงจะเขียนทับ style เดิมทั้งก้อน --}}
-          <div class="tp-bundles" role="group" aria-label="ยอดที่ใช้บ่อย">
+          <div class="tp-bundles" data-tour="topup-cards" role="group" aria-label="ยอดที่ใช้บ่อย">
             @foreach ($bundles as $b)
               <button type="button" class="tp-bundle" @click="amount = '{{ $b }}'"
                       :class="amount === '{{ $b }}' && 'is-on'"
@@ -231,7 +231,7 @@
         </div>
 
         {{-- สรุปก่อนกด — ช่องทาง + ยอด อยู่ตรงหน้าปุ่ม --}}
-        <div class="tp-summary" aria-live="polite">
+        <div class="tp-summary" data-tour="topup-exact" aria-live="polite">
           <div><span>ช่องทาง</span><b x-text="channel === 'kbank' ? 'โอนเข้าบัญชีกสิกรไทย' : (channel === 'manual' ? 'ช่องทางอื่น' : 'พร้อมเพย์ (QR)')">{{ $channel === 'kbank' ? 'โอนเข้าบัญชีกสิกรไทย' : ($channel === 'manual' ? 'ช่องทางอื่น' : 'พร้อมเพย์ (QR)') }}</b></div>
           <div><span>ยอดเติม</span><b class="tp-summary-amt" x-text="money(amount)">฿{{ number_format((float) old('amount', 100)) }}</b></div>
           @if ($autoMatch)

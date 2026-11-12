@@ -43,7 +43,7 @@
     <a href="{{ route('wallet.topup') }}" class="btn btn-primary" style="width:100%;justify-content:center">เติมเงิน</a>
   </div>
 
-  <nav class="sidebar-nav">
+  <nav class="sidebar-nav" data-tour="account-menu">
     @foreach ($items as $it)
       <a href="{{ route($it['route']) }}" class="sidebar-link @if($a === $it['key']) is-active @endif">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="{{ $it['icon'] }}"/></svg>

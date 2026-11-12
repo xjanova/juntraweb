@@ -10,7 +10,7 @@
     <div class="eyebrow">PROFILE • ACCOUNT</div>
     <h2 style="font-family:var(--serif);font-size:clamp(32px,4vw,52px);font-weight:400;margin:8px 0 28px">โปรไฟล์ <em style="color:var(--gold)">ของฉัน</em></h2>
 
-    <div class="panel" style="margin-bottom:24px;padding:28px">
+    <div class="panel" data-tour="profile" style="margin-bottom:24px;padding:28px">
       <div class="eyebrow" style="display:inline-flex;margin-bottom:18px">ข้อมูลทั่วไป</div>
       <form method="POST" action="{{ route('profile.update') }}">
         @csrf

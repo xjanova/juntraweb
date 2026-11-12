@@ -1,4 +1,4 @@
-<nav class="top" x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape.window="open = false">
+<nav class="top" data-tour-nav x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape.window="open = false">
   <a href="{{ route('home') }}" class="brand">
     <div class="brand-mark"><img src="{{ asset('images/logo.webp') }}" alt=""></div>
     <div class="brand-name">
@@ -10,10 +10,10 @@
   {{-- display:contents on desktop keeps the original brand | links | auth
        layout; on mobile this wrapper becomes the dropdown panel. --}}
   <div class="nav-collapse" :class="{ open: open }" x-on:click="open = false">
-    <div class="nav-links">
+    <div class="nav-links" data-tour="menu">
       {{-- บริการที่แอดมินปิดไว้ (ServiceGate) หายจากเมนูเอง --}}
       <a href="{{ route('tarot.index') }}">ไพ่ยิปซี</a>
-      <a href="{{ route('tarot.free') }}">ดูดวงฟรี</a>
+      <a href="{{ route('tarot.free') }}" data-tour="free">ดูดวงฟรี</a>
       @serviceopen('deep')<a href="{{ route('deep.index') }}">ดูดวงเชิงลึก</a>@endserviceopen
       @serviceopen('horoscope')<a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>@endserviceopen
       @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
@@ -37,5 +37,5 @@
   </div>
 
   {{-- Inside the x-data root (nav.top), so tapping it isn't an "outside" click. --}}
-  <button class="burger" type="button" aria-label="เมนู" :aria-expanded="open" x-on:click="open = !open"><span></span></button>
+  <button class="burger" data-tour="burger" type="button" aria-label="เมนู" :aria-expanded="open" x-on:click="open = !open"><span></span></button>
 </nav>
