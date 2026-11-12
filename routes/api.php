@@ -125,6 +125,15 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::post('reports', [ContentReportController::class, 'store'])
             ->middleware('throttle:10,1,content-report')->name('reports.store');
 
+        // 📲 แจ้งเตือนในแอป (FCM) — จด/เลิกจดเครื่อง + เลือกหมวด (ชุดเดียวกับ /push/preferences ของเว็บ)
+        // นโยบายส่งอยู่ที่ PushNotifier · throttle มี prefix ของตัวเอง ไม่กินโควตาของเส้นอื่น
+        Route::prefix('push')->name('push.')->controller(\App\Http\Controllers\Api\V1\PushController::class)->group(function () {
+            Route::post('devices', 'storeDevice')->middleware('throttle:20,1,push-devices')->name('devices.store');
+            Route::delete('devices', 'destroyDevice')->middleware('throttle:20,1,push-devices')->name('devices.destroy');
+            Route::get('preferences', 'preferences')->middleware('throttle:20,1,push-preferences')->name('preferences.show');
+            Route::put('preferences', 'updatePreferences')->middleware('throttle:20,1,push-preferences')->name('preferences.update');
+        });
+
         // Wallet — balance, history, top-up start + native slip upload.
         // The slip POST goes through the same `topup` 10/min/user bucket
         // as the initiate call — mobile re-uploads from a flaky network
