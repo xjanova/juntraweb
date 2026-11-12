@@ -27,4 +27,9 @@ class Profile extends Model
     {
         return $this->zodiac_slug ? Zodiac::where('slug', $this->zodiac_slug)->first() : null;
     }
+
+    public function chineseZodiac(): ?ChineseZodiac
+    {
+        return $this->chinese_zodiac_slug ? ChineseZodiac::where('slug', $this->chinese_zodiac_slug)->first() : null;
+    }
 }

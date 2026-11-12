@@ -23,6 +23,12 @@ class Testimonial extends Model
             ->where(fn ($q) => $q->whereNull('reading_id')->orWhere('allow_public', true));
     }
 
+    /** รีวิวที่หน้าแรกโชว์ ตามลำดับที่แอดมินจัด — ชุดเดียวทั้งเว็บ (HomeController) และแอพ (GET /v1/testimonials) */
+    public function scopeOnHomePage($query)
+    {
+        return $query->approved()->orderBy('order_index');
+    }
+
     public function scopeFromCustomers($query)
     {
         return $query->whereNotNull('reading_id');
