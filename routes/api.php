@@ -71,6 +71,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     // หมวดงานมงคล — ข้อมูลอ้างอิงคงที่ ให้ฟอร์มฤกษ์ยามในแอพกาง dropdown
     // ได้เหมือนเว็บ แทนที่จะปล่อยให้เซิร์ฟเวอร์เดาหมวดจากข้อความล้วน
     Route::get('fortune/occasions', [FortuneController::class, 'occasions'])->name('fortune.occasions');
+    // รีวิวชุดเดียวกับหน้าแรกของเว็บ (อนุมัติแล้ว + ลูกค้ายอมให้โชว์) — ประตูสาธารณะต้องมี throttle
+    Route::get('testimonials', [\App\Http\Controllers\Api\V1\TestimonialController::class, 'index'])
+        ->middleware('throttle:60,1,testimonials')->name('testimonials.index');
 
     // Tarot card catalog — public face-image URLs so the mobile app can pull
     // the real จันทรา.online art (and fall back to its own drawing per card).
@@ -105,6 +108,18 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             ->middleware('throttle:6,1,auth-password')->name('auth.password');
         Route::post('account/delete', [AuthController::class, 'deleteAccount'])
             ->middleware('throttle:5,1,account-delete')->name('account.delete');
+
+        // 🌙 (2026-11-12) เช็กอินรับดวง · สมุดสะสมไพ่ · ข้อมูลโหราศาสตร์ — กติกาเดียวกับหน้าเว็บ /account/*
+        // prefix ท้าย throttle = ตัวนับของเส้นนั้นเอง (throttle:N,M เปล่า ๆ ใช้ตัวนับเดียวกันทุกเส้นต่อผู้ใช้)
+        Route::prefix('account')->name('account.')->group(function () {
+            Route::get('daily-luck', [\App\Http\Controllers\Api\V1\AccountEngagementController::class, 'dailyLuck'])->name('daily-luck');
+            Route::post('checkin', [\App\Http\Controllers\Api\V1\AccountEngagementController::class, 'checkin'])
+                ->middleware('throttle:20,1,account-checkin')->name('checkin');
+            Route::get('collection', [\App\Http\Controllers\Api\V1\AccountEngagementController::class, 'collection'])->name('collection');
+            Route::get('profile', [\App\Http\Controllers\Api\V1\AccountProfileController::class, 'show'])->name('profile.show');
+            Route::patch('profile', [\App\Http\Controllers\Api\V1\AccountProfileController::class, 'update'])
+                ->middleware('throttle:30,1,account-profile')->name('profile.update');
+        });
 
         // รายงานคำทำนาย/ข้อความแชทที่ AI สร้าง (Google Play: AI-Generated Content policy)
         Route::post('reports', [ContentReportController::class, 'store'])

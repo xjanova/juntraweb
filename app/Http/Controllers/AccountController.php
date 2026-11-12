@@ -8,10 +8,9 @@ use App\Models\Reading;
 use App\Models\WalletTransaction;
 use App\Models\Zodiac;
 use App\Services\Wallet\WalletService;
-use App\Support\Astrology;
+use App\Support\ProfileAstrology;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 
 class AccountController extends Controller
@@ -72,7 +71,7 @@ class AccountController extends Controller
     public function astrology(Request $request)
     {
         $user = $request->user();
-        $profile = $user->profile ?? $user->profile()->create([]);
+        $profile = ProfileAstrology::profileFor($user);
 
         return view('pages.account.astrology', [
             'user'           => $user,
@@ -84,34 +83,13 @@ class AccountController extends Controller
 
     public function astrologyUpdate(Request $request): RedirectResponse
     {
-        $data = $request->validate([
-            'birth_date'          => ['nullable', 'date', 'before:tomorrow', 'after:1900-01-01'],
-            'birth_time'          => ['nullable', 'date_format:H:i'],
-            'birth_place'         => ['nullable', 'string', 'max:191'],
-            'zodiac_slug'         => ['nullable', 'string', 'exists:zodiacs,slug'],
-            'chinese_zodiac_slug' => ['nullable', 'string', 'exists:chinese_zodiacs,slug'],
-            'phone'               => ['nullable', 'string', 'max:32'],
-            'line_id'             => ['nullable', 'string', 'max:64'],
-            'subscribed'          => ['nullable', 'boolean'],
-            'auto_zodiac'         => ['nullable', 'boolean'],
-        ]);
+        // กติกาตรวจ + การคำนวณราศีอยู่ที่ ProfileAstrology — แอพ (PATCH /v1/account/profile) ใช้ชุดเดียวกัน
+        $data = $request->validate(ProfileAstrology::rules());
 
         $user    = $request->user();
-        $profile = $user->profile ?? $user->profile()->create([]);
+        $profile = ProfileAstrology::profileFor($user);
 
-        // Auto-derive zodiacs from birth_date when user ticked "ใช้อัตโนมัติ"
-        // (or when fields are blank but DOB exists). Manual override wins
-        // when the user picked a slug explicitly.
-        if (!empty($data['birth_date'])) {
-            $birth = Carbon::parse($data['birth_date']);
-            $autoDerive = !empty($data['auto_zodiac']);
-            if ($autoDerive || empty($data['zodiac_slug'])) {
-                $data['zodiac_slug'] = Astrology::thaiZodiacSlug($birth, $data['birth_time'] ?? null);
-            }
-            if ($autoDerive || empty($data['chinese_zodiac_slug'])) {
-                $data['chinese_zodiac_slug'] = Astrology::chineseZodiacSlug($birth->year);
-            }
-        }
+        $data = ProfileAstrology::withDerivedZodiacs($data, !empty($data['auto_zodiac']));
 
         unset($data['auto_zodiac']);
         $data['subscribed'] = $request->boolean('subscribed');
