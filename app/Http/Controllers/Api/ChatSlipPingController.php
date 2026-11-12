@@ -11,7 +11,8 @@ use Illuminate\Http\Request;
  * 🧾 (2026-11-10) POST /api/server/chat-slips/ping — กริ่งจากบอท Thaiprompt
  *
  * "มีสลิปจากแชทเพจใบนี้รออยู่" — รับแค่เลขอ้างอิง ไม่เชื่อข้อมูลอะไรจากผู้กดกริ่ง
- * ChatSlipIntake ดึงข้อมูลจริงจาก Thaiprompt ด้วย token ของเว็บเอง (กริ่งปลอม = ไม่มีอะไรเกิดขึ้น)
+ * VerifyChatSlipCallback ตรวจ dedicated bearer ก่อน throttle/validation/intake
+ * ChatSlipIntake ดึงข้อมูลจริงจาก Thaiprompt ด้วย token ของเว็บเอง
  * คำตอบให้บอทใช้เลือกข้อความตอบลูกค้าในแชทเท่านั้น
  */
 class ChatSlipPingController extends Controller

@@ -235,9 +235,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 // or orders/match when a signed /notify record for that exact amount already
 // exists — never on X-Api-Key alone (see SmsCheckerService::matchForApp).
 // 🧾 (2026-11-10) กริ่งจากบอท Thaiprompt: "มีสลิปจากแชทเพจรออยู่" — รับแค่เลขอ้างอิง
-//    ข้อมูลจริงดึงจาก Thaiprompt ด้วย token ของเว็บเอง (ChatSlipIntake) จึงไม่ต้องมีความลับร่วม
+//    ข้อมูลจริงดึงจาก Thaiprompt ด้วย token ของเว็บเอง (ChatSlipIntake)
+//    🔐 (2026-11-12) ผู้กดกริ่งต้องส่ง bearer เฉพาะ callback (THAIPROMPT_CHAT_SLIP_PING_TOKEN) — ไม่มี/ผิด = 401 ก่อน throttle
 Route::post('server/chat-slips/ping', \App\Http\Controllers\Api\ChatSlipPingController::class)
-    ->middleware('throttle:30,1')
+    ->middleware([\App\Http\Middleware\VerifyChatSlipCallback::class, 'throttle:30,1'])
     ->name('api.server.chat-slips.ping');
 
 Route::prefix('v1/sms-payment')->middleware(VerifySmsCheckerDevice::class)->name('api.v1.sms.')->group(function () {

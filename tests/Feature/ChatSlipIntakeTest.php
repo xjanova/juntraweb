@@ -40,6 +40,7 @@ class ChatSlipIntakeTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['services.thaiprompt.chat_slip_ping_token' => str_repeat('c', 48)]);
         Setting::put('thaiprompt_base_url', self::TP, 'thaiprompt');
         Setting::put('thaiprompt_client_id', '9f1c-client', 'thaiprompt');
         Setting::put('thaiprompt_client_secret', 'super-secret-value', 'thaiprompt', true);
@@ -141,7 +142,7 @@ class ChatSlipIntakeTest extends TestCase
 
     private function ring(?string $ref = self::REF)
     {
-        return $this->postJson('/api/server/chat-slips/ping', ['trans_ref' => $ref]);
+        return $this->withToken(str_repeat('c', 48))->postJson('/api/server/chat-slips/ping', ['trans_ref' => $ref]);
     }
 
     private function balance(): float
