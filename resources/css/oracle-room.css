@@ -43,7 +43,9 @@ html.or-open body > nav, html.or-open body > footer { display: none; }
 .or-actor .oracle-pose.is-on { opacity: 1; }
 .or-actor.is-busy .oracle-pose { filter: drop-shadow(0 0 30px var(--or-glow)) brightness(1.08); }
 /* คลิปเล่นอยู่ = ภาพนิ่งข้างใต้หยุดโยก (กลับมาโยกเองตอนพักที่ภาพนิ่ง) */
-.or-actor.has-pose img { animation: none; }
+/* 🪞 (2026-11-12) เจ้าของ: "แก้ภาพซ้อนของตัวละคร" — เดิมภาพนิ่งยังโชว์อยู่ใต้คลิป พอขยับหัว/ผม ภาพนิ่งโผล่ตรงส่วนที่คลิปใส
+   → คลิปขึ้นเต็มแล้ว (.35s) ภาพนิ่งค่อยหาย · คลิปจบ/พัง = ภาพนิ่งกลับทันที (เฟรมสุดท้ายของคลิปคือภาพนิ่งอยู่แล้ว) */
+.or-actor.has-pose img { animation: none; opacity: 0; transition: opacity .15s ease .35s; }
 @keyframes or-breathe {
   0%, 100% { transform: translateX(-50%); }
   30% { transform: translateX(-50%) translateY(-.6%) scaleY(1.008) rotate(.35deg); }

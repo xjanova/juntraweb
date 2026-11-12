@@ -42,7 +42,9 @@ html.ct-open, html.ct-open body { overflow: hidden; }
 .ct-actor .oracle-pose { position: absolute; left: 50%; bottom: -3%; width: auto; max-width: none; transform: translateX(-50%);
   opacity: 0; transition: opacity .35s ease; pointer-events: none; filter: drop-shadow(0 0 18px rgba(200, 160, 255, .25)); }
 .ct-actor .oracle-pose.is-on { opacity: 1; }
-.ct-actor.has-pose img { animation: none; }
+/* 🪞 (2026-11-12) เจ้าของ: "แก้ภาพซ้อนของตัวละคร" — เดิมภาพนิ่งยังโชว์อยู่ใต้คลิป พอขยับหัว/ผม ภาพนิ่งโผล่ตรงส่วนที่คลิปใส
+   → คลิปขึ้นเต็มแล้ว (.35s) ภาพนิ่งค่อยหาย · คลิปจบ/พัง = ภาพนิ่งกลับทันที (เฟรมสุดท้ายของคลิปคือภาพนิ่งอยู่แล้ว) */
+.ct-actor.has-pose img { animation: none; opacity: 0; transition: opacity .15s ease .35s; }
 @keyframes ct-nod {
   0% { translate: 0 0; filter: none; }
   35% { translate: 0 1.6%; filter: brightness(1.25) drop-shadow(0 0 24px var(--ct-room-a)); }
