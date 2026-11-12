@@ -1,4 +1,4 @@
-<header class="nav" x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape.window="open = false">
+<header class="nav" data-tour-nav x-data="{ open: false }" x-on:click.outside="open = false" x-on:keydown.escape.window="open = false">
   <a class="brand" href="{{ route('home') }}">
     <div class="brand-logo"><img src="{{ asset('images/juntra/logo.webp') }}" alt="จันทราพยากรณ์"></div>
     <div class="brand-text">
@@ -8,10 +8,10 @@
   </a>
   {{-- :class binds the .open state; x-on:click closes the menu after tapping a
        link so navigation on mobile doesn't leave the panel hanging open. --}}
-  <nav class="nav-links" id="navLinks" :class="{ open: open }" x-on:click="open = false">
+  <nav class="nav-links" data-tour="menu" id="navLinks" :class="{ open: open }" x-on:click="open = false">
     {{-- บริการที่แอดมินปิดไว้ (ServiceGate) หายจากเมนูเอง — ตอนนี้เหลือไพ่เป็นหลัก (เจ้าของ 2026-09-15) --}}
     <a href="{{ route('tarot.index') }}">ไพ่ยิปซี</a>
-    <a href="{{ route('tarot.free') }}">ดูดวงฟรี</a>
+    <a href="{{ route('tarot.free') }}" data-tour="free">ดูดวงฟรี</a>
     @serviceopen('horoscope')<a href="{{ route('horoscope.index') }}">ดวงรายวัน</a>@endserviceopen
     @serviceopen('deep')<a href="{{ route('deep.index') }}">ดูดวงเชิงลึก</a>@endserviceopen
     @serviceopen('numerology')<a href="{{ route('numerology.index') }}">เลขศาสตร์</a>@endserviceopen
@@ -32,6 +32,6 @@
        "outside" click — it toggles instead of being cancelled by click.outside.
        (The old markup put click.outside on #navLinks with the button as a
        sibling, so every tap opened then instantly closed the menu.) --}}
-  <button class="menu-toggle" id="menuToggle" type="button" aria-label="เมนู"
+  <button class="menu-toggle" data-tour="burger" id="menuToggle" type="button" aria-label="เมนู"
           :aria-expanded="open" x-on:click="open = !open"><span></span></button>
 </header>

@@ -27,7 +27,7 @@
     @endif
 
     <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:24px;margin-bottom:36px" class="wallet-summary-grid">
-      <div class="panel" style="padding:28px;display:flex;flex-direction:column;gap:14px;background:linear-gradient(135deg,rgba(244,207,106,.08),rgba(176,122,255,.05))">
+      <div class="panel" data-tour="wallet-balance" style="padding:28px;display:flex;flex-direction:column;gap:14px;background:linear-gradient(135deg,rgba(244,207,106,.08),rgba(176,122,255,.05))">
         <div class="eyebrow" style="display:inline-flex">ยอดคงเหลือ</div>
         <div style="font-family:var(--display);font-weight:300;font-size:52px;line-height:1;color:var(--gold);letter-spacing:.02em">
           ฿{{ number_format($wallet->balance, 2) }}

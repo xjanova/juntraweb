@@ -20,6 +20,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(\App\Http\Middleware\EnsureInstalled::class);
         // Dead man's switch for the cron — checked after the response is sent (terminate()).
         $middleware->web(append: [\App\Http\Middleware\WatchScheduler::class]);
+        // 🌸 ทัวร์บุษบา: หน้าเว็บเขียน cookie ขั้นปัจจุบันเอง (JS) — ถ้าเข้ารหัส เซิร์ฟเวอร์จะถอดไม่ออก
+        //    ค่าข้างในไม่มีความลับ (ชื่อทางเลือก / เลขขั้น) ปลอมได้ก็แค่เห็นหรือไม่เห็นทัวร์
+        $middleware->encryptCookies(except: ['jw_tour_v1', 'jw_tour_v1_run']);
         $middleware->alias([
             'block.installed' => \App\Http\Middleware\BlockInstallerWhenInstalled::class,
             // บริการที่แอดมินปิดไว้ (ServiceGate) — ใช้ไม่ได้ทั้งเว็บ/แอพในจุดเดียว

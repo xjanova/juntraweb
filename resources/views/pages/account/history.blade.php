@@ -41,7 +41,7 @@
       @endforeach
     </div>
 
-    <div style="display:grid;gap:14px">
+    <div style="display:grid;gap:14px" data-tour="history">
       @forelse ($readings as $r)
         @php
           $m = $meta[$r->type] ?? ['label' => $r->type, 'icon' => 'sparkle', 'color' => 'var(--gold)'];
