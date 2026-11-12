@@ -56,6 +56,21 @@ class PushDevicesApiTest extends TestCase
         $this->assertArrayNotHasKey('token', $device->toArray(), 'token ห้ามหลุดออกไปกับ JSON ของโมเดล');
     }
 
+    public function test_a_firebase_installation_id_can_be_registered_and_removed_without_a_legacy_token(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $fid = 'cAbCdEfGhIjKlMnOpQrS_1';
+        $body = ['token' => $fid, 'platform' => 'android', 'channel' => 'play'];
+
+        $this->postJson('/api/v1/push/devices', $body)->assertOk()->assertJsonPath('data.devices', 1);
+        $this->postJson('/api/v1/push/devices', $body)->assertOk()->assertJsonPath('data.devices', 1);
+        $this->assertSame($fid, PushDevice::sole()->token);
+
+        $this->deleteJson('/api/v1/push/devices', ['token' => $fid])->assertOk()
+            ->assertExactJson(['data' => ['removed' => true, 'devices' => 0]]);
+        Http::assertNothingSent();
+    }
+
     public function test_channel_falls_back_to_the_app_channel_header_and_platform_defaults_to_android(): void
     {
         Sanctum::actingAs(User::factory()->create());
@@ -158,13 +173,13 @@ class PushDevicesApiTest extends TestCase
         ];
         foreach ($cases as [$body, $field]) {
             $res = $this->postJson('/api/v1/push/devices', $body)->assertStatus(422)
-                ->assertJsonPath('reason_code', 'invalid_input')
+                ->assertJsonPath('reason_code', 'validation_failed')
                 ->assertJsonValidationErrors($field);
             $this->assertMatchesRegularExpression('/\p{Thai}/u', $res->json('message'), json_encode($body));
             $this->assertStringNotContainsString('field', $res->json('message'));
         }
-        $this->deleteJson('/api/v1/push/devices', [])->assertStatus(422)->assertJsonPath('reason_code', 'invalid_input');
-        $this->putJson('/api/v1/push/preferences', [])->assertStatus(422)->assertJsonPath('reason_code', 'invalid_input');
+        $this->deleteJson('/api/v1/push/devices', [])->assertStatus(422)->assertJsonPath('reason_code', 'validation_failed');
+        $this->putJson('/api/v1/push/preferences', [])->assertStatus(422)->assertJsonPath('reason_code', 'validation_failed');
         $this->putJson('/api/v1/push/preferences', ['muted' => 'daily'])->assertStatus(422);
 
         $this->assertSame(0, PushDevice::count());

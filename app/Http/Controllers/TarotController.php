@@ -16,7 +16,6 @@ use App\Support\Pricing;
 use App\Support\ReadingCooldown;
 use App\Support\ReadingRoomLock;
 use App\Support\TarotSpreads;
-use App\Support\VoicePremium;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -273,65 +272,20 @@ class TarotController extends Controller
                 ->with('status', 'ตอนนี้' . ChatRooms::readerName(TarotSpreads::keyFromType($type)) . 'ยังเชื่อมต่อระบบทำนายไม่ได้ชั่วคราว — ยังไม่มีการหักเครดิต ลองใหม่อีกครั้งนะคะ');
         }
 
-        // Reserve credit BEFORE we touch the AI, so a failed reading doesn't
-        // leak server resources and a successful one always has a paired tx.
-        // If insufficient, bounce to /wallet so the user can top up — their
-        // session pick state is preserved so they can retry after.
-        // Guarded by cost > 0 so admin can set the price to 0 (free reading)
-        // without debit() throwing InvalidArgumentException.
-        // ✨ (2026-11-05) พรีเมียมเสียงผู้พยากรณ์ — เลือกที่หน้าจ่ายเงิน · ระบบเสียงไม่พร้อม = ไม่ขาย (เปิดไพ่ราคาปกติ)
-        // (2026-11-07) หน้าเปิดค้างไว้ตอนเสียงพร้อม แล้วเสียงล่มก่อนกดจ่าย — เดิมเปิดไพ่ราคาปกติให้เงียบ ๆ
-        //    ลูกค้าเลือกแพ็กเสียงไว้ ต้องไม่ได้ของน้อยกว่าที่เลือกโดยไม่รู้ตัว → ไม่ตัดอะไรเลย กลับไปเลือกใหม่ (ปุ่มพรีเมียมหายไปแล้ว)
-        if ($request->boolean('premium') && ! VoicePremium::offerable()) {
+        try {
+            $purchase = app(\App\Services\Tarot\TarotPurchase::class)->charge(
+                $user, $type, $cost, $request->boolean('premium'), (string) $request->input('_idem', Str::uuid()),
+            );
+        } catch (\App\Exceptions\VoicePremiumUnavailable) {
             return redirect()->back(fallback: route('tarot.index'))
                 ->with('status', 'ขออภัยค่ะ ระบบเสียงพรีเมียมเพิ่งปิดชั่วคราว ยังไม่มีการหักเครดิตเลย — เปิดไพ่แบบปกติได้ทันที หรือรอสักครู่แล้วลองพรีเมียมใหม่นะคะ');
+        } catch (InsufficientFundsException $e) {
+            return redirect()->route('wallet.index')->with('status', $request->boolean('premium')
+                ? 'ยอดเงินไม่พอสำหรับแพ็กเกจพรีเมียม (' . Pricing::format($e->required) . ') — กรุณาเติมเงินเข้าวอลเลต ยังไม่มีการหักเครดิต'
+                : $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต');
         }
-        $premium = $request->boolean('premium');
-        $premiumPrice = $premium ? VoicePremium::price() : 0.0;
-        if ($premium && $premiumPrice > 0
-            && bccomp(number_format((float) $this->wallet->balance($user), 2, '.', ''), number_format($cost + $premiumPrice, 2, '.', ''), 2) < 0) {
-            // เช็คก่อนตัดค่าไพ่ — ไม่ปล่อยให้ตัดค่าไพ่ไปแล้วค่อยรู้ว่าพรีเมียมไม่พอ
-            return redirect()->route('wallet.index')
-                ->with('status', 'ยอดเงินไม่พอสำหรับแพ็กเกจพรีเมียม (' . Pricing::format($cost + $premiumPrice) . ') — กรุณาเติมเงินเข้าวอลเลต ยังไม่มีการหักเครดิต');
-        }
-
-        $tx = null;
-        if ($cost > 0) {
-            try {
-                $spreadLabel = TarotSpreads::nameForType($type) ?? 'ไพ่ยิปซี';
-                $tx = $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . $spreadLabel, [
-                    'reference_type' => 'reading',
-                    'method'         => 'system',
-                ]);
-            } catch (InsufficientFundsException $e) {
-                return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต');
-            }
-        }
-
-        // ✨ ตัดพรีเมียมเป็นรายการแยก — คืนเฉพาะ +฿100 ได้โดยไม่แตะค่าไพ่ · คีย์จากฟอร์มเดิม = กดซ้ำไม่ตัดซ้ำ
-        $premiumTx = null;
-        if ($premium && $premiumPrice > 0) {
-            try {
-                $premiumTx = $this->wallet->debit($user, $premiumPrice, 'พรีเมียมเสียงผู้พยากรณ์: ' . (TarotSpreads::nameForType($type) ?? 'ไพ่ยิปซี'), [
-                    'reference_type'  => 'voice_premium',
-                    'method'          => 'system',
-                    'idempotency_key' => VoicePremium::idempotencyKey($user->id, (string) $request->input('_idem', Str::uuid())),
-                ]);
-            } catch (InsufficientFundsException $e) {
-                // ยอดหายไประหว่างทาง (อีกแท็บใช้ไป) — คืนค่าไพ่ที่เพิ่งตัด ให้ลูกค้าเลือกใหม่
-                if ($tx) {
-                    $this->wallet->refund($tx, 'ยอดไม่พอสำหรับพรีเมียม');
-                }
-
-                return redirect()->route('wallet.index')->with('status', $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต (คืนค่าเปิดไพ่แล้ว)');
-            }
-            // ฟอร์มเก่าถูกส่งซ้ำหลังล็อกกันกดซ้ำหมดอายุ → debit() คืนรายการพรีเมียมเดิมที่ผูกกับคำทำนายใบก่อนแล้ว
-            // ห้ามเอามาผูกกับใบใหม่ (ได้พรีเมียมฟรี + tx ชี้ข้ามใบ) — ใบนี้เปิดแบบปกติ ไม่ตัดพรีเมียมเพิ่ม
-            if (! $premiumTx->wasRecentlyCreated && $premiumTx->reference_id !== null) {
-                $premium = false;
-                $premiumTx = null;
-            }
-        }
+        $tx = $purchase['tx'];
+        $premiumTx = $purchase['premium_tx'];
 
         // Consume the session pick state — we're committed now.
         $request->session()->forget('tarot_pick');
@@ -356,12 +310,7 @@ class TarotController extends Controller
                     'birth_date'   => TarotSpreads::wantsBirthDate(TarotSpreads::keyFromType($type) ?? '')
                         ? $request->input('birth_date') : null,
                     // ✨ พรีเมียมเสียง — เล่าคำทำนายด้วยเสียง + ถามต่อ 20 นาทีพร้อมเสียง (VoicePremium)
-                    'premium'      => $premium ? [
-                        'status' => 'paid',
-                        'price'  => $premiumPrice,
-                        'tx_id'  => $premiumTx?->id,
-                        'at'     => now()->toIso8601String(),
-                    ] : null,
+                    'premium'      => $purchase['premium'],
                 ], fn ($v) => $v !== null),
             ]);
 

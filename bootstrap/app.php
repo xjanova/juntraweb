@@ -27,6 +27,18 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
+        // App contract: every /api/v1 validation failure carries reason_code validation_failed.
+        // message stays the first field message (Thai via lang/th), as the v1 endpoints that
+        // build their own 422 already do — additive for app 0.6.0, which shows message as-is.
+        $exceptions->render(function (\Illuminate\Validation\ValidationException $e, \Illuminate\Http\Request $request) {
+            if ($request->is('api/v1/*')) {
+                return response()->json([
+                    'message' => collect($e->errors())->flatten()->first() ?? 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้งค่ะ',
+                    'reason_code' => 'validation_failed',
+                    'errors' => $e->errors(),
+                ], $e->status);
+            }
+        });
         // Tell the owner on Telegram when something throws (a 500, a dying command) — throttled
         // hard and sent after the response. Returns nothing, so normal logging still happens.
         $exceptions->report(function (\Throwable $e): void {

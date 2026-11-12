@@ -130,6 +130,34 @@ class FcmSenderTest extends TestCase
             'question' => 'งาน', 'payload' => [], 'result' => 'ผล', 'status' => null]);
     }
 
+    /** @see https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages#Message */
+    public function test_a_registered_fid_is_sent_unchanged_using_the_compatible_http_v1_target(): void
+    {
+        // During the FID transition, HTTP v1 explicitly accepts FIDs in message.token.
+        $this->fcmOn();
+        $this->fakeGoogle();
+        $fid = 'cAbCdEfGhIjKlMnOpQrS_1';
+        $device = PushDevice::create([
+            'user_id' => User::factory()->create()->id,
+            'token' => $fid,
+            'token_hash' => PushDevice::hashToken($fid),
+            'channel' => 'play',
+        ]);
+
+        $this->assertSame('ok', app(FcmSender::class)->send($device, [
+            'title' => 'คำทำนายพร้อมแล้ว', 'body' => 'แตะเพื่ออ่าน',
+            'type' => 'reading_ready', 'url' => 'https://juntra.test/readings/42',
+        ]));
+
+        Http::assertSent(fn (HttpRequest $request) => $request->url() === self::SEND_URL
+            && $request->hasHeader('Authorization', 'Bearer ya29.test-access')
+            && $request['message']['token'] === $fid
+            && $request['message']['data']['type'] === 'reading_ready'
+            && $request['message']['data']['url'] === 'https://juntra.test/readings/42');
+        $this->assertSame(1, $this->sends()->count());
+        $this->assertSame(0, $device->fresh()->fail_count);
+    }
+
     private function topup(User $user): WalletTransaction
     {
         $tx = WalletTransaction::create([

@@ -160,6 +160,7 @@ class HistoryController extends Controller
         $data = $request->validate([
             'type'           => ['required', Rule::in(array_map(fn ($k) => "tarot_{$k}", $sellable))],
             'mode'           => 'sometimes|in:sync,async',
+            'voice_premium'  => 'sometimes|boolean',
             'question'       => 'nullable|string|max:500',
             // เส้นทางใหม่: กองที่เซิร์ฟเวอร์สับให้ + ตำแหน่งที่ผู้ใช้แตะ
             'deal_token'     => 'sometimes|string|max:64',
@@ -279,7 +280,7 @@ class HistoryController extends Controller
                 ], 409);
             }
 
-            return $this->chargeAndCreate($user, $data, $orderedPicks, $positions, $async, $this->debitKey($request, $user));
+            return $this->chargeAndCreate($user, $data, $orderedPicks, $positions, $async, $this->debitKey($request, $user), $this->idempotencyToken($request) ?? (string) Str::uuid());
         } finally {
             $openLock?->release();
         }
@@ -298,7 +299,13 @@ class HistoryController extends Controller
             return null;
         }
         $prior = WalletTransaction::where('user_id', $user->id)->where('idempotency_key', $key)->first();
+        $prior ??= WalletTransaction::where('user_id', $user->id)->where('idempotency_key',
+            \App\Support\VoicePremium::idempotencyKey($user->id, $this->idempotencyToken($request)))->first();
         if (!$prior) {
+            $free = Reading::where('user_id', $user->id)->where('payload->purchase_key', $key)->first();
+            if ($free) {
+                return $this->purchaseResponse($free, $user, (float) data_get($free->payload, 'cost', 0));
+            }
             return null;
         }
         if ($prior->status === 'refunded') {
@@ -316,7 +323,7 @@ class HistoryController extends Controller
             return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผล กรุณารอสักครู่', 'reason_code' => 'in_flight'], 409);
         }
 
-        return $this->purchaseResponse($reading, $user, abs((float) $prior->amount));
+        return $this->purchaseResponse($reading, $user, (float) data_get($reading->payload, 'cost', abs((float) $prior->amount)));
     }
 
     /** คีย์กันตัดซ้ำที่เก็บกับแถวตัดเงิน — ผูกกับลูกค้า (คอลัมน์ unique ทั้งตาราง) */
@@ -338,26 +345,15 @@ class HistoryController extends Controller
     }
 
     /** @param  array<int,array<string,mixed>>  $orderedPicks */
-    private function chargeAndCreate($user, array $data, array $orderedPicks, array $positions, bool $async = false, ?string $debitKey = null): JsonResponse
+    private function chargeAndCreate($user, array $data, array $orderedPicks, array $positions, bool $async = false, ?string $debitKey = null, string $premiumToken = ''): JsonResponse
     {
         $cost = Pricing::for($data['type']);
-        $balance = $this->wallet->balance($user);
-
-        // Pre-flight: surface 402 cleanly so the mobile app can show the
-        // wallet bottom sheet without us having to differentiate "no
-        // balance" from "race-lost debit" responses downstream.
-        if ($cost > 0 && bccomp(number_format($balance, 2, '.', ''), number_format($cost, 2, '.', ''), 2) < 0) {
-            $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
+        if (($data['voice_premium'] ?? false) && ! \App\Support\VoicePremium::offerable()) {
+            $this->releaseChargeLock();
             return response()->json([
-                'message'     => sprintf(
-                    'เครดิตไม่พอเปิดไพ่ (ต้องการ %s คงเหลือ %s) — กรุณาเติมเงินเข้าวอลเลต',
-                    Pricing::format($cost),
-                    Pricing::format($balance),
-                ),
-                'reason_code' => 'insufficient_funds',
-                'balance'     => (float) $balance,
-                'cost'        => $cost,
-            ], 402);
+                'message' => 'ระบบเสียงพรีเมียมไม่พร้อมชั่วคราว ยังไม่มีการหักเครดิตค่ะ',
+                'reason_code' => 'voice_premium_unavailable',
+            ], 409);
         }
 
         // อัปสตรีมพร้อมไหม — เช็คก่อนหักเงิน
@@ -374,25 +370,25 @@ class HistoryController extends Controller
             ], 409);
         }
 
-        // Debit BEFORE we touch the AI, so a failed AI call doesn't leak
-        // server resources and a successful one always has a paired tx.
         try {
-            $tx = $cost > 0
-                ? $this->wallet->debit($user, $cost, 'เปิดไพ่: ' . (TarotSpreads::nameForType($data['type']) ?? 'ไพ่ยิปซี'), array_filter([
-                    'reference_type'  => 'reading',
-                    'method'          => 'system',
-                    'idempotency_key' => $debitKey,
-                ]))
-                : null;
-        } catch (InsufficientFundsException $e) {
-            $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
+            $purchase = app(\App\Services\Tarot\TarotPurchase::class)->charge(
+                $user, $data['type'], $cost, (bool) ($data['voice_premium'] ?? false), $premiumToken, $debitKey,
+            );
+        } catch (\App\Exceptions\VoicePremiumUnavailable) {
+            $this->releaseChargeLock();
             return response()->json([
-                'message'     => $e->getMessage() . ' — กรุณาเติมเงินเข้าวอลเลต',
-                'reason_code' => 'insufficient_funds',
-                'balance'     => (float) $e->balance,
-                'cost'        => $cost,
+                'message' => 'ระบบเสียงพรีเมียมไม่พร้อมชั่วคราว ยังไม่มีการหักเครดิตค่ะ',
+                'reason_code' => 'voice_premium_unavailable',
+            ], 409);
+        } catch (InsufficientFundsException $e) {
+            $this->releaseChargeLock();
+            return response()->json([
+                'message' => $e->getMessage().' — กรุณาเติมเงินเข้าวอลเลต', 'reason_code' => 'insufficient_funds',
+                'balance' => $e->balance, 'cost' => $e->required,
             ], 402);
         }
+        $tx = $purchase['tx'];
+        $premiumTx = $purchase['premium_tx'];
 
         $reading = null;
 
@@ -407,6 +403,9 @@ class HistoryController extends Controller
                     'cost'         => $cost,
                     'wallet_tx_id' => $tx?->id,
                     'source'       => 'mobile',
+                    'purchase_key' => $debitKey,
+                    'room'         => \App\Support\ChatRooms::roomForSpread(TarotSpreads::keyFromType($data['type'])),
+                    'premium'      => $purchase['premium'],
                     'birth_date'   => TarotSpreads::wantsBirthDate(TarotSpreads::keyFromType($data['type']) ?? '')
                         ? ($data['birth_date'] ?? null) : null,
                 ], fn ($v) => $v !== null),
@@ -421,40 +420,35 @@ class HistoryController extends Controller
                 ]);
             }
 
+            $tx?->update(['reference_id' => $reading->id]);
+            $premiumTx?->update(['reference_id' => $reading->id]);
+
             if ($async) {
                 // ผูกแถวตัดเงินกับรายการทันที — TarotReadingFinisher คืนเงินจากแถวนี้ถ้าอ่านไม่สำเร็จ
                 // และ replay() ใช้ reference_id หารายการเดิมให้คำขอที่ส่งซ้ำ
-                if ($tx) {
-                    $tx->update(['reference_id' => $reading->id]);
-                }
                 // แม่หมออ่านหลังส่งคำตอบ ด้วยโปรไฟล์ของแพ็กเกจ (ทางเดียวกับหน้าเว็บ) — ค้าง = ตัวกวาดคืนเงิน
                 $reading->update(['status' => Reading::STATUS_PENDING]);
                 InterpretTarotReading::dispatchAfterResponse($reading->id);
+            } else {
+                $reading->load('tarotCards.card');
+                // APK รุ่นเก่ารอผลในคำขอเดียว (ถามสถานะไม่ได้) → ทางเดิมที่ตอบเร็ว ไม่ใช่โปรไฟล์ต่อแพ็กเกจ
+                // บนเลนทำนาย (Celtic/12 เดือนบนเลนทำนายใช้ 36-48 วิ เสี่ยงชนเพดานคำขอ)
+                $aiResult = $this->ai->interpretTarot($reading, $user, 55, profile: false);
 
-                return $this->purchaseResponse($reading, $user, $cost);
-            }
+                // 🔴 `source === 'local'` = อัปสตรีมใช้ไม่ได้ (ผู้ใช้ยังไม่ผูก
+                // Thaiprompt หรือพูลล่ม) แล้ว FortuneAiService ตกไปประกอบข้อความ
+                // จากคอลัมน์ความหมายไพ่ในดาต้าเบสแทน — มันไม่ใช่คำทำนาย
+                // เก็บเงินเต็มราคาสำหรับของแบบนี้ไม่ได้ ต้องคืนแล้วให้ลองใหม่
+                // เหมือนที่ FreeTarotController ทำ (ที่นั่นจงใจไม่มี fallback เลย)
+                if (($aiResult['source'] ?? null) === 'local' || blank($aiResult['text'] ?? null)
+                    || \App\Services\Tarot\TarotReadingFinisher::looksLikeRefusal((string) $aiResult['text'])) {
+                    throw new \RuntimeException('upstream_unavailable');
+                }
 
-            $reading->load('tarotCards.card');
-            // APK รุ่นเก่ารอผลในคำขอเดียว (ถามสถานะไม่ได้) → ทางเดิมที่ตอบเร็ว ไม่ใช่โปรไฟล์ต่อแพ็กเกจ
-            // บนเลนทำนาย (Celtic/12 เดือนบนเลนทำนายใช้ 36-48 วิ เสี่ยงชนเพดานคำขอ)
-            $aiResult = $this->ai->interpretTarot($reading, $user, 55, profile: false);
-
-            // 🔴 `source === 'local'` = อัปสตรีมใช้ไม่ได้ (ผู้ใช้ยังไม่ผูก
-            // Thaiprompt หรือพูลล่ม) แล้ว FortuneAiService ตกไปประกอบข้อความ
-            // จากคอลัมน์ความหมายไพ่ในดาต้าเบสแทน — มันไม่ใช่คำทำนาย
-            // เก็บเงินเต็มราคาสำหรับของแบบนี้ไม่ได้ ต้องคืนแล้วให้ลองใหม่
-            // เหมือนที่ FreeTarotController ทำ (ที่นั่นจงใจไม่มี fallback เลย)
-            if (($aiResult['source'] ?? null) === 'local') {
-                throw new \RuntimeException('upstream_unavailable');
-            }
-
-            $reading->result      = $aiResult['text'];
-            $reading->ai_provider = $aiResult['provider'];
-            $reading->ai_model    = $aiResult['model'];
-            $reading->save();
-
-            if ($tx) {
-                $tx->update(['reference_id' => $reading->id]);
+                $reading->result      = $aiResult['text'];
+                $reading->ai_provider = $aiResult['provider'];
+                $reading->ai_model    = $aiResult['model'];
+                $reading->save();
             }
         } catch (\Throwable $e) {
             // คืนเงินแล้ว = รายการนี้ไม่สำเร็จ ปล่อยล็อกให้ลองใหม่ได้ทันที
@@ -465,20 +459,22 @@ class HistoryController extends Controller
                 'type'    => $data['type'],
                 'err'     => $e->getMessage(),
             ]);
-            if ($tx) {
+            $refunded = true;
+            foreach ([$premiumTx, $tx] as $payment) {
+                if (! $payment) {
+                    continue;
+                }
                 try {
-                    $this->wallet->refund($tx, 'ระบบขัดข้องระหว่างเปิดไพ่ (mobile)');
+                    $this->wallet->refund($payment, 'ระบบขัดข้องระหว่างเปิดไพ่ (mobile)');
                 } catch (\Throwable $refundErr) {
-                    Log::critical('Refund FAILED after mobile reading failure — manual intervention needed', [
-                        'tx_id' => $tx->id,
-                        'err'   => $refundErr->getMessage(),
-                    ]);
+                    $refunded = false;
+                    Log::critical('Refund FAILED after mobile reading failure', ['tx_id' => $payment->id, 'err' => $refundErr->getMessage()]);
                 }
             }
 
             // แถวที่ยังไม่มีคำทำนายต้องไม่ค้างอยู่ในประวัติ ไม่งั้นผู้ใช้เปิดเจอ
             // รายการเปล่าที่ "จ่ายแล้วไม่ได้อะไร" ทั้งที่เงินถูกคืนไปแล้ว
-            if ($reading && blank($reading->result)) {
+            if ($refunded && $reading && blank($reading->fresh()?->result)) {
                 try {
                     $reading->delete();
                 } catch (\Throwable) {
@@ -487,9 +483,16 @@ class HistoryController extends Controller
             }
 
             return response()->json([
-                'message'     => 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนเข้าวอลเลตแล้ว กรุณาลองใหม่อีกครั้ง',
+                'message'     => $refunded
+                    ? 'ระบบขัดข้องชั่วคราว — เครดิตถูกคืนเข้าวอลเลตแล้ว กรุณาลองใหม่อีกครั้ง'
+                    : 'ระบบขัดข้องชั่วคราว ทีมงานกำลังตรวจสอบและคืนเครดิตให้ค่ะ',
                 'reason_code' => 'reading_failed',
             ], 503);
+        }
+
+        // ส่งงานแล้ว — จัดรูปคำตอบนอก try เพื่อไม่ให้คืนเงิน/ลบใบที่ job กำลังจะอ่าน
+        if ($async) {
+            return $this->purchaseResponse($reading, $user, $cost);
         }
 
         return response()->json([
@@ -510,7 +513,7 @@ class HistoryController extends Controller
         return $key ? TarotSpreads::positionLabels($key) : [];
     }
 
-    private function readingDetail(Reading $reading): array
+    public function readingDetail(Reading $reading): array
     {
         $cards = [];
         // Only tarot readings have associated tarot_reading_cards rows.
@@ -540,6 +543,9 @@ class HistoryController extends Controller
         // แอพต่อ URL เองไม่ได้ (ไม่รู้โฮสต์ storage) จึงต้องแปลงให้เป็น
         // absolute เหมือนที่ทำกับหน้าไพ่ ไม่งั้นลูกค้าไม่เห็นรูปที่ตัวเองส่งไป
         $payload = (array) ($reading->payload ?? []);
+        if (is_array($payload['voice'] ?? null)) {
+            $payload['voice']['url'] = ReadingVoiceController::url($reading);
+        }
         $imageUrl = null;
         if (!empty($payload['image_path'])) {
             $imageUrl = asset('storage/' . ltrim((string) $payload['image_path'], '/'));
@@ -554,9 +560,10 @@ class HistoryController extends Controller
         }
 
         return array_merge($this->readingSummary($reading), [
+            ...\App\Support\ReadingPresentation::details($reading),
             'question'      => $reading->question,
             'result'        => $reading->result,
-            'payload'       => $reading->payload,
+            'payload'       => $payload,
             'image_url'     => $imageUrl,
             'ai_provider'   => $reading->ai_provider,
             'ai_model'      => $reading->ai_model,

@@ -161,7 +161,7 @@ class PushController extends Controller
     {
         return response()->json([
             'message' => $v->errors()->first(),
-            'reason_code' => 'invalid_input',
+            'reason_code' => 'validation_failed',
             'errors' => $v->errors()->toArray(),
         ], 422);
     }

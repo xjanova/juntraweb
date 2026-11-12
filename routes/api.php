@@ -90,6 +90,8 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 
     // ─── Authenticated (Sanctum bearer) ───────────────────────
     Route::middleware('auth:sanctum')->group(function () {
+        Route::get('tarot/free', [\App\Http\Controllers\Api\V1\FreeTarotController::class, 'show'])->name('tarot.free.show');
+        Route::post('tarot/free', [\App\Http\Controllers\Api\V1\FreeTarotController::class, 'store'])->middleware('throttle:reading')->name('tarot.free.store');
 
         // สับไพ่หนึ่งกองต่อหนึ่งเกม — เซิร์ฟเวอร์เป็นคนสับและตัดสินหัวตั้ง/หัวกลับ
         // (แอพเคยใช้สำรับ const เรียงเดิมตลอดกาล และสุ่มหัวกลับเอง 30% ต่างจากเว็บ 50%)
@@ -213,6 +215,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         // in AppServiceProvider — same protection against rapid-fire
         // wallet drain that the web TarotController relies on.
         Route::prefix('history')->name('history.')->group(function () {
+            Route::post('readings/{reading}/share', [\App\Http\Controllers\Api\V1\ReadingEngagementController::class, 'share'])->middleware('throttle:30,1,reading-engagement')->name('share');
+            Route::post('readings/{reading}/review', [\App\Http\Controllers\Api\V1\ReadingEngagementController::class, 'review'])->middleware('throttle:30,1,reading-engagement')->name('review');
+            Route::post('readings/{reading}/voice/next', [\App\Http\Controllers\Api\V1\ReadingVoiceController::class, 'next'])->middleware('throttle:30,1,reading-voice')->name('voice.next');
+            Route::get('readings/{reading}/voice.mp3', [\App\Http\Controllers\Api\V1\ReadingVoiceController::class, 'file'])->name('voice.file');
             Route::get('readings',           [HistoryController::class, 'index'])->name('index');
             Route::post('readings',          [HistoryController::class, 'store'])
                 ->middleware('throttle:reading')->name('store');

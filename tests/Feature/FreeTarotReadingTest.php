@@ -149,6 +149,7 @@ class FreeTarotReadingTest extends TestCase
 
         $res->assertRedirect(route('tarot.free'));
         $res->assertSessionHas('free_retry', true);   // หน้าเว็บต้องไม่ auto-ยิงซ้ำ = กันลูป
+        $res->assertSessionHas('status', fn ($s) => str_contains($s, 'สิทธิ์ดูฟรียังอยู่ครบ'));
         $this->assertSame(0, Reading::count(), 'reading ที่ไม่มีคำทำนายต้องถูกลบ');
 
         // แถว claim ยังอยู่ (ให้เพดานต้นทุนต่อวันนับได้) แต่ต้องไม่กันสิทธิ์ลูกค้า
@@ -219,6 +220,7 @@ class FreeTarotReadingTest extends TestCase
         $res = $this->actingAs($this->member())->post(route('tarot.free.cast'));
 
         $res->assertRedirect(route('tarot.free'));
+        $res->assertSessionMissing('status');   // หน้า tarot.free แสดงเหตุผลเอง — flash ซ้ำ = ขึ้นสองรอบ
         $this->assertSame(1, Reading::count(), 'เกินเพดานต่อวันต้องไม่เปิดไพ่เพิ่ม');
     }
 
@@ -245,6 +247,7 @@ class FreeTarotReadingTest extends TestCase
         $res = $this->actingAs($this->member())->post(route('tarot.free.cast'));
 
         $res->assertRedirect(route('tarot.free'));
+        $res->assertSessionMissing('status');
         $this->assertSame(0, Reading::count());
     }
 
