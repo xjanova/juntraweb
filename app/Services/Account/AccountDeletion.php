@@ -4,6 +4,7 @@ namespace App\Services\Account;
 
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
+use App\Models\PushDevice;
 use App\Models\Reading;
 use App\Models\User;
 use App\Models\WalletTransaction;
@@ -46,6 +47,8 @@ class AccountDeletion
         DB::transaction(function () use ($user, &$files) {
             // โทเคนแอพทุกตัว — bearer ที่ค้างในเครื่องไหนก็ใช้ต่อไม่ได้
             $user->tokens()->delete();
+            // 📲 (2026-11-12) token แจ้งเตือนของแอป (FCM) — ผู้ใช้ถูก soft delete จึงไม่มี FK cascade ช่วยลบ
+            PushDevice::where('user_id', $user->id)->delete();
             if (Schema::hasTable('sessions')) {
                 DB::table('sessions')->where('user_id', $user->id)->delete();
             }

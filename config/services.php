@@ -2,6 +2,10 @@
 
 return [
 
+    'thaiprompt' => [
+        'chat_slip_ping_token' => env('THAIPROMPT_CHAT_SLIP_PING_TOKEN', ''),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

@@ -101,6 +101,20 @@ class ChatTopupController extends Controller
         if ($tx->status !== 'pending' || ($tx->expires_at && $tx->expires_at->isPast())) {
             return response()->json(['error' => 'บิลนี้ไม่ได้รอชำระแล้วค่ะ', 'status' => $tx->status, 'paid' => $tx->status === 'success'], 410);
         }
+        $account = self::billAccount($tx, $user);
+        if (! $account) {
+            return response()->json(['error' => 'ระบบเติมเงินยังไม่พร้อมชั่วคราว กรุณาติดต่อแอดมินค่ะ', 'reason_code' => 'promptpay_unset'], 503);
+        }
+
+        return response()->json($this->payload($tx, $account));
+    }
+
+    /**
+     * บัญชีที่บิลนี้ออก QR ไว้ (จดไว้กับบิลตอนสร้าง) — ไม่มี = บัญชีปัจจุบัน · null = ตั้งค่าไม่ได้ทั้งสองทาง
+     * ใช้ทั้งการเปิด QR ซ้ำบนเว็บ (resume) และบิลค้างในห้องของแอพ (GET /v1/chat/conversations/{id})
+     */
+    public static function billAccount(WalletTransaction $tx, $user): ?array
+    {
         $meta = (array) $tx->meta;
         $account = ! empty($meta['promptpay_id'])
             ? ['promptpay_id' => (string) $meta['promptpay_id'], 'name' => (string) ($meta['promptpay_name'] ?? ''), 'source' => 'bill',
@@ -114,11 +128,8 @@ class ChatTopupController extends Controller
                 $account['transfer'] = $current['transfer'] ?? null;
             }
         }
-        if (! $account) {
-            return response()->json(['error' => 'ระบบเติมเงินยังไม่พร้อมชั่วคราว กรุณาติดต่อแอดมินค่ะ', 'reason_code' => 'promptpay_unset'], 503);
-        }
 
-        return response()->json($this->payload($tx, $account));
+        return $account ?: null;
     }
 
     /** บิลเติมเงินที่ยังรอชำระ (ยังไม่หมดอายุ) ล่าสุดของลูกค้า หรือ null */

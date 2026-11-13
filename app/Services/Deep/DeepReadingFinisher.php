@@ -23,10 +23,35 @@ use Illuminate\Support\Facades\Log;
  */
 class DeepReadingFinisher
 {
+    public const MAX_QUESTIONS = 3;
+
     public function __construct(
         private FortuneBotClient $bot,
         private TarotReadingFinisher $tarot,
     ) {}
+
+    /**
+     * รายการรอแม่หมออ่าน — แถวเดียวกันทั้งเว็บและแอพ (payload ที่ finish() อ่าน) · ผู้เรียกส่งงานเอง
+     *
+     * @param  array<int,string>  $questions
+     * @param  array<string,mixed>  $extra
+     */
+    public static function pending(\App\Models\User $user, array $questions, ?string $birthDate, float $cost, ?WalletTransaction $tx, array $extra = []): Reading
+    {
+        return Reading::create([
+            'user_id'       => $user->id,
+            'session_token' => (string) \Illuminate\Support\Str::uuid(),
+            'type'          => 'deep',
+            'question'      => $questions[0],
+            'payload'       => [
+                'questions'    => $questions,
+                'birth_date'   => $birthDate,
+                'cost'         => $cost,
+                'wallet_tx_id' => $tx?->id,
+            ] + $extra,
+            'status' => Reading::STATUS_PENDING,
+        ]);
+    }
 
     /** อ่านคำทำนายของรายการนี้ให้เสร็จ — เรียกซ้ำได้ (รายการที่ไม่ใช่ pending จะถูกข้าม) */
     public function finish(int $readingId, int $timeout = TarotReadingFinisher::BACKGROUND_TIMEOUT): void

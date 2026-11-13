@@ -71,6 +71,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     // หมวดงานมงคล — ข้อมูลอ้างอิงคงที่ ให้ฟอร์มฤกษ์ยามในแอพกาง dropdown
     // ได้เหมือนเว็บ แทนที่จะปล่อยให้เซิร์ฟเวอร์เดาหมวดจากข้อความล้วน
     Route::get('fortune/occasions', [FortuneController::class, 'occasions'])->name('fortune.occasions');
+    // รีวิวชุดเดียวกับหน้าแรกของเว็บ (อนุมัติแล้ว + ลูกค้ายอมให้โชว์) — ประตูสาธารณะต้องมี throttle
+    Route::get('testimonials', [\App\Http\Controllers\Api\V1\TestimonialController::class, 'index'])
+        ->middleware('throttle:60,1,testimonials')->name('testimonials.index');
 
     // Tarot card catalog — public face-image URLs so the mobile app can pull
     // the real จันทรา.online art (and fall back to its own drawing per card).
@@ -78,8 +81,17 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     // แพ็กเกจไพ่ที่เปิดขาย (ราคา/ภาพประกอบ/ตำแหน่งไพ่/ข้อห้ามเปิดซ้ำ) — ชุดเดียวกับหน้า /tarot
     Route::get('tarot/packages', [TarotController::class, 'packages'])->name('tarot.packages');
 
+    // 🔮 (2026-11-12) ห้องผู้พยากรณ์ (หน้าเลือกห้องของเว็บ) + ตัวเลขสดหน้าห้อง — ไม่ต้องล็อกอิน
+    //    rooms อ่าน bearer ถ้ามี (meta.lock = กำลังทำนายอยู่ห้องไหน)
+    Route::get('chat/rooms', [ChatController::class, 'rooms'])
+        ->middleware('throttle:60,1,chat-rooms')->name('chat.rooms');
+    Route::get('chat/live', [ChatController::class, 'live'])
+        ->middleware('throttle:60,1,chat-live')->name('chat.live');
+
     // ─── Authenticated (Sanctum bearer) ───────────────────────
     Route::middleware('auth:sanctum')->group(function () {
+        Route::get('tarot/free', [\App\Http\Controllers\Api\V1\FreeTarotController::class, 'show'])->name('tarot.free.show');
+        Route::post('tarot/free', [\App\Http\Controllers\Api\V1\FreeTarotController::class, 'store'])->middleware('throttle:reading')->name('tarot.free.store');
 
         // สับไพ่หนึ่งกองต่อหนึ่งเกม — เซิร์ฟเวอร์เป็นคนสับและตัดสินหัวตั้ง/หัวกลับ
         // (แอพเคยใช้สำรับ const เรียงเดิมตลอดกาล และสุ่มหัวกลับเอง 30% ต่างจากเว็บ 50%)
@@ -99,9 +111,30 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::post('account/delete', [AuthController::class, 'deleteAccount'])
             ->middleware('throttle:5,1,account-delete')->name('account.delete');
 
+        // 🌙 (2026-11-12) เช็กอินรับดวง · สมุดสะสมไพ่ · ข้อมูลโหราศาสตร์ — กติกาเดียวกับหน้าเว็บ /account/*
+        // prefix ท้าย throttle = ตัวนับของเส้นนั้นเอง (throttle:N,M เปล่า ๆ ใช้ตัวนับเดียวกันทุกเส้นต่อผู้ใช้)
+        Route::prefix('account')->name('account.')->group(function () {
+            Route::get('daily-luck', [\App\Http\Controllers\Api\V1\AccountEngagementController::class, 'dailyLuck'])->name('daily-luck');
+            Route::post('checkin', [\App\Http\Controllers\Api\V1\AccountEngagementController::class, 'checkin'])
+                ->middleware('throttle:20,1,account-checkin')->name('checkin');
+            Route::get('collection', [\App\Http\Controllers\Api\V1\AccountEngagementController::class, 'collection'])->name('collection');
+            Route::get('profile', [\App\Http\Controllers\Api\V1\AccountProfileController::class, 'show'])->name('profile.show');
+            Route::patch('profile', [\App\Http\Controllers\Api\V1\AccountProfileController::class, 'update'])
+                ->middleware('throttle:30,1,account-profile')->name('profile.update');
+        });
+
         // รายงานคำทำนาย/ข้อความแชทที่ AI สร้าง (Google Play: AI-Generated Content policy)
         Route::post('reports', [ContentReportController::class, 'store'])
             ->middleware('throttle:10,1,content-report')->name('reports.store');
+
+        // 📲 แจ้งเตือนในแอป (FCM) — จด/เลิกจดเครื่อง + เลือกหมวด (ชุดเดียวกับ /push/preferences ของเว็บ)
+        // นโยบายส่งอยู่ที่ PushNotifier · throttle มี prefix ของตัวเอง ไม่กินโควตาของเส้นอื่น
+        Route::prefix('push')->name('push.')->controller(\App\Http\Controllers\Api\V1\PushController::class)->group(function () {
+            Route::post('devices', 'storeDevice')->middleware('throttle:20,1,push-devices')->name('devices.store');
+            Route::delete('devices', 'destroyDevice')->middleware('throttle:20,1,push-devices')->name('devices.destroy');
+            Route::get('preferences', 'preferences')->middleware('throttle:20,1,push-preferences')->name('preferences.show');
+            Route::put('preferences', 'updatePreferences')->middleware('throttle:20,1,push-preferences')->name('preferences.update');
+        });
 
         // Wallet — balance, history, top-up start + native slip upload.
         // The slip POST goes through the same `topup` 10/min/user bucket
@@ -135,6 +168,15 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
             Route::get('conversations/{conversation}',    [ChatController::class, 'show'])->name('conversations.show');
             Route::post('conversations/{conversation}/send', [ChatController::class, 'send'])
                 ->middleware('throttle:chat-send')->name('conversations.send');
+            // ⏳ "พอแล้ว" — จบเวลาถามต่อของไพ่ก่อนกำหนด (ตัวนับเดียวกับการส่งข้อความ เหมือนเว็บ)
+            Route::post('conversations/{conversation}/qa/end', [ChatController::class, 'endQa'])
+                ->middleware('throttle:chat-send')->whereNumber('conversation')->name('conversations.qa.end');
+            // 🧑‍💼 ข้อความใหม่จากทีมงาน (แอพ poll ระหว่าง held) — ตัวนับของเส้นนี้เอง
+            Route::get('conversations/{conversation}/feed', [ChatController::class, 'feed'])
+                ->middleware('throttle:40,1,chat-feed')->whereNumber('conversation')->name('conversations.feed');
+            // 🎙️ ปุ่มไมค์ — เพดานเดียวกับเว็บ (12 ครั้ง/นาที)
+            Route::post('transcribe', [ChatController::class, 'transcribe'])
+                ->middleware('throttle:12,1,chat-mic')->name('transcribe');
             // หมวดคำถามแบบเต็ม (5 หมวด 24 คำถาม) — ชุดเดียวกับที่เว็บกางในแชท
             Route::get('topics', [ChatController::class, 'topics'])->name('topics');
         });
@@ -173,6 +215,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         // in AppServiceProvider — same protection against rapid-fire
         // wallet drain that the web TarotController relies on.
         Route::prefix('history')->name('history.')->group(function () {
+            Route::post('readings/{reading}/share', [\App\Http\Controllers\Api\V1\ReadingEngagementController::class, 'share'])->middleware('throttle:30,1,reading-engagement')->name('share');
+            Route::post('readings/{reading}/review', [\App\Http\Controllers\Api\V1\ReadingEngagementController::class, 'review'])->middleware('throttle:30,1,reading-engagement')->name('review');
+            Route::post('readings/{reading}/voice/next', [\App\Http\Controllers\Api\V1\ReadingVoiceController::class, 'next'])->middleware('throttle:30,1,reading-voice')->name('voice.next');
+            Route::get('readings/{reading}/voice.mp3', [\App\Http\Controllers\Api\V1\ReadingVoiceController::class, 'file'])->name('voice.file');
             Route::get('readings',           [HistoryController::class, 'index'])->name('index');
             Route::post('readings',          [HistoryController::class, 'store'])
                 ->middleware('throttle:reading')->name('store');
@@ -195,9 +241,10 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
 // or orders/match when a signed /notify record for that exact amount already
 // exists — never on X-Api-Key alone (see SmsCheckerService::matchForApp).
 // 🧾 (2026-11-10) กริ่งจากบอท Thaiprompt: "มีสลิปจากแชทเพจรออยู่" — รับแค่เลขอ้างอิง
-//    ข้อมูลจริงดึงจาก Thaiprompt ด้วย token ของเว็บเอง (ChatSlipIntake) จึงไม่ต้องมีความลับร่วม
+//    ข้อมูลจริงดึงจาก Thaiprompt ด้วย token ของเว็บเอง (ChatSlipIntake)
+//    🔐 (2026-11-12) ผู้กดกริ่งต้องส่ง bearer เฉพาะ callback (THAIPROMPT_CHAT_SLIP_PING_TOKEN) — ไม่มี/ผิด = 401 ก่อน throttle
 Route::post('server/chat-slips/ping', \App\Http\Controllers\Api\ChatSlipPingController::class)
-    ->middleware('throttle:30,1')
+    ->middleware([\App\Http\Middleware\VerifyChatSlipCallback::class, 'throttle:30,1'])
     ->name('api.server.chat-slips.ping');
 
 Route::prefix('v1/sms-payment')->middleware(VerifySmsCheckerDevice::class)->name('api.v1.sms.')->group(function () {

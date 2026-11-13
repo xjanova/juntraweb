@@ -10,9 +10,13 @@ use App\Models\WalletTransaction;
 use App\Services\SmsPayment\AmountReservation;
 use App\Services\Wallet\SlipAutoVerifier;
 use App\Services\Wallet\WalletService;
+use App\Support\AppChannel;
 use App\Support\Pricing;
 use App\Support\PayoutAccount;
 use App\Support\PromptPayQr;
+use App\Support\TarotSpreads;
+use App\Support\TopupChannel;
+use App\Support\VoicePremium;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -46,22 +50,39 @@ class WalletController extends Controller
             ->get()
             ->map(fn (WalletTransaction $tx) => $this->txPayload($tx));
 
-        return response()->json([
-            'data' => [
-                'balance'             => (float) $balance,
-                'currency'            => config('pricing.currency', 'THB'),
-                // appKeys — แพ็กเกจที่แอพซื้อได้จริง (ไม่รวมที่ยังซ่อน/เว็บเท่านั้น)
-                'pricing'             => collect(\App\Support\TarotSpreads::appKeys())
-                    ->mapWithKeys(fn ($k) => ["tarot_{$k}" => Pricing::for("tarot_{$k}")])
-                    ->merge([
-                        'numerology'   => Pricing::for('numerology'),
-                        'palmistry'    => Pricing::for('palmistry'),
-                        'auspicious'   => Pricing::for('auspicious'),
-                        'chat_message' => Pricing::for('chat_message'),
-                    ])->all(),
-                'recent_transactions' => $recent,
-            ],
-        ]);
+        $data = [
+            'balance'             => (float) $balance,
+            'currency'            => config('pricing.currency', 'THB'),
+            // appKeys — แพ็กเกจที่แอพซื้อได้จริง (ไม่รวมที่ยังซ่อน/เว็บเท่านั้น)
+            'pricing'             => collect(TarotSpreads::appKeys())
+                ->mapWithKeys(fn ($k) => ["tarot_{$k}" => Pricing::for("tarot_{$k}")])
+                ->merge([
+                    'numerology'   => Pricing::for('numerology'),
+                    'palmistry'    => Pricing::for('palmistry'),
+                    'auspicious'   => Pricing::for('auspicious'),
+                    'chat_message' => Pricing::for('chat_message'),
+                ])
+                // 🔮 (2026-11-12) แพ็กเกจที่อ่านเบื้องหลัง (ซื้อด้วย mode: async) + ราคาเสริม — คีย์ใหม่เท่านั้น ของเดิมไม่แตะ
+                ->union(collect(array_keys(TarotSpreads::registry()))
+                    ->mapWithKeys(fn ($k) => ["tarot_{$k}" => Pricing::for(TarotSpreads::priceKey($k))]))
+                ->merge([
+                    'voice_premium' => VoicePremium::price(),
+                    'deep'          => Pricing::for('deep'),
+                ])->all(),
+            'recent_transactions' => $recent,
+        ];
+
+        // 🏦 กติกาเติมเงินชุดเดียวกับหน้า /wallet/topup — ช่อง Google Play ห้ามเห็นพร้อมเพย์/บัญชีธนาคาร
+        if (! AppChannel::isPlay($request)) {
+            $payout        = PayoutAccount::resolve($user);
+            $card          = TopupChannel::card($payout['transfer'] ?? null, (string) ($payout['name'] ?? ''));
+            $data['topup'] = TopupChannel::limits() + [
+                'channels' => $card ? TopupChannel::CHANNELS : ['promptpay'],
+                'kbank'    => $card,
+            ];
+        }
+
+        return response()->json(['data' => $data]);
     }
 
     public function transactions(Request $request): JsonResponse
@@ -104,12 +125,27 @@ class WalletController extends Controller
      */
     public function topupPromptPay(Request $request, AmountReservation $amounts): JsonResponse
     {
+        // ช่อง Google Play เติมเครดิตผ่าน Google Play เท่านั้น — ไม่สร้างบิลพร้อมเพย์/ไม่ส่งเลขบัญชีกลับไป
+        if (AppChannel::isPlay($request)) {
+            return $this->playOnly();
+        }
+
+        ['min' => $min, 'max' => $max] = TopupChannel::limits();
         $data = $request->validate([
-            'amount' => 'required|numeric|min:' . config('pricing.min_topup', 20)
-                                  . '|max:' . config('pricing.max_topup', 50000),
+            'amount' => "required|numeric|min:$min|max:$max",
+            // ไม่ส่ง = พร้อมเพย์ (แอพ 0.6.0) · kbank = โอนเข้าบัญชีกสิกรไทย กติกาเดียวกับเว็บ (TopupChannel)
+            'method' => 'sometimes|in:' . implode(',', TopupChannel::CHANNELS),
         ]);
 
-        $base = (float) $data['amount'];
+        $base   = (float) $data['amount'];
+        $picked = TopupChannel::pick($request->user(), (string) ($data['method'] ?? 'promptpay'));
+        if (! $picked) {
+            return response()->json([
+                'message'     => TopupChannel::KBANK_UNAVAILABLE,
+                'reason_code' => 'kbank_unavailable',
+                'errors'      => ['method' => [TopupChannel::KBANK_UNAVAILABLE]],
+            ], 422);
+        }
 
         // กันรายการซ้ำจากการกดรัว ๆ / RetryInterceptor ของแอพยิงซ้ำเอง
         // (เพดาน pending = 5 ใบ ถ้าปล่อยให้ซ้ำ ผู้ใช้จะสร้างใบใหม่ไม่ได้
@@ -153,6 +189,9 @@ class WalletController extends Controller
                 && abs((float) (((array) $t->meta)['base_amount'] ?? abs((float) $t->amount)) - $base) < 0.0001);
 
         if ($existing) {
+            // กดซ้ำแต่เปลี่ยนช่องทาง (พร้อมเพย์ ↔ กสิกร) = บัญชีเดียวกัน แค่จดช่องทางล่าสุดที่เลือก
+            $existing->update(['meta' => array_merge((array) $existing->meta, TopupChannel::meta($picked))]);
+
             return response()->json([
                 'data' => [
                     'transaction'    => $this->txPayload($existing),
@@ -164,7 +203,7 @@ class WalletController extends Controller
                     'slip_upload_url' => url('/wallet/topup/' . $existing->id),
                     'reused'         => true,
                     'instructions'   => 'รายการนี้สร้างไว้แล้ว โอนตามยอดนี้ได้เลยค่ะ',
-                ],
+                ] + $this->channelBlock($existing, $request->user()),
             ], 200);
         }
 
@@ -184,6 +223,8 @@ class WalletController extends Controller
             ], 409);
         }
         $payable = (float) $tx->amount;
+        // จดช่องทาง + บัญชีที่โชว์ให้โอนไว้กับรายการ เหมือนหน้าเว็บ (หน้าสถานะโชว์บัญชีของรายการนี้)
+        $tx->update(['meta' => array_merge((array) $tx->meta, TopupChannel::meta($picked))]);
 
         return response()->json([
             'data' => [
@@ -199,8 +240,32 @@ class WalletController extends Controller
                 'instructions'    => config('smschecker.enabled')
                     ? 'โอนยอดให้ตรงเป๊ะตาม QR/ยอดที่ระบุ — ระบบจะเครดิตอัตโนมัติเมื่อเงินเข้า (หรืออัปโหลดสลิปก็ได้)'
                     : 'สแกน QR หรือโอนตามจำนวน แล้วอัปโหลดสลิป — แอดมินจะอนุมัติภายในไม่กี่นาที',
-            ],
+            ] + $this->channelBlock($tx, $request->user()),
         ], 201);
+    }
+
+    /**
+     * ช่องทางของรายการ + การ์ดบัญชีกสิกร — กติกาเดียวกับหน้าสถานะรายการบนเว็บ (TopupChannel::ofTransaction)
+     *
+     * @return array{channel: string, kbank: ?array}
+     */
+    private function channelBlock(WalletTransaction $tx, $user): array
+    {
+        $payout = PayoutAccount::resolve($user);
+        $wired  = TopupChannel::ofTransaction($tx, $payout);
+
+        return [
+            'channel' => $wired['channel'],
+            'kbank'   => TopupChannel::card($wired['transfer'], (string) ($payout['name'] ?? '')),
+        ];
+    }
+
+    private function playOnly(): JsonResponse
+    {
+        return response()->json([
+            'message'     => 'แอพจาก Google Play เติมเครดิตผ่าน Google Play เท่านั้นค่ะ',
+            'reason_code' => 'play_billing_only',
+        ], 403);
     }
 
     /** List the user's top-up requests (optionally filtered by status). */
@@ -249,19 +314,21 @@ class WalletController extends Controller
             ->firstOrFail();
 
         $payable = abs((float) $row->amount);
+        // ช่อง Google Play: สถานะ/ยอด/ยอดคงเหลือได้ แต่ไม่มี QR พร้อมเพย์หรือเลขบัญชี
+        $play = AppChannel::isPlay($request);
 
         return response()->json([
             'data' => array_merge($this->txPayload($row), [
                 'payable_amount'  => $payable,
                 // ต้องเป็นบล็อกเดียวกับตอน initiate เป๊ะ ๆ ไม่งั้น QR ที่ลูกค้า
                 // สแกนตอนกลับมาอัปสลิปซ้ำจะชี้คนละบัญชี (หรือว่างเปล่า)
-                'promptpay'       => $this->promptpayBlock($request->user(), $payable),
+                'promptpay'       => $play ? null : $this->promptpayBlock($request->user(), $payable),
                 'slip_upload_url' => url('/wallet/topup/' . $row->id),
                 'slip_uploaded'   => !empty($row->slip_path),
                 // ชีทเติมเงินในแชท poll เส้นนี้แล้วอ่าน balance เพื่อโชว์ยอดใหม่
                 // ตอนเครดิตเข้า — ก่อนหน้านี้ไม่มีคีย์นี้ หน้าจอ "สำเร็จ" จึงไม่มีตัวเลข
                 'balance'         => (float) $this->wallet->balance($request->user()),
-            ]),
+            ], $play ? ['channel' => null, 'kbank' => null] : $this->channelBlock($row, $request->user())),
         ]);
     }
 
@@ -312,6 +379,10 @@ class WalletController extends Controller
      */
     public function topupUploadSlip(Request $request, int $tx): JsonResponse
     {
+        if (AppChannel::isPlay($request)) {
+            return $this->playOnly();
+        }
+
         $row = WalletTransaction::where('id', $tx)
             ->where('user_id', $request->user()->id)
             ->firstOrFail();

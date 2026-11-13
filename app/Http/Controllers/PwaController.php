@@ -66,7 +66,7 @@ class PwaController extends Controller
     /** เบราว์เซอร์สมัครรับแล้ว → จดเครื่องนี้ไว้กับผู้ใช้ (เรียกซ้ำได้ — ใช้ซิงก์ทุกครั้งที่เปิดแอป) */
     public function subscribe(Request $request): JsonResponse
     {
-        if (! PushNotifier::ready()) {
+        if (! PushNotifier::webReady()) { // ตั้งแค่ FCM (แอป) ไว้ = เบราว์เซอร์ยังสมัครไม่ได้
             return response()->json(['error' => 'ระบบแจ้งเตือนยังไม่เปิดใช้งานค่ะ'], 503);
         }
         $data = $request->validate([

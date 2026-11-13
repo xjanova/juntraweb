@@ -12,7 +12,7 @@ class HomeController extends Controller
     {
         return view('welcome', [
             'zodiacs' => Zodiac::orderBy('order_index')->get(),
-            'testimonials' => Testimonial::approved()->orderBy('order_index')->limit(3)->get(),
+            'testimonials' => Testimonial::onHomePage()->limit(3)->get(),
             'stats' => [
                 'readings' => Setting::get('stat_readings', '250K+'),
                 'accuracy' => Setting::get('stat_accuracy', '97.8%'),

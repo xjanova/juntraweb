@@ -2,9 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Reading;
 use App\Models\TarotCard;
-use App\Models\TarotReadingCard;
+use App\Support\CardCollection;
 use App\Support\DailyLuck;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,23 +30,18 @@ class AccountEngagementController extends Controller
     {
         $user = $request->user();
 
-        $seen = TarotReadingCard::query()
-            ->whereIn('reading_id', Reading::where('user_id', $user->id)->visibleInHistory()->select('id'))
-            ->selectRaw('tarot_card_id, COUNT(*) as times, SUM(CASE WHEN reversed THEN 1 ELSE 0 END) as reversed_times, MAX(created_at) as last_at')
-            ->groupBy('tarot_card_id')
-            ->get()
-            ->keyBy('tarot_card_id');
-
-        $cards = TarotCard::where('active', true)->orderBy('id')->get();
+        // นับด้วยกติกาเดียวกับแอพ (GET /v1/account/collection) — ดู CardCollection
+        $collection = CardCollection::for($user);
+        $cards = $collection['cards'];
         $groups = $cards->groupBy(fn (TarotCard $c) => $c->arcana === 'major' ? 'major' : ($c->suit ?: 'other'));
 
         return view('pages.account.collection', [
             'user' => $user,
             'cards' => $cards,
             'groups' => $groups,
-            'seen' => $seen,
-            'seenCount' => $cards->filter(fn ($c) => $seen->has($c->id))->count(),
-            'favorite' => $seen->sortByDesc('times')->first(),
+            'seen' => $collection['seen'],
+            'seenCount' => $collection['seenCount'],
+            'favorite' => $collection['favorite'],
         ]);
     }
 }

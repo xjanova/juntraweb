@@ -117,6 +117,49 @@ class ChatTakeover
         return $message;
     }
 
+    /**
+     * ลูกค้าพิมพ์ระหว่างที่แอดมินคุมห้อง — เก็บข้อความให้แอดมินอ่าน แล้วจบแค่นั้น (เว็บ /chat/send + แอพ …/send)
+     *
+     * ไม่ถาม AI · ไม่คิดเงิน · กดส่งซ้ำ (ข้อความเดิมภายใน 10 วิ) = ไม่เก็บซ้ำ
+     */
+    public static function hold(ChatConversation $conversation, string $message): void
+    {
+        $dupe = ChatMessage::where('chat_conversation_id', $conversation->id)
+            ->where('role', 'user')
+            ->where('content', $message)
+            ->where('created_at', '>=', now()->subSeconds(10))
+            ->exists();
+        if (! $dupe) {
+            ChatMessage::create([
+                'chat_conversation_id' => $conversation->id,
+                'role'     => 'user',
+                'content'  => $message,
+                'admin_as' => ChatMessage::HELD,
+            ]);
+            $conversation->touch();
+        }
+        self::touchSeen($conversation);
+    }
+
+    /**
+     * ข้อความใหม่ที่แอดมินพิมพ์หลัง id ที่หน้าห้องมีแล้ว (หน้าเว็บ /chat/feed + แอพ …/feed)
+     * ข้อความบอท/ลูกค้ามาทางการส่งข้อความอยู่แล้ว · ถามมา = ลูกค้ายังเปิดห้องอยู่ (หลังบ้านโชว์ "ออนไลน์")
+     *
+     * @return \Illuminate\Support\Collection<int, ChatMessage>
+     */
+    public static function feed(ChatConversation $conversation, int $after)
+    {
+        self::touchSeen($conversation);
+
+        return ChatMessage::where('chat_conversation_id', $conversation->id)
+            ->where('id', '>', max(0, $after))
+            ->where('role', 'assistant')
+            ->whereNotNull('admin_as')
+            ->orderBy('id')
+            ->limit(30)
+            ->get();
+    }
+
     public static function markRead(ChatConversation $conversation): void
     {
         $now = now();

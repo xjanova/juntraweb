@@ -17,7 +17,7 @@ class InterpretDeepReading
     use Dispatchable;
 
     /** คำถามสูงสุดต่อบิล (ตรงกับ DeepReadingController::MAX_QUESTIONS) — ใช้คิดเพดานเวลา */
-    private const MAX_QUESTIONS = 3;
+    private const MAX_QUESTIONS = \App\Services\Deep\DeepReadingFinisher::MAX_QUESTIONS;
 
     public function __construct(public int $readingId) {}
 

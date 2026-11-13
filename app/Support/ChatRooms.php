@@ -14,6 +14,15 @@ final class ChatRooms
     public const DEFAULT = 'maemor';
 
     /** ห้องทั้งหมดตามลำดับในหน้าเลือก (ถูก → แพง) */
+    /** ท้ายประโยคราคาแชทบนหน้าเลือกห้อง (เว็บ pages/chat/rooms + แอพ GET /v1/chat/rooms meta.lede) */
+    public const PICKER_TAIL = 'อยากให้เปิดไพ่เมื่อไรค่อยเลือก ราคาไพ่หักตอนเปิดไพ่เท่านั้น';
+
+    /**
+     * 🤖 (2026-11-04, owner) บอกตรง ๆ ว่าผู้พยากรณ์ทุกห้องคือ AI — คำเดียวกับหน้าเลือกห้องของเว็บ
+     * (pages/chat/rooms.blade.php เน้นคำว่า "หมอดู AI" ด้วยตัวหนา) · แก้คำต้องแก้ทั้งสองที่
+     */
+    public const AI_DISCLOSURE = 'ผู้พยากรณ์ทุกห้องคือหมอดู AI เปิดไพ่แล้วอ่านจากความหมายในตำราไพ่ 78 ใบ ตามใบและตำแหน่งที่ท่านเปิดได้จริง — ไม่เดา ไม่มโน';
+
     public static function all(): array
     {
         return config('chat_rooms.rooms', []);

@@ -16,7 +16,7 @@
     <div style="text-align:center;margin-bottom:22px">
       <div class="eyebrow">CHOOSE YOUR ORACLE</div>
       <h1 class="display" style="font-size:clamp(32px,4.5vw,56px);margin-bottom:10px">เลือก<em>ผู้พยากรณ์</em></h1>
-      <p class="lede" style="margin:0 auto">{{ $chatLede ?? 'คุยฟรีทุกวัน' }} · อยากให้เปิดไพ่เมื่อไรค่อยเลือก ราคาไพ่หักตอนเปิดไพ่เท่านั้น</p>
+      <p class="lede" style="margin:0 auto">{{ $chatLede ?? 'คุยฟรีทุกวัน' }} · {{ \App\Support\ChatRooms::PICKER_TAIL }}</p>
       {{-- 🤖 (2026-11-04, owner) บอกตรง ๆ ว่าผู้พยากรณ์ทุกห้องคือ AI — คำโฆษณาต้องไม่เกินที่ระบบทำจริง:
            ไพ่อ่านจากความหมายของสำรับ 78 ใบ (database/data/tarot_meanings.php → TarotPromptBuilder ส่งความหมายของทุกใบไปด้วย)
            ห้องแชทไม่ได้คำนวณดาว จึงไม่อ้างเรื่องดาวตรงนี้ --}}

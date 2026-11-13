@@ -11,7 +11,6 @@ use App\Services\Wallet\WalletService;
 use App\Support\Pricing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 /**
  * ดูดวงเชิงลึก 39฿ — แพ็กเดียวกับที่บอทแม่หมอใน Facebook/LINE ขายอยู่
@@ -27,7 +26,7 @@ class DeepReadingController extends Controller
 {
     use PreventsDuplicateCharges;
 
-    private const MAX_QUESTIONS = 3;
+    private const MAX_QUESTIONS = \App\Services\Deep\DeepReadingFinisher::MAX_QUESTIONS;
 
     public function __construct(
         private WalletService $wallet,
@@ -100,19 +99,7 @@ class DeepReadingController extends Controller
         //    (ข้อละ ≤ ~55 วิ รวมหลายข้อเกินเพดาน ~60 วิของคำขอหน้าเว็บ) หน้าผลถามสถานะจนคำทำนายขึ้น
         //    ไม่สำเร็จ/โมเดลปฏิเสธ/คำถามถูกปัด = คืนเงินที่ DeepReadingFinisher
         try {
-            $row = Reading::create([
-                'user_id'       => $user->id,
-                'session_token' => (string) Str::uuid(),
-                'type'          => 'deep',
-                'question'      => $questions[0],
-                'payload'       => [
-                    'questions'    => $questions,
-                    'birth_date'   => $data['birth_date'] ?? null,
-                    'cost'         => $cost,
-                    'wallet_tx_id' => $tx?->id,
-                ],
-                'status' => Reading::STATUS_PENDING,
-            ]);
+            $row = \App\Services\Deep\DeepReadingFinisher::pending($user, $questions, $data['birth_date'] ?? null, $cost, $tx);
             InterpretDeepReading::dispatchAfterResponse($row->id);
         } catch (\Throwable $e) {
             // สร้างรายการได้แต่ส่งงานไม่ได้ — ปิดรายการเป็นไม่สำเร็จ + คืนเงินผ่านทางเดียวกับงานเบื้องหลัง

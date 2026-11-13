@@ -10,6 +10,12 @@ use Illuminate\Validation\Rule;
 
 class ProfileUpdateRequest extends FormRequest
 {
+    /** กติกาช่องชื่อ — แอพ (PATCH /v1/account/profile) ใช้ชุดเดียวกัน */
+    public static function nameRules(): array
+    {
+        return ['required', 'string', 'max:255'];
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *
@@ -18,7 +24,7 @@ class ProfileUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:255'],
+            'name' => self::nameRules(),
             'email' => [
                 'required',
                 'string',

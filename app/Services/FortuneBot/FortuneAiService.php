@@ -137,7 +137,8 @@ class FortuneAiService
         $persona = ChatRooms::personaForSpread(TarotSpreads::keyFromType((string) $reading->type));
         $personaField = $persona !== ChatRooms::DEFAULT ? ChatRooms::upstreamPersona($persona) : null;
 
-        $remote = $this->bot->freeTarot($user, ($personaField !== null ? ['persona' => $personaField] : []) + [
+        $remote = $this->bot->freeTarot($user, ($personaField !== null ? ['persona' => $personaField] : [])
+            + (filled($reading->question) ? ['question' => $reading->question] : []) + [
             'card' => [
                 'name_en' => (string) ($card->card->name_en ?? ''),
                 'name_th' => (string) ($card->card->name_th ?? ''),

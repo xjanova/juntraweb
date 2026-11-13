@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\TarotCard;
+use App\Support\ChatRooms;
 use App\Support\Pricing;
 use App\Support\ReadingCooldown;
 use App\Support\TarotSpreads;
@@ -119,6 +120,11 @@ class TarotController extends Controller
                 'cooldown_days'  => ReadingCooldown::days($key),
                 'requires_async' => ! empty($meta['web_only']),
                 'image_url'      => self::packageImageUrl($key),
+                // 🔮 (2026-11-12) ห้องผู้พยากรณ์ที่ขาย/อ่านไพ่ชุดนี้ตอนนี้ (ห้องปิดอยู่ = แม่หมอ) — ชุดเดียวกับเมนูไพ่ของเว็บ
+                'room'           => ChatRooms::roomForSpread($key),
+                'reader_name'    => ChatRooms::readerName($key),
+                // แพ็กเกจที่เว็บอ่านเบื้องหลังเท่านั้นเมื่อไม่ส่ง mode: async (ความหมายเดียวกับ requires_async)
+                'web_only'       => ! empty($meta['web_only']),
             ];
         }
 

@@ -8,15 +8,11 @@
 --}}
 @php
   use App\Services\Push\PushNotifier;
-  $ready = PushNotifier::ready();
+  $ready = PushNotifier::webReady(); // การ์ดนี้คือ Web Push — ตั้งแค่ FCM (แอป) ไว้ไม่นับ
   $types = collect(PushNotifier::TYPES)->filter(fn ($t, $k) => PushNotifier::typeEnabled($k));
   $muted = auth()->check() ? PushNotifier::mutedTypes(auth()->user()) : [];
   $devices = auth()->check() ? \App\Models\PushSubscription::where('user_id', auth()->id())->count() : 0;
-  $copy = [
-    'bill' => 'บิลเติมเงินที่ยังไม่ได้โอน',
-    'reading_ready' => 'คำทำนายอ่านเสร็จแล้ว',
-    'daily' => 'ดวงประจำวันช่วงเช้า (วันละครั้ง)',
-  ];
+  $copy = PushNotifier::MEMBER_LABELS; // ชุดเดียวกับหน้าตั้งค่าแจ้งเตือนในแอป
 @endphp
 
 @if ($ready && $types->isNotEmpty())

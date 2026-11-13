@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Models\DailyCheckin;
-use App\Models\PushSubscription;
 use App\Models\User;
 use App\Services\Push\PushNotifier;
 use App\Support\DailyLuck;
@@ -34,7 +33,7 @@ class PushDailyNudgeCommand extends Command
         $today = DailyLuck::today();
         $sent = 0;
         User::query()
-            ->whereIn('id', PushSubscription::select('user_id'))
+            ->tap(fn ($q) => PushNotifier::whereReachable($q, 'id', 'daily')) // เบราว์เซอร์หรือแอป Android
             ->whereNotIn('id', DailyCheckin::select('user_id')->whereDate('day', $today->toDateString()))
             ->with('profile')
             ->chunkById(200, function ($users) use ($notifier, $today, &$sent) {

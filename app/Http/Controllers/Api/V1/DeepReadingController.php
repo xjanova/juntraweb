@@ -27,7 +27,7 @@ class DeepReadingController extends Controller
 {
     use PreventsDuplicateCharges;
 
-    private const MAX_QUESTIONS = 3;
+    private const MAX_QUESTIONS = \App\Services\Deep\DeepReadingFinisher::MAX_QUESTIONS;
 
     public function __construct(
         private FortuneBotClient $bot,
@@ -51,6 +51,7 @@ class DeepReadingController extends Controller
         $user = $request->user();
 
         $data = $request->validate([
+            'mode'        => 'sometimes|in:sync,async',
             'birth_date'  => 'nullable|date_format:Y-m-d|before:today',
             'questions'   => 'required|array|min:1|max:'.self::MAX_QUESTIONS,
             'questions.*' => 'nullable|string|max:500',
@@ -68,6 +69,27 @@ class DeepReadingController extends Controller
                 'message'     => 'กรุณาพิมพ์คำถามอย่างน้อย 1 ข้อ',
                 'reason_code' => 'no_question',
             ], 422);
+        }
+
+        $async = ($data['mode'] ?? null) === 'async';
+        $key = $this->idempotencyToken($request);
+        $purchaseKey = $key ? 'deep:'.$user->id.':'.sha1($key) : null;
+        if ($async && $purchaseKey) {
+            $debit = \App\Models\WalletTransaction::where('user_id', $user->id)->where('idempotency_key', $purchaseKey)->first();
+            if ($debit?->status === 'refunded') {
+                return response()->json([
+                    'message' => 'รายการนี้ไม่สำเร็จและคืนเครดิตแล้วค่ะ กรุณาสร้างรายการใหม่',
+                    'reason_code' => 'reading_failed',
+                ], 503);
+            }
+            $prior = Reading::where('user_id', $user->id)->where('type', 'deep')
+                ->where('payload->purchase_key', $purchaseKey)->first();
+            if ($prior) {
+                return $this->asyncResponse($prior, $user);
+            }
+            if ($debit) {
+                return response()->json(['message' => 'รายการก่อนหน้ากำลังประมวลผลค่ะ', 'reason_code' => 'in_flight'], 409);
+            }
         }
 
         // กดซ้ำจากเน็ตกระตุก ต้องไม่ถูกคิดเงินสองรอบ (Idempotency-Key header)
@@ -89,6 +111,7 @@ class DeepReadingController extends Controller
                 $tx = $this->wallet->debit($user, $cost, 'ดูดวงเชิงลึก', [
                     'reference_type' => 'reading',
                     'method'         => 'system',
+                    'idempotency_key' => $async ? $purchaseKey : null,
                 ]);
             } catch (InsufficientFundsException $e) {
                 $this->releaseChargeLock();   // ยังไม่ได้ตัดเงิน
@@ -101,7 +124,30 @@ class DeepReadingController extends Controller
             }
         }
 
-        $reading = $this->bot->deepReading($user, $questions, $data['birth_date'] ?? null, $user->name);
+        if ($async) {
+            try {
+                $row = \App\Services\Deep\DeepReadingFinisher::pending($user, $questions, $data['birth_date'] ?? null, $cost, $tx,
+                    array_filter(['purchase_key' => $purchaseKey]));
+                $tx?->update(['reference_id' => $row->id]);
+                \App\Jobs\InterpretDeepReading::dispatchAfterResponse($row->id);
+
+                return $this->asyncResponse($row, $user);
+            } catch (\Throwable $e) {
+                Log::error('Deep reading (app async) persist/dispatch failed', ['user_id' => $user->id, 'err' => $e->getMessage()]);
+                if (isset($row)) {
+                    app(TarotReadingFinisher::class)->fail($row, 'ส่งงานดูดวงเชิงลึกไม่สำเร็จ', [Reading::STATUS_PENDING]);
+                } else {
+                    $this->refundQuietly($tx, 'บันทึกคำทำนายไม่สำเร็จ');
+                }
+                return response()->json(['message' => 'ระบบขัดข้องชั่วคราวค่ะ กรุณาลองใหม่', 'reason_code' => 'reading_failed'], 503);
+            }
+        }
+
+        try {
+            $reading = $this->bot->deepReading($user, $questions, $data['birth_date'] ?? null, $user->name);
+        } catch (\Throwable $e) {
+            $reading = null;
+        }
 
         // 🛡️ (2026-11-07) โมเดลตอบคำปฏิเสธ ("ขออภัยค่ะ…ไม่สามารถ…") แทนคำทำนาย = ไม่มีสินค้า → คืนเงิน
         //   Thaiprompt ตีกลับเป็น 503 ให้แล้ว นี่คือด่านสุดท้ายเผื่อ Thaiprompt รุ่นเก่าส่งคำปัดมาเป็น 200
@@ -160,6 +206,20 @@ class DeepReadingController extends Controller
             'balance'    => (float) $this->wallet->balance($user),
             'created_at' => optional($row->created_at)->toIso8601String(),
         ]], 201);
+    }
+
+    private function asyncResponse(Reading $reading, $user): JsonResponse
+    {
+        return response()->json(['data' => [
+            'id' => $reading->id,
+            'status' => $reading->isInProgress() ? $reading->status : ($reading->isFailed() ? 'failed' : 'done'),
+            'reading' => $reading->result,
+            'questions' => data_get($reading->payload, 'questions', []),
+            'birth_date' => data_get($reading->payload, 'birth_date'),
+            'cost' => (float) data_get($reading->payload, 'cost', 0),
+            'balance' => (float) $this->wallet->balance($user),
+            'created_at' => $reading->created_at?->toIso8601String(),
+        ]], $reading->isInProgress() ? 202 : ($reading->isFailed() ? 503 : 201));
     }
 
     private function refundQuietly($tx, string $reason): void
