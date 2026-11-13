@@ -30,7 +30,7 @@
       </div>
     @else
       <div class="nav-auth">
-        <a href="{{ route('login') }}" class="nav-cta" style="border-color:var(--line);color:var(--ink-dim)">เข้าสู่ระบบ</a>
+        <a href="{{ route('login') }}" data-tour="login" class="nav-cta" style="border-color:var(--line);color:var(--ink-dim)">เข้าสู่ระบบ</a>
         <a href="{{ route('register') }}" class="nav-cta">สมัครสมาชิก</a>
       </div>
     @endauth

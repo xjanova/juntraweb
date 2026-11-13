@@ -30,7 +30,8 @@
       'freeUrl' => BusabaTour::freeUrl($tourUser),
       'freeOn'  => $freeOn,
       'roomUrl' => route('chat.index', ['room' => 'busaba']),
-      'loginUrl'=> route('thaiprompt.redirect', ['to' => '/chat?pick=1']),
+      // ประตูหน้าสมาชิกของทัวร์: สคริปต์ต่อ ?to=หน้าของขั้นนั้น → ล็อกอินเสร็จเด้งกลับมาชี้ต่อ
+      'loginUrl'=> route('thaiprompt.redirect'),
       'still'   => \App\Support\OracleMedia::asset('images/juntra/theater/sprite-busaba.webp'),
       'poses'   => collect($busabaPoses['clips'] ?? [])->pluck('url', 'name')->all(),
       'poseScale' => (float) ($busabaPoses['scale'] ?? 1),

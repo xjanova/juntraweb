@@ -176,14 +176,14 @@
 }
 .bt-title { margin: 0; font-family: var(--thai, 'Prompt', sans-serif); font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--bt-gold); }
 .bt-text { margin: 0; font-size: 15.5px; line-height: 1.6; color: var(--bt-ink); }
-.bt-lock { margin: 2px 0 0; padding: 7px 10px; border-radius: 10px; font-size: 13px; color: var(--bt-sky); background: rgba(143, 211, 255, .08); border: 1px dashed rgba(143, 211, 255, .35); }
-.bt-lock[hidden] { display: none; }
 .bt-steps { height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden; margin-top: 4px; }
 .bt-steps i { display: block; height: 100%; background: linear-gradient(90deg, var(--bt-sky), var(--bt-gold)); transition: width .4s; }
 
-.bt-nav, .bt-end { display: flex; gap: 8px; margin-top: 6px; }
-.bt-nav[hidden], .bt-end[hidden] { display: none; }
-.bt-end { flex-direction: column; }
+.bt-nav, .bt-end, .bt-gate { display: flex; gap: 8px; margin-top: 6px; }
+.bt-nav[hidden], .bt-end[hidden], .bt-gate[hidden] { display: none; }
+.bt-end, .bt-gate { flex-direction: column; }
+.bt-gate-row { display: flex; gap: 8px; }
+.bt-tour .bt-gate-back.bt-gate-back { flex: 0 0 auto; }
 .bt-tour .bt-btn.bt-btn {
   flex: 1 1 auto; min-height: 44px; padding: 10px 12px; border-radius: 14px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;

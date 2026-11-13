@@ -24,7 +24,7 @@
       <a href="{{ route('account.dashboard') }}">บัญชี</a>
       <form method="POST" action="{{ route('logout') }}" style="display:inline">@csrf<button class="nav-cta">ออกจากระบบ</button></form>
     @else
-      <a href="{{ route('login') }}">เข้าสู่ระบบ</a>
+      <a href="{{ route('login') }}" data-tour="login">เข้าสู่ระบบ</a>
       <a href="{{ route('register') }}" class="nav-cta">สมัครสมาชิก ✦</a>
     @endauth
   </nav>

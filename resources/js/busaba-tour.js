@@ -8,7 +8,10 @@
 //     ย้ายหน้าแล้วเบราว์เซอร์ลืมการแตะ → ลองเล่นเอง ไม่ได้ = ปุ่ม "แตะเพื่อฟัง" กะพริบ (ข้อความอยู่บนจอครบเสมอ)
 //   - ขั้นปัจจุบันเก็บใน cookie `{cookie}_run` (ไม่ใช่ localStorage อย่างเดียว) — เซิร์ฟเวอร์ต้องรู้ว่าหน้าถัดไป
 //     ต้องใส่ทัวร์ด้วย · จบ/ข้าม = ลบ cookie นี้ + จำว่าเลือกแล้ว (POST /tour/seen)
-//   - คนที่ยังไม่ล็อกอิน: ขั้นของหน้าสมาชิก (auth) ไม่พาไปหน้านั้น (จะเด้งไปหน้าล็อกอิน) — ขึ้นเป็นการ์ดอธิบายแทน
+//   - คนที่ยังไม่ล็อกอิน: ขั้นของหน้าสมาชิก (auth) ย้ายหน้าตรง ๆ ไม่ได้ (จะเด้งไปหน้าล็อกอิน ทัวร์หลุด)
+//     → ขึ้น "ประตูสมาชิก" (gate) ชี้ปุ่มเข้าสู่ระบบ + ปุ่ม "เข้าสู่ระบบ แล้วไปต่อ" (Thaiprompt ?to=หน้าของขั้นนั้น)
+//       ล็อกอินเสร็จเด้งกลับหน้านั้น cookie _run ยังอยู่ → ทัวร์ชี้ต่อจริง · หรือ "ข้ามส่วนสมาชิก" ไปขั้นจบ
+//     (2026-11-13 เจ้าของ: เดิมขึ้นการ์ดกลางจอเฉย ๆ "มันควรไปชี้หน้าที่กำลังแนะนำ แต่อยู่ที่เดิม")
 //   - ทัวร์สอนใช้เว็บเท่านั้น ไม่มีคำทำนาย
 
 const dataEl = document.getElementById('bt-data');
@@ -155,6 +158,7 @@ function boot(D) {
     function makeTour() {
         let root = null;
         let idx = 0;
+        let gated = false;          // กำลังขึ้นประตู "เข้าสู่ระบบก่อน" (คนยังไม่ล็อกอิน ถึงขั้นหน้าสมาชิก)
         let target = null;
         let raf = 0;
         let muted = ls.get('jw-tour-mute') === '1';
@@ -189,7 +193,6 @@ function boot(D) {
                         </div>
                         <h3 class="bt-title" id="bt-title"></h3>
                         <p class="bt-text"></p>
-                        <p class="bt-lock" hidden>🔒 หน้านี้เป็นของสมาชิก — เข้าสู่ระบบแล้วจะเจอตรงนี้ค่ะ</p>
                         <div class="bt-steps" aria-hidden="true"><i></i></div>
                         <div class="bt-nav">
                             <button type="button" class="bt-btn bt-back" aria-label="ขั้นก่อนหน้า">‹ ย้อน</button>
@@ -200,13 +203,22 @@ function boot(D) {
                             <a class="bt-btn bt-next bt-end-free" href="${escAttr(D.freeUrl)}">${D.freeOn ? '🎁 ดูดวงฟรีเลย' : '🔮 เข้าห้องบุษบา'}</a>
                             <a class="bt-btn bt-end-room" href="${escAttr(D.roomUrl)}">💬 เข้าห้องบุษบา</a>
                         </div>
+                        <div class="bt-gate" hidden>
+                            <a class="bt-btn bt-next bt-gate-login" href="#">🔑 เข้าสู่ระบบ แล้วไปต่อ</a>
+                            <div class="bt-gate-row">
+                                <button type="button" class="bt-btn bt-gate-back" aria-label="ขั้นก่อนหน้า">‹ ย้อน</button>
+                                <button type="button" class="bt-btn bt-gate-skip">ข้ามส่วนสมาชิก ›</button>
+                            </div>
+                        </div>
                     </div>
                 </section>`;
             document.body.appendChild(root);
             if (!D.freeOn) $('.bt-end-room').remove();
 
-            $('.bt-next:not(.bt-end-free)').addEventListener('click', () => go(idx + 1));
+            $('.bt-nav .bt-next').addEventListener('click', () => go(idx + 1));
             $('.bt-back').addEventListener('click', () => go(idx - 1));
+            $('.bt-gate-back').addEventListener('click', () => go(openBefore(idx)));
+            $('.bt-gate-skip').addEventListener('click', () => go(openAfter(idx)));
             $('.bt-play').addEventListener('click', () => speak(true));
             $('.bt-close').addEventListener('click', () => finish('skip'));
             $('.bt-mute').addEventListener('click', toggleMute);
@@ -224,7 +236,7 @@ function boot(D) {
             audio.addEventListener('pause', () => talking(false));
             audio.addEventListener('ended', () => {
                 talking(false);
-                $('.bt-next')?.classList.add('is-pulse');
+                $('.bt-nav .bt-next')?.classList.add('is-pulse');
             });
             paintMute();
             requestAnimationFrame(() => root.classList.add('is-open'));
@@ -233,8 +245,32 @@ function boot(D) {
         function onKey(e) {
             if (!root) return;
             if (e.key === 'Escape') finish('skip');
-            else if (e.key === 'ArrowRight' && idx < last) go(idx + 1);
-            else if (e.key === 'ArrowLeft' && idx > 0) go(idx - 1);
+            else if (e.key === 'ArrowRight' && idx < last) go(gated ? openAfter(idx) : idx + 1);
+            else if (e.key === 'ArrowLeft' && idx > 0) go(gated ? openBefore(idx) : idx - 1);
+        }
+
+        // ขั้นที่คนยังไม่ล็อกอินเดินได้ ก่อน/หลังช่วงหน้าสมาชิก (ข้ามทั้งช่วงทีเดียว ไม่เจอประตูซ้ำทีละขั้น)
+        function openBefore(i) {
+            let j = i - 1;
+            while (j > 0 && preview(steps[j])) j--;
+            return j;
+        }
+        function openAfter(i) {
+            let j = i + 1;
+            while (j < last && preview(steps[j])) j++;
+            return j;
+        }
+
+        // ล็อกอินผ่าน Thaiprompt แล้วเด้งกลับมาหน้าของขั้นนี้ — cookie _run ยังอยู่ ทัวร์จึงชี้ต่อที่นั่นเลย
+        function loginTo(step) {
+            try {
+                const dest = new URL(step.url, location.href);
+                const u = new URL(D.loginUrl, location.href);
+                u.searchParams.set('to', dest.pathname + dest.search);
+                return u.toString();
+            } catch (_) {
+                return D.loginUrl;
+            }
         }
 
         function talking(on) {
@@ -278,10 +314,15 @@ function boot(D) {
         }
 
         // ไปขั้น i — คนละหน้า = ย้ายหน้า (ขั้นถัดไปเล่นต่อที่หน้านั้น)
+        //   ขั้นหน้าสมาชิกแต่ยังไม่ล็อกอิน = ประตูเข้าสู่ระบบ (ย้ายหน้าไปตรง ๆ จะเด้งไปหน้าล็อกอินแล้วทัวร์หลุด)
         function go(i) {
             if (i < 0 || i > last) return;
             const step = steps[i];
-            if (step.url && !preview(step) && !samePage(step)) {
+            if (preview(step)) {
+                gate(i);
+                return;
+            }
+            if (step.url && !samePage(step)) {
                 audio.pause();
                 setCookie(D.run, String(i), RUN_MAX_AGE);
                 root?.classList.add('is-leaving');
@@ -298,16 +339,17 @@ function boot(D) {
             const isLast = i === last;
             setCookie(D.run, String(i), RUN_MAX_AGE);
 
-            root.classList.remove('is-wander', 'is-ready');
+            gated = false;
+            root.classList.remove('is-wander', 'is-ready', 'is-gate');
             $('.bt-count').textContent = `${i + 1}/${steps.length}`;
             $('.bt-title').textContent = `${step.icon} ${step.title}`;
             $('.bt-text').textContent = step.text;
-            $('.bt-lock').hidden = !preview(step);
             $('.bt-steps i').style.width = `${((i + 1) / steps.length) * 100}%`;
             $('.bt-back').disabled = i === 0;
             $('.bt-nav').hidden = isLast;
             $('.bt-end').hidden = !isLast;
-            $('.bt-next')?.classList.remove('is-pulse');
+            $('.bt-gate').hidden = true;
+            $('.bt-nav .bt-next')?.classList.remove('is-pulse');
             $('.bt-play').textContent = '🔊 ฟังอีกครั้ง';
 
             if (isLast) {
@@ -316,16 +358,43 @@ function boot(D) {
                 markSeen('done');
             }
 
-            menu(step.menu && !preview(step));
+            menu(step.menu);
             // เมนูมือถือเปิดเป็นแผงเลื่อนลง — รอให้กางเสร็จก่อนหาตำแหน่ง
-            setTimeout(() => aim(step), step.menu ? 260 : 30);
+            setTimeout(() => aim(step.target), step.menu ? 260 : 30);
             speak(false);
         }
 
-        function aim(step) {
+        // ประตูหน้าสมาชิก: บุษบาชี้ปุ่ม "เข้าสู่ระบบ" บนเมนู + ปุ่มล็อกอินแล้วทัวร์ต่อที่หน้านั้น / ข้ามช่วงสมาชิก
+        function gate(i) {
+            build();
+            idx = i;
+            gated = true;
+            const step = steps[i];
+            audio.pause();
+            setCookie(D.run, String(i), RUN_MAX_AGE);
+
+            root.classList.remove('is-wander', 'is-ready', 'needs-tap');
+            root.classList.add('is-gate');
+            $('.bt-count').textContent = `${i + 1}/${steps.length}`;
+            $('.bt-title').textContent = '🔑 ต่อไปเป็นส่วนของสมาชิก';
+            $('.bt-text').textContent = `ขั้นต่อไปบุษบาจะพาไปดู "${step.title}" ซึ่งเป็นหน้าของสมาชิกค่ะ เข้าสู่ระบบก่อนนะคะ แล้วบุษบาจะพาดูต่อจากตรงนั้นเลย`;
+            $('.bt-steps i').style.width = `${((i + 1) / steps.length) * 100}%`;
+            $('.bt-nav').hidden = true;
+            $('.bt-end').hidden = true;
+            $('.bt-gate').hidden = false;
+            $('.bt-gate-login').href = loginTo(step);
+            $('.bt-gate-login').classList.add('is-pulse');
+            $('.bt-gate-back').disabled = openBefore(i) < 0;
+
+            // ปุ่มเข้าสู่ระบบบนมือถืออยู่ในเมนูสามขีด — กางเมนูให้เห็นก่อนชี้
+            menu(true);
+            setTimeout(() => aim('login'), 260);
+        }
+
+        function aim(name) {
             target = null;
-            if (step.target && !preview(step)) {
-                target = [...document.querySelectorAll(`[data-tour="${cssEsc(step.target)}"]`)].find(visible) || null;
+            if (name) {
+                target = [...document.querySelectorAll(`[data-tour="${cssEsc(name)}"]`)].find(visible) || null;
             }
             if (target) {
                 // ชิ้นที่สูงเกินครึ่งจอ (การ์ดห้องบนมือถือ) → ชิดบนใต้แถบเมนู ให้เห็นหัวการ์ด/ชื่อห้องก่อน
@@ -420,7 +489,12 @@ function boot(D) {
             // ย้ายหน้ามาแล้ว — ขั้นนี้อยู่หน้านี้ไหม (ลูกค้าอาจกดลิงก์อื่นระหว่างทัวร์)
             resume(i) {
                 const step = steps[i];
-                if (preview(step) || samePage(step)) {
+                if (preview(step)) {
+                    // ไปล็อกอินแล้วไม่สำเร็จ/กดกลับ — ขึ้นประตูเดิม (ล็อกอินอีกครั้ง หรือข้ามช่วงสมาชิก)
+                    gate(i);
+                    return;
+                }
+                if (samePage(step)) {
                     show(i, false);
                     return;
                 }
@@ -430,11 +504,11 @@ function boot(D) {
                 $('.bt-count').textContent = `${i + 1}/${steps.length}`;
                 $('.bt-title').textContent = 'ทัวร์ของบุษบายังค้างอยู่';
                 $('.bt-text').textContent = `ขั้นถัดไป: ${step.title} — ไปต่อเลยไหมคะ`;
-                $('.bt-lock').hidden = true;
                 $('.bt-end').hidden = true;
+                $('.bt-gate').hidden = true;
                 $('.bt-play').hidden = true;
                 $('.bt-back').disabled = true;
-                const next = $('.bt-next');
+                const next = $('.bt-nav .bt-next');
                 next.textContent = 'ไปต่อ ›';
                 next.addEventListener('click', (e) => {
                     e.stopImmediatePropagation();
