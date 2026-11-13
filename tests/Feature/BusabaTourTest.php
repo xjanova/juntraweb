@@ -283,4 +283,27 @@ class BusabaTourTest extends TestCase
         $this->assertIsArray($data);
         $this->assertEqualsWithDelta((float) config('oracle_media.rooms.busaba.poses.scale', 1), $data['poseScale'], 0.0001);
     }
+
+    public function test_a_guest_reaching_the_member_pages_is_led_to_log_in_and_back(): void
+    {
+        // (2026-11-13) เจ้าของ: ขั้นหน้าสมาชิก "มันควรไปชี้หน้าที่กำลังแนะนำ แต่อยู่ที่เดิม"
+        // คนยังไม่ล็อกอิน → ทัวร์ชี้ปุ่มเข้าสู่ระบบบนเมนู แล้วล็อกอินผ่าน Thaiprompt ?to=หน้าของขั้นนั้น (สคริปต์ต่อเอง)
+        foreach (['mae-mor-chantra', 'juntra-payakorn'] as $theme) {
+            $this->assertStringContainsString('data-tour="login"', view("themes.{$theme}.nav")->render(), "$theme nav lost the login mark");
+        }
+
+        $html = $this->withUnencryptedCookie(BusabaTour::runCookie(), '6')->get('/chat?pick=1')->assertOk()->getContent();
+        preg_match('#<script type="application/json" id="bt-data">(.*?)</script>#s', $html, $m);
+        $data = json_decode($m[1] ?? 'null', true);
+        $this->assertIsArray($data);
+        $this->assertTrue($data['guest']);
+        // ไม่ฝังปลายทางไว้ — ถ้าฝัง ?to= เดิม ล็อกอินเสร็จจะเด้งไปหน้าอื่น ไม่ใช่หน้าที่ทัวร์จะชี้ต่อ
+        $this->assertSame(route('thaiprompt.redirect'), $data['loginUrl']);
+
+        $member = collect($data['steps'])->where('auth', true);
+        $this->assertNotEmpty($member);
+        foreach ($member as $s) {
+            $this->assertNotNull($s['url'], "{$s['key']} needs a page to come back to after login");
+        }
+    }
 }
