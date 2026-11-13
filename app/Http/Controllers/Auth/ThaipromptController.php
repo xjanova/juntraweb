@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Rules\NotReservedEmailDomain;
 use App\Services\Affiliate\MaeMorAffiliate;
+use App\Services\MobileSocialLogin;
 use App\Services\ThaipromptClient;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -22,6 +23,7 @@ class ThaipromptController extends Controller
 {
     public function redirect(Request $request, ThaipromptClient $client): RedirectResponse
     {
+        app(MobileSocialLogin::class)->finish($request, 'cancelled');
         if (!$client->isEnabled()) {
             return redirect()->route('login')->withErrors(['email' => 'ระบบเข้าสู่ระบบ Thaiprompt ยังไม่ได้เปิดใช้งาน']);
         }
@@ -127,12 +129,26 @@ class ThaipromptController extends Controller
      */
     public function callback(Request $request, ThaipromptClient $client)
     {
+        $socialLogin = app(MobileSocialLogin::class);
+        $social = $socialLogin->context($request);
+        if ($social && ! $socialLogin->validContext($request)) {
+            return $socialLogin->page();
+        }
+        if ($social && ! $socialLogin->claimCallback($request)) {
+            return $socialLogin->page();
+        }
+        if ($social && (! is_string($request->query('code', '')) || ! is_string($request->query('error', '')))) {
+            return $this->fail($request, 'ข้อมูลตอบกลับไม่ถูกต้อง');
+        }
+        if ($social && $request->user()) {
+            return $this->fail($request, 'บัญชีในเบราว์เซอร์เปลี่ยนระหว่างเข้าสู่ระบบ');
+        }
         if (!$client->isEnabled()) {
             return $this->fail($request, 'Thaiprompt SSO ปิดอยู่');
         }
 
         // CSRF — match state we put in session
-        $expected = $request->session()->pull('thaiprompt_oauth_state');
+        $expected = $social['state'] ?? $request->session()->pull('thaiprompt_oauth_state');
         // ธง handoff ใช้ได้ครั้งเดียวต่อรอบ SSO — ดึงออกก่อนเช็ค state เพื่อไม่ให้ค้างไปรอบถัดไป
         $handoff = (bool) $request->session()->pull('thaiprompt_oauth_handoff', false);
 
@@ -149,7 +165,7 @@ class ThaipromptController extends Controller
             return $this->fail($request, 'ไม่ได้รับ authorization code');
         }
 
-        $token = $client->exchangeCode($code);
+        $token = $client->exchangeCode($code, $social);
         if (!$token || empty($token['access_token'])) {
             return $this->fail($request, 'แลก token ไม่สำเร็จ');
         }
@@ -163,6 +179,15 @@ class ThaipromptController extends Controller
         $name  = (string) ($profile['name'] ?? $profile['username'] ?? Str::before($email, '@'));
         $tpId  = (string) ($profile['id'] ?? $profile['user_id'] ?? '');
 
+        if ($social && $tpId === '') {
+            return $this->fail($request, 'ดึงข้อมูลบัญชี Thaiprompt ไม่ครบ');
+        }
+        if ($social && User::onlyTrashed()->where(function ($query) use ($tpId, $email) {
+            $query->where('thaiprompt_user_id', $tpId)->orWhere('email', $email);
+        })->exists()) {
+            return $this->fail($request, 'บัญชีนี้ถูกลบแล้ว');
+        }
+
         // FB/LINE link state from Thaiprompt — used to gate the AI chat.
         // Thaiprompt's User model carries `line_user_id` natively; FB users
         // are tracked indirectly via FortuneReading PSIDs (Thaiprompt may
@@ -175,7 +200,7 @@ class ThaipromptController extends Controller
         //   ห้ามหาจากอีเมลแล้วสลับคน: ลูกค้าที่สมัครด้วยเบอร์โทรมีอีเมลคนละอันกับ Thaiprompt — เดิมกดเชื่อมแล้ว
         //   ได้บัญชีจันทราใหม่อีกบัญชี ถูกสลับไปล็อกอินบัญชีนั้น บัญชีเดิมไม่ถูกผูก ผังแม่หมอจึงไม่รวมบัญชีเงา
         //   ของเขาเข้าบัญชี Thaiprompt และค่าแนะนำค้างในกระเป๋าที่ไม่มีใครเข้าได้
-        $current = $request->user();
+        $current = $social ? null : $request->user();
         $reservedEmail = false;
 
         // 🔀 เส้น handoff จาก FB + มีคนอื่นล็อกอินค้างอยู่ (เช่น remember cookie ของอีกบัญชีใน in-app browser)
@@ -230,6 +255,9 @@ class ThaipromptController extends Controller
             if (! $user && ! $reservedEmail) {
                 $user = User::where('email', $email)->first();
             }
+        }
+        if ($social && $user && $this->linkRefusal($user, $tpId) !== null) {
+            return $this->fail($request, 'บัญชีนี้เชื่อมกับบัญชีอื่นอยู่แล้ว');
         }
         // 🔐 (รีวิว) บัญชีทีมงาน (admin/editor เข้าแผงหลังบ้านได้) ห้ามล็อกอินอัตโนมัติผ่าน SSO/ลิงก์จากแชท
         //    ลิงก์ handoff ถูกส่งต่อ/ดักได้ = ยึดสิทธิ์หลังบ้านได้ → ต้องเข้าด้วยรหัสผ่านที่หน้า /login เท่านั้น
@@ -302,7 +330,7 @@ class ThaipromptController extends Controller
 
         // ผูกเข้าบัญชีที่ล็อกอินอยู่ = ไม่ล็อกอินซ้ำ (เซสชันจากแอพตั้งใจให้สั้น — ห้ามติด remember)
         //   เส้น handoff จาก FB = ห้าม remember เช่นกัน (ลิงก์จากแชทเปิดใน in-app browser/เครื่องที่ใช้ร่วมกันได้)
-        if (! $current) {
+        if (! $current && ! $social) {
             Auth::login($user, ! $handoff);
             $request->session()->regenerate();
         }
@@ -313,6 +341,17 @@ class ThaipromptController extends Controller
         // downline. Best-effort: a definitive upstream answer (success OR
         // rejection) clears the cookie; a network failure keeps it so the
         // next login retries.
+        if ($social) {
+            if (! $socialLogin->finish($request, 'authorized', $user)) {
+                return $socialLogin->page();
+            }
+            if (! $user->maemor_member_code && ! $user->pending_referral_code && ! empty($social['referral_code'])) {
+                $user->forceFill(['pending_referral_code' => $social['referral_code']])->save();
+            }
+            dispatch(fn () => app(MaeMorAffiliate::class)->ensureMember($user))->afterResponse();
+            return $socialLogin->page(true);
+        }
+
         $referralStatus = $this->claimPendingReferral($request, $user, linkedNow: $user->wasChanged('thaiprompt_user_id'));
 
         // Mobile-initiated flow → render a "back to app" success page
@@ -384,8 +423,13 @@ class ThaipromptController extends Controller
      *
      * หน้าเข้าสู่ระบบไล่คนที่ล็อกอินอยู่ออกทันที (middleware guest) ข้อความจะหายไประหว่างทาง
      */
-    private function fail(Request $request, string $message): RedirectResponse
+    private function fail(Request $request, string $message)
     {
+        $socialLogin = app(MobileSocialLogin::class);
+        if ($socialLogin->context($request)) {
+            $socialLogin->finish($request, $request->query('error') === 'access_denied' ? 'cancelled' : 'failed');
+            return $socialLogin->page();
+        }
         // เดิมไม่มีร่องรอยเลย — ลูกค้าเข้าไม่ได้ซ้ำ ๆ แต่ log ว่างเปล่า ทีมจึงไม่รู้ว่าพังตรงไหน
         Log::info('Thaiprompt SSO failed', [
             'reason'    => $message,

@@ -36,6 +36,9 @@ Route::middleware('block.installed')->prefix('install')->name('install.')->group
 });
 
 // Thaiprompt SSO
+Route::get('/auth/social/{id}', [\App\Http\Controllers\Api\V1\SocialAuthController::class, 'browser'])
+    ->where('id', '[a-f0-9]{64}')->middleware('throttle:10,1,social-browser')->name('auth.social.browser');
+
 Route::prefix('auth/thaiprompt')->name('thaiprompt.')->group(function () {
     Route::get('/redirect', [ThaipromptController::class, 'redirect'])->name('redirect');
     Route::get('/callback', [ThaipromptController::class, 'callback'])->name('callback');

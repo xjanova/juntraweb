@@ -43,3 +43,6 @@ Schedule::command('push:daily-nudge')->everyThirtyMinutes()->withoutOverlapping(
 //  - ลูกค้าขอคืนเงิน/chargeback กับ Google → ดึงเครดิตคืน
 Schedule::command('googleplay:consume-pending')->everyTenMinutes()->withoutOverlapping()->runInBackground();
 Schedule::command('googleplay:sync-voided')->hourly()->withoutOverlapping()->runInBackground();
+
+Schedule::call(fn () => \Illuminate\Support\Facades\DB::table('social_login_requests')
+    ->where('expires_at', '<=', now())->delete())->hourly()->name('social-login-prune')->withoutOverlapping();
